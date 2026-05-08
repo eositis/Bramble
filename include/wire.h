@@ -27,11 +27,13 @@
 #define WIRE_MAX_LINKS  4
 #define WIRE_MAX_PAYLOAD 8
 #define WIRE_IO_BUFFER_SIZE 256
+#define WIRE_ETH_MAX_FRAME 1522
 
 /* Wire message types */
 #define WIRE_MSG_UART_DATA  0x01  /* UART byte: payload = 1 byte */
 #define WIRE_MSG_GPIO_PIN   0x02  /* GPIO pin change: pin(1) + value(1) */
 #define WIRE_MSG_SPI_XFER   0x03  /* SPI byte exchange: tx(1), expects rx(1) */
+#define WIRE_MSG_ETH_FRAME  0x04  /* Ethernet frame: 2-byte LE length + frame data */
 
 /* Wire message header (4 bytes) */
 typedef struct {
@@ -84,7 +86,14 @@ void wire_poll(void);
 void wire_send_uart(int uart_num, uint8_t byte);
 void wire_send_gpio(uint8_t pin, uint8_t value);
 
+/* Send an Ethernet frame to all ETH-type wire links.
+ * Uses extended framing: header + 2-byte LE length + frame data. */
+void wire_send_eth_frame(const uint8_t *frame, int len);
+
 /* Returns 1 if UART has a wire link active */
 int wire_uart_active(int uart_num);
+
+/* Returns 1 if any ETH wire link is active */
+int wire_eth_active(void);
 
 #endif /* WIRE_H */

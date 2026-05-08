@@ -17,6 +17,7 @@
 #include "wire.h"
 #include "uart.h"
 #include "gpio.h"
+#include "vnet.h"
 
 wire_state_global_t wire_state;
 
@@ -160,6 +161,11 @@ static void wire_handle_message(wire_link_t *l, wire_msg_t *msg, uint8_t *payloa
         }
         break;
 
+    case WIRE_MSG_ETH_FRAME:
+        /* Extended framing: the msg->len field is unused for ETH frames.
+         * The actual frame length was decoded from 2-byte LE prefix. */
+        break;
+
     default:
         break;
     }
@@ -170,6 +176,33 @@ static void wire_process_rx(wire_link_t *l) {
     while (l->rx_len >= sizeof(wire_msg_t)) {
         wire_msg_t msg;
         memcpy(&msg, l->rx_buf, sizeof(msg));
+
+        /* Ethernet frames use extended framing */
+        if (msg.type == WIRE_MSG_ETH_FRAME) {
+            /* After the 4-byte header, expect 2-byte LE frame length + frame data */
+            if (l->rx_len < (int)(sizeof(wire_msg_t) + 2)) return;
+
+            uint16_t frame_len = (uint16_t)l->rx_buf[sizeof(wire_msg_t)] |
+                                 ((uint16_t)l->rx_buf[sizeof(wire_msg_t) + 1] << 8);
+            if (frame_len > WIRE_ETH_MAX_FRAME) {
+                fprintf(stderr, "[Wire] %s: oversized ETH frame (%u)\n", l->path, frame_len);
+                wire_disconnect_peer(l);
+                return;
+            }
+
+            size_t total = sizeof(wire_msg_t) + 2 + frame_len;
+            if ((size_t)l->rx_len < total) return;
+
+            /* Deliver frame to vnet for distribution */
+            const uint8_t *frame = l->rx_buf + sizeof(wire_msg_t) + 2;
+            vnet_tx_frame(-1, frame, (int)frame_len);
+
+            memmove(l->rx_buf, l->rx_buf + total, (size_t)l->rx_len - total);
+            l->rx_len -= (int)total;
+            continue;
+        }
+
+        /* Standard small-payload messages */
         if (msg.len > WIRE_MAX_PAYLOAD) {
             fprintf(stderr, "[Wire] %s: invalid payload length %u\n", l->path, msg.len);
             wire_disconnect_peer(l);
@@ -177,13 +210,13 @@ static void wire_process_rx(wire_link_t *l) {
         }
 
         size_t frame_len = sizeof(wire_msg_t) + msg.len;
-        if (l->rx_len < frame_len) {
+        if ((size_t)l->rx_len < frame_len) {
             return;
         }
 
         wire_handle_message(l, &msg, l->rx_buf + sizeof(wire_msg_t));
-        memmove(l->rx_buf, l->rx_buf + frame_len, l->rx_len - frame_len);
-        l->rx_len -= frame_len;
+        memmove(l->rx_buf, l->rx_buf + frame_len, (size_t)l->rx_len - frame_len);
+        l->rx_len -= (int)frame_len;
     }
 }
 
@@ -341,6 +374,42 @@ int wire_uart_active(int uart_num) {
     for (int i = 0; i < wire_state.link_count; i++) {
         wire_link_t *l = &wire_state.links[i];
         if (l->type == WIRE_MSG_UART_DATA && l->channel == (uint8_t)uart_num) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void wire_send_eth_frame(const uint8_t *frame, int len) {
+    if (len <= 0 || len > WIRE_ETH_MAX_FRAME) return;
+
+    for (int i = 0; i < wire_state.link_count; i++) {
+        wire_link_t *l = &wire_state.links[i];
+        if (l->type != WIRE_MSG_ETH_FRAME || l->state != WIRE_CONNECTED) continue;
+        if (l->peer_fd < 0) continue;
+
+        /* Extended framing: 4-byte header + 2-byte LE length + frame */
+        wire_msg_t msg = { .type = WIRE_MSG_ETH_FRAME, .channel = 0, .len = 0, .reserved = 0 };
+        uint8_t hdr[sizeof(wire_msg_t) + 2];
+        memcpy(hdr, &msg, sizeof(msg));
+        hdr[sizeof(msg)]     = (uint8_t)(len & 0xFF);
+        hdr[sizeof(msg) + 1] = (uint8_t)((len >> 8) & 0xFF);
+
+        /* Write header + frame (best-effort, non-blocking) */
+        ssize_t n = write(l->peer_fd, hdr, sizeof(hdr));
+        if (n == (ssize_t)sizeof(hdr)) {
+            write(l->peer_fd, frame, (size_t)len);
+        } else if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+            fprintf(stderr, "[Wire] %s: ETH write error\n", l->path);
+            wire_disconnect_peer(l);
+        }
+    }
+}
+
+int wire_eth_active(void) {
+    for (int i = 0; i < wire_state.link_count; i++) {
+        wire_link_t *l = &wire_state.links[i];
+        if (l->type == WIRE_MSG_ETH_FRAME) {
             return 1;
         }
     }

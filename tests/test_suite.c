@@ -46,6 +46,9 @@
 #include "rp2350_rv/rv_icache.h"
 #include "rp2350_arm/m33_cpu.h"
 #include "thumb32.h"
+#include "vnet.h"
+#include "sdd.h"
+#include "w5500.h"
 
 /* ========================================================================
  * Test Framework (Verbose)
@@ -3844,6 +3847,448 @@ TEST(test_wire_poll_handles_partial_uart_frame) {
     PASS();
 }
 
+TEST(test_wire_eth_frame_relay) {
+    reset_cpu();
+    memset(&wire_state, 0, sizeof(wire_state));
+
+    int sv[2];
+    ASSERT_EQ(0, socketpair(AF_UNIX, SOCK_STREAM, 0, sv), "socketpair should succeed");
+
+    int flags = fcntl(sv[0], F_GETFL, 0);
+    ASSERT_TRUE(flags >= 0, "Should read socket flags");
+    ASSERT_EQ(0, fcntl(sv[0], F_SETFL, flags | O_NONBLOCK), "Should set non-blocking");
+
+    wire_state.link_count = 1;
+    wire_state.links[0].state = WIRE_CONNECTED;
+    wire_state.links[0].listen_fd = -1;
+    wire_state.links[0].peer_fd = sv[0];
+    wire_state.links[0].type = WIRE_MSG_ETH_FRAME;
+    strcpy(wire_state.links[0].path, "/tmp/bramble_test_eth.sock");
+
+    /* Build a minimal Ethernet frame (14-byte header + 4-byte payload) */
+    uint8_t frame[18];
+    memset(frame, 0xFF, 6);     /* Broadcast dest MAC */
+    memset(frame + 6, 0x02, 6); /* Source MAC */
+    frame[12] = 0x08;           /* EtherType: IPv4 */
+    frame[13] = 0x00;
+    frame[14] = 'T'; frame[15] = 'E'; frame[16] = 'S'; frame[17] = 'T';
+
+    /* Wire framing: 4-byte header + 2-byte LE length + frame */
+    wire_msg_t msg = { .type = WIRE_MSG_ETH_FRAME, .channel = 0, .len = 0, .reserved = 0 };
+    uint8_t wire_frame[sizeof(msg) + 2 + sizeof(frame)];
+    memcpy(wire_frame, &msg, sizeof(msg));
+    wire_frame[sizeof(msg)]     = sizeof(frame) & 0xFF;
+    wire_frame[sizeof(msg) + 1] = (sizeof(frame) >> 8) & 0xFF;
+    memcpy(wire_frame + sizeof(msg) + 2, frame, sizeof(frame));
+
+    /* Initialize vnet so wire handler can deliver the frame */
+    vnet_init();
+
+    /* Write complete ETH wire frame */
+    ssize_t n = write(sv[1], wire_frame, sizeof(wire_frame));
+    ASSERT_EQ((uint32_t)sizeof(wire_frame), (uint32_t)n, "Should write entire ETH wire frame");
+
+    wire_poll();
+
+    /* The frame was delivered to vnet_tx_frame; verify stats */
+    ASSERT_EQ(1, vnet.frames_tx, "vnet should have transmitted the ETH frame");
+
+    close(sv[0]);
+    close(sv[1]);
+    memset(&wire_state, 0, sizeof(wire_state));
+    vnet_cleanup();
+    PASS();
+}
+
+TEST(test_wire_eth_active) {
+    memset(&wire_state, 0, sizeof(wire_state));
+    ASSERT_EQ(0, wire_eth_active(), "No ETH links initially");
+
+    wire_state.link_count = 1;
+    wire_state.links[0].type = WIRE_MSG_ETH_FRAME;
+    ASSERT_EQ(1, wire_eth_active(), "ETH link should be active");
+
+    memset(&wire_state, 0, sizeof(wire_state));
+    PASS();
+}
+
+/* ========================================================================
+ * Virtual Network Bus Tests
+ * ======================================================================== */
+
+static uint8_t test_vnet_rx_buf[VNET_MAX_FRAME];
+static int test_vnet_rx_len = 0;
+
+static void test_vnet_rx_callback(void *ctx, const uint8_t *frame, int len) {
+    (void)ctx;
+    if (len > 0 && len <= VNET_MAX_FRAME) {
+        memcpy(test_vnet_rx_buf, frame, (size_t)len);
+        test_vnet_rx_len = len;
+    }
+}
+
+TEST(test_vnet_init_cleanup) {
+    vnet_init();
+    ASSERT_EQ(1, vnet.enabled, "vnet should be enabled after init");
+    ASSERT_EQ(-1, vnet.tap_fd, "TAP should not be open");
+    ASSERT_EQ(0, vnet.port_count, "No ports initially");
+    ASSERT_EQ(0, vnet.peer_count, "No peers initially");
+    vnet_cleanup();
+    ASSERT_EQ(0, vnet.enabled, "vnet should be disabled after cleanup");
+    PASS();
+}
+
+TEST(test_vnet_register_port) {
+    vnet_init();
+    uint8_t mac[6] = {0x02, 0xBB, 0x00, 0x00, 0x00, 0x42};
+    int idx = vnet_register_port("test-dev", VNET_PORT_CUSTOM, mac,
+                                  test_vnet_rx_callback, NULL);
+    ASSERT_EQ(0, idx, "First port should be index 0");
+    ASSERT_EQ(1, vnet.port_count, "Port count should be 1");
+    ASSERT_TRUE(vnet.ports[0].active, "Port should be active");
+    ASSERT_EQ(0x42, vnet.ports[0].mac[5], "MAC should match");
+    vnet_cleanup();
+    PASS();
+}
+
+TEST(test_vnet_frame_delivery_to_port) {
+    vnet_init();
+    /* Port with broadcast-matching MAC */
+    uint8_t mac[6] = {0x02, 0xBB, 0x00, 0x00, 0x00, 0x10};
+    int port = vnet_register_port("receiver", VNET_PORT_CUSTOM, mac,
+                                   test_vnet_rx_callback, NULL);
+    test_vnet_rx_len = 0;
+
+    /* Build broadcast Ethernet frame */
+    uint8_t frame[18];
+    memset(frame, 0xFF, 6);       /* Broadcast dest */
+    memset(frame + 6, 0x02, 6);   /* Src MAC */
+    frame[12] = 0x08; frame[13] = 0x00;
+    frame[14] = 'H'; frame[15] = 'I'; frame[16] = '!'; frame[17] = 0;
+
+    /* TX from "outside" (src_port = -1) */
+    vnet_tx_frame(-1, frame, 18);
+    ASSERT_EQ(18, test_vnet_rx_len, "Port should receive broadcast frame");
+    ASSERT_EQ('H', test_vnet_rx_buf[14], "Frame data should match");
+
+    /* TX from the port itself should NOT be delivered back */
+    test_vnet_rx_len = 0;
+    vnet_tx_frame(port, frame, 18);
+    ASSERT_EQ(0, test_vnet_rx_len, "Port should not receive its own frame");
+
+    vnet_cleanup();
+    PASS();
+}
+
+TEST(test_vnet_unicast_delivery) {
+    vnet_init();
+    uint8_t mac1[6] = {0x02, 0xBB, 0x00, 0x00, 0x00, 0x01};
+    uint8_t mac2[6] = {0x02, 0xBB, 0x00, 0x00, 0x00, 0x02};
+
+    int port1 = vnet_register_port("dev1", VNET_PORT_CUSTOM, mac1,
+                                    test_vnet_rx_callback, NULL);
+    vnet_register_port("dev2", VNET_PORT_CUSTOM, mac2,
+                       test_vnet_rx_callback, NULL);
+    (void)port1;
+
+    /* Unicast frame addressed to mac1 only */
+    uint8_t frame[14];
+    memcpy(frame, mac1, 6);       /* Dest = mac1 */
+    memset(frame + 6, 0x02, 6);   /* Src */
+    frame[12] = 0x08; frame[13] = 0x00;
+
+    test_vnet_rx_len = 0;
+    vnet_tx_frame(-1, frame, 14);
+    /* At least one port should receive it (mac1) */
+    ASSERT_TRUE(test_vnet_rx_len > 0, "Unicast should be delivered to matching port");
+
+    vnet_cleanup();
+    PASS();
+}
+
+TEST(test_vnet_generate_mac) {
+    uint8_t mac[6];
+    vnet_generate_mac(mac, 0);
+    ASSERT_EQ(0x02, mac[0], "Locally-administered unicast");
+    ASSERT_EQ(0xBB, mac[1], "Bramble OUI");
+    ASSERT_EQ(0x00, mac[5], "Index 0");
+    vnet_generate_mac(mac, 255);
+    ASSERT_EQ(0xFF, mac[5], "Index 255");
+    PASS();
+}
+
+TEST(test_vnet_peer_socketpair) {
+    /* Test peer frame exchange using socketpair */
+    vnet_init();
+
+    /* Register a receiving port */
+    uint8_t mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}; /* Broadcast MAC */
+    int port = vnet_register_port("peer-test", VNET_PORT_CUSTOM, mac,
+                                   test_vnet_rx_callback, NULL);
+    (void)port;
+
+    /* Create a socketpair to simulate peer connection */
+    int sv[2];
+    ASSERT_EQ(0, socketpair(AF_UNIX, SOCK_STREAM, 0, sv), "socketpair");
+    int flags = fcntl(sv[0], F_GETFL, 0);
+    fcntl(sv[0], F_SETFL, flags | O_NONBLOCK);
+
+    /* Manually inject peer */
+    vnet.peers[0].fd = sv[0];
+    vnet.peers[0].listen_fd = -1;
+    vnet.peers[0].rx_len = 0;
+    strcpy(vnet.peers[0].path, "/tmp/test_peer");
+    vnet.peer_count = 1;
+
+    /* Write a length-prefixed frame from the "remote" side */
+    uint8_t frame[14];
+    memset(frame, 0xFF, 6);
+    memset(frame + 6, 0x02, 6);
+    frame[12] = 0x08; frame[13] = 0x00;
+
+    uint8_t hdr[4];
+    uint32_t flen = 14;
+    hdr[0] = flen & 0xFF; hdr[1] = (flen >> 8) & 0xFF;
+    hdr[2] = (flen >> 16) & 0xFF; hdr[3] = (flen >> 24) & 0xFF;
+
+    write(sv[1], hdr, 4);
+    write(sv[1], frame, 14);
+
+    test_vnet_rx_len = 0;
+    vnet_poll();
+    ASSERT_TRUE(test_vnet_rx_len > 0, "Peer frame should be delivered to port");
+
+    close(sv[0]);
+    close(sv[1]);
+    vnet.peers[0].fd = -1;
+    vnet.peer_count = 0;
+    vnet_cleanup();
+    PASS();
+}
+
+/* ========================================================================
+ * Software-Defined Device Tests
+ * ======================================================================== */
+
+TEST(test_sdd_thermometer_create) {
+    sdd_init();
+    int idx = sdd_create_thermometer(25.0f, 0, 0x48);
+    ASSERT_TRUE(idx >= 0, "Thermometer should be created");
+    ASSERT_EQ(1, sdd_registry.count, "Registry should have 1 device");
+    ASSERT_EQ(0x48, sdd_registry.devices[0].i2c_addr, "I2C addr should be 0x48");
+    sdd_cleanup();
+    ASSERT_EQ(0, sdd_registry.count, "Registry should be empty after cleanup");
+    PASS();
+}
+
+TEST(test_sdd_thermometer_i2c_read) {
+    sdd_init();
+    sdd_create_thermometer(25.0f, 0, 0x48);
+    sdd_device_t *dev = &sdd_registry.devices[0];
+
+    /* Start transaction */
+    dev->i2c_start(dev->ctx);
+
+    /* Write register pointer = 0x00 (temperature) */
+    dev->i2c_write(dev->ctx, 0x00);
+
+    /* Read MSB and LSB of temperature */
+    uint8_t msb = dev->i2c_read(dev->ctx);
+    uint8_t lsb = dev->i2c_read(dev->ctx);
+
+    /* 25.0°C in TMP102 format: raw = 25.0 / 0.0625 = 400 = 0x190
+     * Register value = 0x190 << 4 = 0x1900
+     * MSB = 0x19, LSB = 0x00 */
+    ASSERT_EQ(0x19, msb, "Temperature MSB for 25°C");
+    ASSERT_EQ(0x00, lsb, "Temperature LSB for 25°C");
+
+    dev->i2c_stop(dev->ctx);
+    sdd_cleanup();
+    PASS();
+}
+
+TEST(test_sdd_thermometer_custom_temp) {
+    sdd_init();
+    sdd_create_thermometer(37.5f, 0, 0x48);
+    sdd_device_t *dev = &sdd_registry.devices[0];
+
+    dev->i2c_start(dev->ctx);
+    dev->i2c_write(dev->ctx, 0x00);  /* Temperature register */
+
+    uint8_t msb = dev->i2c_read(dev->ctx);
+    uint8_t lsb = dev->i2c_read(dev->ctx);
+
+    /* 37.5°C: raw = 37.5 / 0.0625 = 600 = 0x258
+     * Register = 0x258 << 4 = 0x2580
+     * MSB = 0x25, LSB = 0x80 */
+    ASSERT_EQ(0x25, msb, "Temperature MSB for 37.5°C");
+    ASSERT_EQ(0x80, lsb, "Temperature LSB for 37.5°C");
+
+    dev->i2c_stop(dev->ctx);
+    sdd_cleanup();
+    PASS();
+}
+
+TEST(test_sdd_thermometer_config_register) {
+    sdd_init();
+    sdd_create_thermometer(25.0f, 0, 0x48);
+    sdd_device_t *dev = &sdd_registry.devices[0];
+
+    dev->i2c_start(dev->ctx);
+    dev->i2c_write(dev->ctx, 0x01);  /* Config register */
+
+    uint8_t cfg_msb = dev->i2c_read(dev->ctx);
+    uint8_t cfg_lsb = dev->i2c_read(dev->ctx);
+    uint16_t config = ((uint16_t)cfg_msb << 8) | cfg_lsb;
+
+    ASSERT_EQ(0x60A0, config, "Default config should be 0x60A0");
+
+    dev->i2c_stop(dev->ctx);
+    sdd_cleanup();
+    PASS();
+}
+
+TEST(test_sdd_create_from_arg) {
+    sdd_init();
+    int rc = sdd_create_from_arg("thermometer:temp=42.0,addr=0x49");
+    ASSERT_EQ(0, rc, "Create from arg should succeed");
+    ASSERT_EQ(1, sdd_registry.count, "Should have 1 device");
+    ASSERT_EQ(0x49, sdd_registry.devices[0].i2c_addr, "Addr should be 0x49");
+    sdd_cleanup();
+    PASS();
+}
+
+TEST(test_sdd_unknown_type) {
+    sdd_init();
+    int rc = sdd_create_from_arg("nonexistent_device");
+    ASSERT_EQ(-1, rc, "Unknown device type should fail");
+    ASSERT_EQ(0, sdd_registry.count, "No devices should be registered");
+    sdd_cleanup();
+    PASS();
+}
+
+/* ========================================================================
+ * W5500 Live Networking Tests
+ * ======================================================================== */
+
+TEST(test_w5500_init_host_fds) {
+    w5500_t dev;
+    w5500_init(&dev);
+    ASSERT_EQ(0, dev.live, "Live mode should be off by default");
+    ASSERT_EQ(-1, dev.vnet_port, "vnet port should be -1");
+    for (int i = 0; i < W5500_NUM_SOCKETS; i++) {
+        ASSERT_EQ(-1, dev.sockets[i].host_fd, "Host fd should be -1");
+        ASSERT_EQ(-1, dev.sockets[i].host_listen_fd, "Listen fd should be -1");
+    }
+    PASS();
+}
+
+TEST(test_w5500_set_live) {
+    w5500_t dev;
+    w5500_init(&dev);
+    ASSERT_EQ(0, dev.live, "Should start not-live");
+    w5500_set_live(&dev, 1);
+    ASSERT_EQ(1, dev.live, "Should be live after set");
+    w5500_set_live(&dev, 0);
+    ASSERT_EQ(0, dev.live, "Should be not-live after clear");
+    PASS();
+}
+
+TEST(test_w5500_tcp_open_creates_host_socket) {
+    w5500_t dev;
+    w5500_init(&dev);
+    w5500_set_live(&dev, 1);
+
+    /* Open socket 0 in TCP mode */
+    dev.sockets[0].regs[W5500_Sn_MR] = W5500_MR_TCP;
+    dev.sockets[0].regs[W5500_Sn_CR] = W5500_CMD_OPEN;
+    /* Trigger command processing via SPI write to CR register */
+    w5500_spi_cs(&dev, 1);
+    /* Manually process (in real usage the SPI write triggers this) */
+    dev.sockets[0].regs[W5500_Sn_CR] = W5500_CMD_OPEN;
+    /* Simulate by calling internal - just check the state */
+    /* Re-init to test */
+    w5500_init(&dev);
+    w5500_set_live(&dev, 1);
+    dev.sockets[0].regs[W5500_Sn_MR] = W5500_MR_TCP;
+    dev.sockets[0].regs[W5500_Sn_CR] = W5500_CMD_OPEN;
+
+    /* Call the SPI write path to trigger command processing:
+     * BSB for socket 0 register block = 0x01 (shifted left 3 = 0x08)
+     * We write to offset W5500_Sn_CR (0x0001) */
+    dev.cs_active = 0;
+    w5500_spi_cs(&dev, 1);
+    w5500_spi_xfer(&dev, 0x00);          /* Addr high = 0 */
+    w5500_spi_xfer(&dev, W5500_Sn_CR);   /* Addr low = 1 */
+    w5500_spi_xfer(&dev, (0x01 << 3) | 0x04); /* BSB=sock0_reg, write, VDM */
+    w5500_spi_xfer(&dev, W5500_CMD_OPEN); /* Write OPEN command */
+    w5500_spi_cs(&dev, 0);
+
+    ASSERT_EQ(W5500_SOCK_INIT, dev.sockets[0].regs[W5500_Sn_SR],
+              "Socket should be in INIT state after TCP OPEN");
+    ASSERT_TRUE(dev.sockets[0].host_fd >= 0,
+                "Host socket should be created in live mode");
+
+    /* Cleanup */
+    if (dev.sockets[0].host_fd >= 0) close(dev.sockets[0].host_fd);
+    PASS();
+}
+
+TEST(test_w5500_udp_open_creates_host_socket) {
+    w5500_t dev;
+    w5500_init(&dev);
+    w5500_set_live(&dev, 1);
+
+    /* Open via SPI */
+    dev.sockets[0].regs[W5500_Sn_MR] = W5500_MR_UDP;
+    dev.cs_active = 0;
+    w5500_spi_cs(&dev, 1);
+    w5500_spi_xfer(&dev, 0x00);
+    w5500_spi_xfer(&dev, W5500_Sn_CR);
+    w5500_spi_xfer(&dev, (0x01 << 3) | 0x04);
+    w5500_spi_xfer(&dev, W5500_CMD_OPEN);
+    w5500_spi_cs(&dev, 0);
+
+    ASSERT_EQ(W5500_SOCK_UDP, dev.sockets[0].regs[W5500_Sn_SR],
+              "Socket should be in UDP state");
+    ASSERT_TRUE(dev.sockets[0].host_fd >= 0,
+                "Host UDP socket should be created");
+
+    if (dev.sockets[0].host_fd >= 0) close(dev.sockets[0].host_fd);
+    PASS();
+}
+
+TEST(test_w5500_close_cleans_host_socket) {
+    w5500_t dev;
+    w5500_init(&dev);
+    w5500_set_live(&dev, 1);
+
+    /* Open TCP */
+    dev.sockets[0].regs[W5500_Sn_MR] = W5500_MR_TCP;
+    dev.cs_active = 0;
+    w5500_spi_cs(&dev, 1);
+    w5500_spi_xfer(&dev, 0x00);
+    w5500_spi_xfer(&dev, W5500_Sn_CR);
+    w5500_spi_xfer(&dev, (0x01 << 3) | 0x04);
+    w5500_spi_xfer(&dev, W5500_CMD_OPEN);
+    w5500_spi_cs(&dev, 0);
+    ASSERT_TRUE(dev.sockets[0].host_fd >= 0, "Socket should be open");
+
+    /* Close */
+    dev.cs_active = 0;
+    w5500_spi_cs(&dev, 1);
+    w5500_spi_xfer(&dev, 0x00);
+    w5500_spi_xfer(&dev, W5500_Sn_CR);
+    w5500_spi_xfer(&dev, (0x01 << 3) | 0x04);
+    w5500_spi_xfer(&dev, W5500_CMD_CLOSE);
+    w5500_spi_cs(&dev, 0);
+
+    ASSERT_EQ(W5500_SOCK_CLOSED, dev.sockets[0].regs[W5500_Sn_SR],
+              "Socket should be CLOSED");
+    ASSERT_EQ(-1, dev.sockets[0].host_fd, "Host fd should be -1 after close");
+    PASS();
+}
+
 /* ========================================================================
  * Cortex-M33 Tests
  * ======================================================================== */
@@ -4707,7 +5152,35 @@ int main(void) {
 
     BEGIN_CATEGORY("Wire Protocol");
     RUN_TEST(test_wire_poll_handles_partial_uart_frame);
+    RUN_TEST(test_wire_eth_frame_relay);
+    RUN_TEST(test_wire_eth_active);
     END_CATEGORY("Wire Protocol");
+
+    BEGIN_CATEGORY("Virtual Network Bus");
+    RUN_TEST(test_vnet_init_cleanup);
+    RUN_TEST(test_vnet_register_port);
+    RUN_TEST(test_vnet_frame_delivery_to_port);
+    RUN_TEST(test_vnet_unicast_delivery);
+    RUN_TEST(test_vnet_generate_mac);
+    RUN_TEST(test_vnet_peer_socketpair);
+    END_CATEGORY("Virtual Network Bus");
+
+    BEGIN_CATEGORY("Software-Defined Devices");
+    RUN_TEST(test_sdd_thermometer_create);
+    RUN_TEST(test_sdd_thermometer_i2c_read);
+    RUN_TEST(test_sdd_thermometer_custom_temp);
+    RUN_TEST(test_sdd_thermometer_config_register);
+    RUN_TEST(test_sdd_create_from_arg);
+    RUN_TEST(test_sdd_unknown_type);
+    END_CATEGORY("Software-Defined Devices");
+
+    BEGIN_CATEGORY("W5500 Live Networking");
+    RUN_TEST(test_w5500_init_host_fds);
+    RUN_TEST(test_w5500_set_live);
+    RUN_TEST(test_w5500_tcp_open_creates_host_socket);
+    RUN_TEST(test_w5500_udp_open_creates_host_socket);
+    RUN_TEST(test_w5500_close_cleans_host_socket);
+    END_CATEGORY("W5500 Live Networking");
 
     BEGIN_CATEGORY("Cortex-M33");
     RUN_TEST(test_m33_cpuid);

@@ -119,6 +119,8 @@ typedef struct {
     uint8_t regs[W5500_SOCKET_REG_SIZE];
     uint8_t tx_buf[W5500_TX_BUF_SIZE];
     uint8_t rx_buf[W5500_RX_BUF_SIZE];
+    int     host_fd;        /* Host socket fd for live networking (-1 if none) */
+    int     host_listen_fd; /* Host listen fd for TCP server (-1 if none) */
 } w5500_socket_t;
 
 /* W5500 device state */
@@ -135,6 +137,10 @@ typedef struct {
     uint8_t  bsb;           /* Block select byte (5 bits) */
     int      rw;            /* 0=read, 1=write */
     int      cs_active;     /* Chip select state */
+
+    /* Live networking mode */
+    int      live;          /* 1 = host sockets enabled, 0 = stub only */
+    int      vnet_port;     /* vnet port index (-1 if not registered) */
 } w5500_t;
 
 /* Initialize W5500 device with default register values */
@@ -145,5 +151,11 @@ uint8_t w5500_spi_xfer(void *ctx, uint8_t mosi);
 
 /* SPI chip-select callback */
 void w5500_spi_cs(void *ctx, int cs_active);
+
+/* Poll host sockets for incoming data (call from main loop when live=1) */
+void w5500_poll(w5500_t *dev);
+
+/* Enable live networking mode (creates real host sockets) */
+void w5500_set_live(w5500_t *dev, int enable);
 
 #endif /* W5500_H */

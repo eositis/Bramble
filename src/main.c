@@ -59,6 +59,9 @@ typedef enum { ARCH_M0PLUS, ARCH_RV32, ARCH_M33 } arch_t;
 #include "fuse_mount.h"
 #include "corepool.h"
 #include "cyw43.h"
+#include "vnet.h"
+#include "sdd.h"
+#include "w5500.h"
 
 
 int any_core_running(void);
@@ -352,9 +355,17 @@ int main(int argc, char **argv) {
         fprintf(stderr, "  -wire-uart0 <path>          Wire UART0 to peer via Unix socket\n");
         fprintf(stderr, "  -wire-uart1 <path>          Wire UART1 to peer via Unix socket\n");
         fprintf(stderr, "  -wire-gpio <path>           Wire GPIO pins to peer via Unix socket\n");
+        fprintf(stderr, "  -wire-eth <path>            Wire Ethernet frames to peer via Unix socket\n");
         fprintf(stderr, "\nWiFi (Pico W):\n");
         fprintf(stderr, "  -wifi                       Enable CYW43 WiFi chip emulation\n");
         fprintf(stderr, "  -tap <ifname>               Bridge WiFi to TAP interface (implies -wifi, sudo)\n");
+        fprintf(stderr, "\nVirtual Network:\n");
+        fprintf(stderr, "  -net                        Create TAP + NAT for internet bridge (auto-sudo)\n");
+        fprintf(stderr, "  -net-peer <path>            Mesh with another Bramble instance via Unix socket\n");
+        fprintf(stderr, "  -net-live                   Enable W5500 live host sockets\n");
+        fprintf(stderr, "\nSoftware-Defined Devices:\n");
+        fprintf(stderr, "  -sdd <type[:opts]>          Attach a software-defined device\n");
+        fprintf(stderr, "                              Types: thermometer[:temp=25,i2c=0,addr=0x48]\n");
         fprintf(stderr, "\nPerformance:\n");
         fprintf(stderr, "  -jit        Enable JIT basic block compilation for hot loops\n");
         fprintf(stderr, "\nDeveloper Tools:\n");
@@ -423,6 +434,10 @@ int main(int argc, char **argv) {
     int thread_quantum_set = 0;
     static sdcard_t sdcard;
     static emmc_t emmc_dev;
+    static w5500_t w5500_dev;
+    int vnet_enabled = 0;
+    int w5500_live = 0;
+    int sdd_count = 0;
 
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "-debug") == 0) {
@@ -555,12 +570,33 @@ int main(int argc, char **argv) {
             if (i + 1 < argc) {
                 wire_add_link(argv[++i], WIRE_MSG_GPIO_PIN, 0);
             }
+        } else if (strcmp(argv[i], "-wire-eth") == 0) {
+            if (i + 1 < argc) {
+                wire_add_link(argv[++i], WIRE_MSG_ETH_FRAME, 0);
+            }
         } else if (strcmp(argv[i], "-wifi") == 0) {
             cyw43.enabled = 1;
         } else if (strcmp(argv[i], "-tap") == 0) {
             if (i + 1 < argc) {
                 tap_name = argv[++i];
                 cyw43.enabled = 1;  /* -tap implies -wifi */
+            }
+        } else if (strcmp(argv[i], "-net") == 0) {
+            vnet_enabled = 1;
+            if (!tap_name) tap_name = "bramble0";
+        } else if (strcmp(argv[i], "-net-peer") == 0) {
+            if (i + 1 < argc) {
+                vnet_enabled = 1;
+                vnet_add_peer(argv[++i]);
+            }
+        } else if (strcmp(argv[i], "-net-live") == 0) {
+            vnet_enabled = 1;
+            w5500_live = 1;
+        } else if (strcmp(argv[i], "-sdd") == 0) {
+            if (i + 1 < argc) {
+                sdd_count++;
+                /* Defer creation until after init — just record the arg index */
+                /* We'll parse them in a second pass below */
             }
         } else if (strcmp(argv[i], "-arch") == 0) {
             if (i + 1 < argc) {
@@ -656,7 +692,7 @@ int main(int argc, char **argv) {
      * ======================================================================== */
 
     {
-        int needs_privilege = (tap_name != NULL) || (mount_path != NULL);
+        int needs_privilege = (tap_name != NULL) || (mount_path != NULL) || vnet_enabled;
         if (needs_privilege && geteuid() != 0 && getenv("BRAMBLE_ESCALATED") == NULL) {
             /* Explain why we need elevated privileges */
             fprintf(stderr, "\n[Privilege] The following features require superuser access:\n");
@@ -911,6 +947,31 @@ skip_fuse:
     if (wire_init() < 0) {
         fprintf(stderr, "[Error] Failed to initialize wire protocol\n");
         return EXIT_FAILURE;
+    }
+
+    /* Virtual network bus initialization */
+    if (vnet_enabled) {
+        vnet_init();
+        if (tap_name && !cyw43.enabled) {
+            /* -net without -wifi: attach TAP to vnet directly */
+            if (vnet_attach_tap(tap_name) < 0) {
+                fprintf(stderr, "[Error] Failed to attach TAP '%s' to vnet\n", tap_name);
+            }
+        }
+    }
+
+    /* W5500 live networking */
+    if (w5500_live) {
+        w5500_init(&w5500_dev);
+        w5500_set_live(&w5500_dev, 1);
+    }
+
+    /* Software-Defined Devices: second pass to create from -sdd arguments */
+    sdd_init();
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "-sdd") == 0 && i + 1 < argc) {
+            sdd_create_from_arg(argv[++i]);
+        }
     }
 
     /* SD card initialization */
@@ -1168,6 +1229,8 @@ skip_fuse:
             if ((step_count & 0x3FF) == 0) {
                 net_bridge_poll();
                 wire_poll();
+                if (vnet_enabled) vnet_poll();
+                if (w5500_live) w5500_poll(&w5500_dev);
             }
 
             /* Timeout and semihosting */
@@ -1215,11 +1278,13 @@ skip_fuse:
                 corepool_unlock();
             }
 
-            /* Poll network, wire, and WiFi TAP */
+            /* Poll network, wire, vnet, and WiFi TAP */
             corepool_lock();
             net_bridge_poll();
             wire_poll();
             cyw43_tap_poll();
+            if (vnet_enabled) vnet_poll();
+            if (w5500_live) w5500_poll(&w5500_dev);
             corepool_unlock();
 
             /* Periodic storage flush */
@@ -1318,6 +1383,8 @@ skip_fuse:
                 net_bridge_poll();
                 wire_poll();
                 cyw43_tap_poll();
+                if (vnet_enabled) vnet_poll();
+                if (w5500_live) w5500_poll(&w5500_dev);
             }
 
             /* Flush dirty storage devices every ~1M steps */
@@ -1386,6 +1453,8 @@ skip_fuse:
     net_bridge_cleanup();
     wire_cleanup();
     cyw43_tap_close();
+    if (vnet_enabled) vnet_cleanup();
+    sdd_cleanup();
 
     /* Unmount FUSE filesystem */
     if (mount_path) {

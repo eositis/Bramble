@@ -16,6 +16,14 @@
  */
 
 #include <string.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <poll.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include "w5500.h"
 
 /* ========================================================================
@@ -44,6 +52,40 @@ static int bsb_socket(uint8_t bsb) {
  * Socket command processing
  * ======================================================================== */
 
+static void set_sock_nonblock(int fd) {
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags != -1)
+        fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+}
+
+/* Build a sockaddr_in from socket registers */
+static void w5500_build_addr(w5500_socket_t *s, struct sockaddr_in *addr) {
+    memset(addr, 0, sizeof(*addr));
+    addr->sin_family = AF_INET;
+    /* Dest IP from regs (big-endian on wire) */
+    uint32_t ip = ((uint32_t)s->regs[W5500_Sn_DIPR0] << 24) |
+                  ((uint32_t)s->regs[W5500_Sn_DIPR0 + 1] << 16) |
+                  ((uint32_t)s->regs[W5500_Sn_DIPR0 + 2] << 8) |
+                  (uint32_t)s->regs[W5500_Sn_DIPR0 + 3];
+    addr->sin_addr.s_addr = htonl(ip);
+    /* Dest port */
+    uint16_t port = ((uint16_t)s->regs[W5500_Sn_DPORT0] << 8) |
+                    s->regs[W5500_Sn_DPORT0 + 1];
+    addr->sin_port = htons(port);
+}
+
+/* Close any host socket associated with this W5500 socket */
+static void w5500_close_host_sock(w5500_socket_t *s) {
+    if (s->host_fd >= 0) {
+        close(s->host_fd);
+        s->host_fd = -1;
+    }
+    if (s->host_listen_fd >= 0) {
+        close(s->host_listen_fd);
+        s->host_listen_fd = -1;
+    }
+}
+
 static void w5500_process_socket_cmd(w5500_t *dev, int sock) {
     w5500_socket_t *s = &dev->sockets[sock];
     uint8_t cmd = s->regs[W5500_Sn_CR];
@@ -53,33 +95,112 @@ static void w5500_process_socket_cmd(w5500_t *dev, int sock) {
 
     switch (cmd) {
     case W5500_CMD_OPEN:
-        if ((mode & 0x0F) == W5500_MR_TCP)
+        if ((mode & 0x0F) == W5500_MR_TCP) {
             s->regs[W5500_Sn_SR] = W5500_SOCK_INIT;
-        else if ((mode & 0x0F) == W5500_MR_UDP)
+            if (dev->live) {
+                w5500_close_host_sock(s);
+                s->host_fd = socket(AF_INET, SOCK_STREAM, 0);
+                if (s->host_fd >= 0) set_sock_nonblock(s->host_fd);
+            }
+        } else if ((mode & 0x0F) == W5500_MR_UDP) {
             s->regs[W5500_Sn_SR] = W5500_SOCK_UDP;
-        else if ((mode & 0x0F) == W5500_MR_MACRAW)
+            if (dev->live) {
+                w5500_close_host_sock(s);
+                s->host_fd = socket(AF_INET, SOCK_DGRAM, 0);
+                if (s->host_fd >= 0) {
+                    set_sock_nonblock(s->host_fd);
+                    /* Bind to source port if set */
+                    uint16_t src_port = ((uint16_t)s->regs[W5500_Sn_PORT0] << 8) |
+                                        s->regs[W5500_Sn_PORT0 + 1];
+                    if (src_port > 0) {
+                        struct sockaddr_in bind_addr;
+                        memset(&bind_addr, 0, sizeof(bind_addr));
+                        bind_addr.sin_family = AF_INET;
+                        bind_addr.sin_addr.s_addr = INADDR_ANY;
+                        bind_addr.sin_port = htons(src_port);
+                        int opt = 1;
+                        setsockopt(s->host_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+                        bind(s->host_fd, (struct sockaddr *)&bind_addr, sizeof(bind_addr));
+                    }
+                }
+            }
+        } else if ((mode & 0x0F) == W5500_MR_MACRAW) {
             s->regs[W5500_Sn_SR] = W5500_SOCK_MACRAW;
+        }
         /* TX free = full buffer size */
         s->regs[W5500_Sn_TX_FSR0] = (W5500_TX_BUF_SIZE >> 8) & 0xFF;
         s->regs[W5500_Sn_TX_FSR0 + 1] = W5500_TX_BUF_SIZE & 0xFF;
         break;
 
     case W5500_CMD_LISTEN:
-        if (s->regs[W5500_Sn_SR] == W5500_SOCK_INIT)
+        if (s->regs[W5500_Sn_SR] == W5500_SOCK_INIT) {
             s->regs[W5500_Sn_SR] = W5500_SOCK_LISTEN;
+            if (dev->live && s->host_fd >= 0) {
+                uint16_t src_port = ((uint16_t)s->regs[W5500_Sn_PORT0] << 8) |
+                                    s->regs[W5500_Sn_PORT0 + 1];
+                struct sockaddr_in bind_addr;
+                memset(&bind_addr, 0, sizeof(bind_addr));
+                bind_addr.sin_family = AF_INET;
+                bind_addr.sin_addr.s_addr = INADDR_ANY;
+                bind_addr.sin_port = htons(src_port);
+                int opt = 1;
+                setsockopt(s->host_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+                if (bind(s->host_fd, (struct sockaddr *)&bind_addr, sizeof(bind_addr)) == 0 &&
+                    listen(s->host_fd, 1) == 0) {
+                    s->host_listen_fd = s->host_fd;
+                    s->host_fd = -1;
+                }
+            }
+        }
         break;
 
     case W5500_CMD_CONNECT:
-        if (s->regs[W5500_Sn_SR] == W5500_SOCK_INIT)
+        if (s->regs[W5500_Sn_SR] == W5500_SOCK_INIT) {
             s->regs[W5500_Sn_SR] = W5500_SOCK_ESTABLISHED;
+            if (dev->live && s->host_fd >= 0) {
+                struct sockaddr_in dest;
+                w5500_build_addr(s, &dest);
+                /* Non-blocking connect — may succeed or be in progress */
+                int rc = connect(s->host_fd, (struct sockaddr *)&dest, sizeof(dest));
+                if (rc < 0 && errno != EINPROGRESS) {
+                    fprintf(stderr, "[W5500] Socket %d connect failed: %s\n",
+                            sock, strerror(errno));
+                }
+            }
+        }
         break;
 
     case W5500_CMD_CLOSE:
         s->regs[W5500_Sn_SR] = W5500_SOCK_CLOSED;
+        if (dev->live) w5500_close_host_sock(s);
         break;
 
-    case W5500_CMD_SEND:
-        /* Simulate send complete: advance TX read pointer to write pointer */
+    case W5500_CMD_SEND: {
+        /* Read TX data from buffer */
+        uint16_t tx_rd = ((uint16_t)s->regs[W5500_Sn_TX_RD0] << 8) |
+                         s->regs[W5500_Sn_TX_RD0 + 1];
+        uint16_t tx_wr = ((uint16_t)s->regs[W5500_Sn_TX_WR0] << 8) |
+                         s->regs[W5500_Sn_TX_WR0 + 1];
+        uint16_t data_len = tx_wr - tx_rd;
+
+        if (dev->live && s->host_fd >= 0 && data_len > 0) {
+            uint8_t send_buf[W5500_TX_BUF_SIZE];
+            for (uint16_t i = 0; i < data_len; i++) {
+                send_buf[i] = s->tx_buf[(tx_rd + i) % W5500_TX_BUF_SIZE];
+            }
+
+            uint8_t mode_val = s->regs[W5500_Sn_MR] & 0x0F;
+            if (mode_val == W5500_MR_UDP) {
+                struct sockaddr_in dest;
+                w5500_build_addr(s, &dest);
+                sendto(s->host_fd, send_buf, data_len, 0,
+                       (struct sockaddr *)&dest, sizeof(dest));
+            } else {
+                send(s->host_fd, send_buf, data_len, MSG_NOSIGNAL);
+            }
+        }
+
+        /* Advance TX read pointer to write pointer */
         s->regs[W5500_Sn_TX_RD0] = s->regs[W5500_Sn_TX_WR0];
         s->regs[W5500_Sn_TX_RD0 + 1] = s->regs[W5500_Sn_TX_WR0 + 1];
         /* Restore full TX free space */
@@ -88,6 +209,7 @@ static void w5500_process_socket_cmd(w5500_t *dev, int sock) {
         /* Set SEND_OK interrupt */
         s->regs[W5500_Sn_IR] |= 0x10;
         break;
+    }
 
     case W5500_CMD_RECV:
         /* Advance RX read pointer, clear received size */
@@ -202,6 +324,10 @@ void w5500_init(w5500_t *dev) {
     /* Default retry count */
     dev->common[W5500_RCR] = 0x08;
 
+    /* Live networking defaults */
+    dev->live = 0;
+    dev->vnet_port = -1;
+
     /* Initialize each socket with default buffer sizes and TTL */
     for (int i = 0; i < W5500_NUM_SOCKETS; i++) {
         w5500_socket_t *s = &dev->sockets[i];
@@ -212,6 +338,8 @@ void w5500_init(w5500_t *dev) {
         /* TX free = full buffer */
         s->regs[W5500_Sn_TX_FSR0] = (W5500_TX_BUF_SIZE >> 8) & 0xFF;
         s->regs[W5500_Sn_TX_FSR0 + 1] = W5500_TX_BUF_SIZE & 0xFF;
+        s->host_fd = -1;
+        s->host_listen_fd = -1;
     }
 }
 
@@ -264,5 +392,103 @@ void w5500_spi_cs(void *ctx, int cs_active) {
     if (cs_active) {
         /* CS asserted: reset frame state machine */
         dev->phase = W5500_PHASE_ADDR_HI;
+    }
+}
+
+/* ========================================================================
+ * Live Networking: Poll host sockets for incoming data
+ * ======================================================================== */
+
+void w5500_poll(w5500_t *dev) {
+    if (!dev->live) return;
+
+    for (int i = 0; i < W5500_NUM_SOCKETS; i++) {
+        w5500_socket_t *s = &dev->sockets[i];
+
+        /* Accept incoming TCP connections */
+        if (s->host_listen_fd >= 0 &&
+            s->regs[W5500_Sn_SR] == W5500_SOCK_LISTEN) {
+            struct pollfd pfd = { .fd = s->host_listen_fd, .events = POLLIN };
+            if (poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN)) {
+                struct sockaddr_in client;
+                socklen_t clen = sizeof(client);
+                int cfd = accept(s->host_listen_fd, (struct sockaddr *)&client, &clen);
+                if (cfd >= 0) {
+                    set_sock_nonblock(cfd);
+                    s->host_fd = cfd;
+                    s->regs[W5500_Sn_SR] = W5500_SOCK_ESTABLISHED;
+                    /* Store client IP/port in dest registers */
+                    uint32_t ip = ntohl(client.sin_addr.s_addr);
+                    s->regs[W5500_Sn_DIPR0]     = (ip >> 24) & 0xFF;
+                    s->regs[W5500_Sn_DIPR0 + 1] = (ip >> 16) & 0xFF;
+                    s->regs[W5500_Sn_DIPR0 + 2] = (ip >>  8) & 0xFF;
+                    s->regs[W5500_Sn_DIPR0 + 3] = ip & 0xFF;
+                    uint16_t port = ntohs(client.sin_port);
+                    s->regs[W5500_Sn_DPORT0]     = (port >> 8) & 0xFF;
+                    s->regs[W5500_Sn_DPORT0 + 1] = port & 0xFF;
+                    /* Set CON interrupt */
+                    s->regs[W5500_Sn_IR] |= 0x01;
+                }
+            }
+        }
+
+        /* Read incoming data into RX buffer */
+        if (s->host_fd >= 0 &&
+            (s->regs[W5500_Sn_SR] == W5500_SOCK_ESTABLISHED ||
+             s->regs[W5500_Sn_SR] == W5500_SOCK_UDP)) {
+
+            uint16_t rx_rsr = ((uint16_t)s->regs[W5500_Sn_RX_RSR0] << 8) |
+                              s->regs[W5500_Sn_RX_RSR0 + 1];
+            uint16_t free_space = W5500_RX_BUF_SIZE - rx_rsr;
+            if (free_space == 0) continue;
+
+            struct pollfd pfd = { .fd = s->host_fd, .events = POLLIN };
+            if (poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN)) {
+                uint16_t rx_wr = ((uint16_t)s->regs[W5500_Sn_RX_WR0] << 8) |
+                                 s->regs[W5500_Sn_RX_WR0 + 1];
+
+                uint8_t tmp[W5500_RX_BUF_SIZE];
+                ssize_t n = recv(s->host_fd, tmp,
+                                free_space < sizeof(tmp) ? free_space : sizeof(tmp), 0);
+                if (n > 0) {
+                    for (ssize_t j = 0; j < n; j++) {
+                        s->rx_buf[(rx_wr + (uint16_t)j) % W5500_RX_BUF_SIZE] = tmp[j];
+                    }
+                    rx_wr = (uint16_t)(rx_wr + (uint16_t)n);
+                    s->regs[W5500_Sn_RX_WR0]     = (rx_wr >> 8) & 0xFF;
+                    s->regs[W5500_Sn_RX_WR0 + 1] = rx_wr & 0xFF;
+                    rx_rsr = (uint16_t)(rx_rsr + (uint16_t)n);
+                    s->regs[W5500_Sn_RX_RSR0]     = (rx_rsr >> 8) & 0xFF;
+                    s->regs[W5500_Sn_RX_RSR0 + 1] = rx_rsr & 0xFF;
+                    /* Set RECV interrupt */
+                    s->regs[W5500_Sn_IR] |= 0x04;
+                } else if (n == 0) {
+                    /* Peer disconnected */
+                    s->regs[W5500_Sn_SR] = W5500_SOCK_CLOSED;
+                    s->regs[W5500_Sn_IR] |= 0x02;  /* DISCON interrupt */
+                    close(s->host_fd);
+                    s->host_fd = -1;
+                }
+            }
+
+            /* Check for errors/disconnect */
+            if (s->host_fd >= 0) {
+                struct pollfd pfd2 = { .fd = s->host_fd, .events = 0 };
+                if (poll(&pfd2, 1, 0) > 0 &&
+                    (pfd2.revents & (POLLERR | POLLHUP))) {
+                    s->regs[W5500_Sn_SR] = W5500_SOCK_CLOSED;
+                    s->regs[W5500_Sn_IR] |= 0x02;
+                    close(s->host_fd);
+                    s->host_fd = -1;
+                }
+            }
+        }
+    }
+}
+
+void w5500_set_live(w5500_t *dev, int enable) {
+    dev->live = enable;
+    if (enable) {
+        fprintf(stderr, "[W5500] Live networking enabled\n");
     }
 }
