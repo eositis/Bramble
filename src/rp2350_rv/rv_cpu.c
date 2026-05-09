@@ -893,17 +893,26 @@ decode:
                 goto illegal;
             }
             break;
-        case 5: /* SRLI / SRAI / Zbs: BEXTI / Zbb: RORI */
+        case 5: /* SRLI / SRAI / Zbs: BEXTI / Zbb: ORC.B / RORI / REV8 */
             if (funct7 == 0x00)
                 result = src >> (rs2 & 0x1F);               /* SRLI */
             else if (funct7 == 0x20)
                 result = (uint32_t)((int32_t)src >> (rs2 & 0x1F));  /* SRAI */
             else if (funct7 == 0x24)
                 result = (src >> (rs2 & 0x1F)) & 1;         /* BEXTI */
+            else if (funct7 == 0x14 && rs2 == 0x07) {
+                result = 0;                                 /* ORC.B */
+                if (src & 0x000000FF) result |= 0x000000FF;
+                if (src & 0x0000FF00) result |= 0x0000FF00;
+                if (src & 0x00FF0000) result |= 0x00FF0000;
+                if (src & 0xFF000000) result |= 0xFF000000;
+            }
             else if (funct7 == 0x30) {
                 /* Zbb: RORI */
                 uint32_t sh = rs2 & 0x1F;
-                result = (src >> sh) | (src << (32 - sh));
+                result = sh ? ((src >> sh) | (src << (32 - sh))) : src;
+            } else if (funct7 == 0x34 && rs2 == 0x18) {
+                result = __builtin_bswap32(src);            /* REV8 */
             } else goto illegal;
             break;
         default: goto illegal;
@@ -990,31 +999,18 @@ decode:
             case 0: result = a - b; break;                              /* SUB */
             case 1: { /* Zbb: ROL */
                 uint32_t sh = b & 0x1F;
-                result = (a << sh) | (a >> (32 - sh));
+                result = sh ? ((a << sh) | (a >> (32 - sh))) : a;
                 break;
             }
             case 4: result = a ^ ~b; break;                             /* XNOR */
-            case 5: {
-                if (rs2 == 0x07 && rs1 == 0x00 && funct3 == 5) { /* Zbb: ORC.B */
-                    result = 0;
-                    if (a & 0x000000FF) result |= 0x000000FF;
-                    if (a & 0x0000FF00) result |= 0x0000FF00;
-                    if (a & 0x00FF0000) result |= 0x00FF0000;
-                    if (a & 0xFF000000) result |= 0xFF000000;
-                } else {
-                    result = (uint32_t)((int32_t)a >> (b & 0x1F));      /* SRA */
-                }
-                break;
-            }
+            case 5: result = (uint32_t)((int32_t)a >> (b & 0x1F)); break; /* SRA */
             case 6: result = a | ~b; break;                             /* ORN */
             case 7: result = a & ~b; break;                             /* ANDN */
             default: goto illegal;
             }
         } else if (funct7 == 0x30 && funct3 == 1) { /* Zbb: ROR */
             uint32_t sh = b & 0x1F;
-            result = (a >> sh) | (a << (32 - sh));
-        } else if (funct7 == 0x20 && funct3 == 5 && rs2 == 0x18) { /* Zbb: REV8 */
-            result = __builtin_bswap32(a);
+            result = sh ? ((a >> sh) | (a << (32 - sh))) : a;
         } else {
             goto illegal;
         }
