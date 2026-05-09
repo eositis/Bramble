@@ -89,10 +89,15 @@ typedef struct {
 
 /* ========================================================================
  * BOOTRAM (0x400E0000)
- * 256-byte boot scratch RAM shared between bootrom and firmware.
+ * 1KB boot scratch RAM plus adjacent bootrom-owned registers.
  * ======================================================================== */
 
-#define BOOTRAM_SIZE  256
+#define BOOTRAM_SIZE                 0x400
+#define BOOTRAM_WRITE_ONCE_OFFSET    0x800
+#define BOOTRAM_BOOTLOCK_STAT_OFFSET 0x808
+#define BOOTRAM_BOOTLOCK0_OFFSET     0x80C
+#define BOOTRAM_BOOTLOCK_COUNT       8
+#define BOOTRAM_REGS_END             0x82C
 
 /* ========================================================================
  * TIMER1 (0x400B8000)
@@ -121,6 +126,8 @@ typedef struct {
     rp2350_otp_state_t otp;
     rp2350_timer1_state_t timer1;
     uint8_t bootram[BOOTRAM_SIZE];
+    uint32_t bootram_write_once[2];
+    uint32_t bootram_bootlock_stat;
     uint32_t glitch_regs[8];      /* Glitch detector */
     uint32_t coresight_regs[16];  /* CoreSight trace */
     uint32_t accessctrl_regs[64]; /* Access control */

@@ -38,6 +38,7 @@ void rp2350_periph_init(rp2350_periph_state_t *state) {
 
     /* BOOTRAM: cleared */
     memset(state->bootram, 0, BOOTRAM_SIZE);
+    state->bootram_bootlock_stat = 0xFF;  /* All bootlocks start unclaimed. */
 
     /* Timer1: starts at 0 */
     state->timer1.time_us = 0;
@@ -63,8 +64,8 @@ int rp2350_periph_match(uint32_t addr) {
     if (base >= RP2350_OTP_BASE && base < RP2350_OTP_BASE + 0x100) return 1;
     /* OTP data */
     if (addr >= RP2350_OTP_DATA_BASE && addr < RP2350_OTP_DATA_BASE + OTP_NUM_ROWS * 4) return 1;
-    /* BOOTRAM */
-    if (addr >= RP2350_BOOTRAM_BASE && addr < RP2350_BOOTRAM_BASE + BOOTRAM_SIZE) return 1;
+    /* BOOTRAM scratch plus adjacent bootrom-owned registers */
+    if (addr >= RP2350_BOOTRAM_BASE && addr < RP2350_BOOTRAM_BASE + BOOTRAM_REGS_END) return 1;
     /* TIMER1 */
     if (base >= RP2350_TIMER1_BASE && base < RP2350_TIMER1_BASE + 0x100) return 1;
     /* GLITCH */
@@ -204,6 +205,69 @@ static void otp_write(rp2350_otp_state_t *o, uint32_t addr, uint32_t val) {
 }
 
 /* ========================================================================
+ * BOOTRAM register bank (0x400E0000)
+ * ======================================================================== */
+
+static uint32_t bootram_read(rp2350_periph_state_t *state, uint32_t addr) {
+    uint32_t offset = addr - RP2350_BOOTRAM_BASE;
+
+    if (offset < BOOTRAM_SIZE) {
+        uint32_t val = 0;
+        memcpy(&val, &state->bootram[offset], 4);
+        return val;
+    }
+
+    switch (offset) {
+    case BOOTRAM_WRITE_ONCE_OFFSET:
+        return state->bootram_write_once[0];
+    case BOOTRAM_WRITE_ONCE_OFFSET + 4:
+        return state->bootram_write_once[1];
+    case BOOTRAM_BOOTLOCK_STAT_OFFSET:
+        return state->bootram_bootlock_stat;
+    default:
+        if (offset >= BOOTRAM_BOOTLOCK0_OFFSET &&
+            offset < BOOTRAM_BOOTLOCK0_OFFSET + BOOTRAM_BOOTLOCK_COUNT * 4) {
+            uint32_t lock_num = (offset - BOOTRAM_BOOTLOCK0_OFFSET) / 4;
+            uint32_t bit = 1u << lock_num;
+            if (state->bootram_bootlock_stat & bit) {
+                state->bootram_bootlock_stat &= ~bit;
+                return bit;
+            }
+            return 0;
+        }
+        return 0;
+    }
+}
+
+static void bootram_write(rp2350_periph_state_t *state, uint32_t addr, uint32_t val) {
+    uint32_t offset = addr - RP2350_BOOTRAM_BASE;
+
+    if (offset < BOOTRAM_SIZE) {
+        memcpy(&state->bootram[offset], &val, 4);
+        return;
+    }
+
+    switch (offset) {
+    case BOOTRAM_WRITE_ONCE_OFFSET:
+        state->bootram_write_once[0] |= val;
+        break;
+    case BOOTRAM_WRITE_ONCE_OFFSET + 4:
+        state->bootram_write_once[1] |= val;
+        break;
+    case BOOTRAM_BOOTLOCK_STAT_OFFSET:
+        state->bootram_bootlock_stat = val & 0xFF;
+        break;
+    default:
+        if (offset >= BOOTRAM_BOOTLOCK0_OFFSET &&
+            offset < BOOTRAM_BOOTLOCK0_OFFSET + BOOTRAM_BOOTLOCK_COUNT * 4) {
+            uint32_t lock_num = (offset - BOOTRAM_BOOTLOCK0_OFFSET) / 4;
+            state->bootram_bootlock_stat |= (1u << lock_num);
+        }
+        break;
+    }
+}
+
+/* ========================================================================
  * TIMER1 (0x400B8000) — same register layout as RP2040 timer
  * ======================================================================== */
 
@@ -285,13 +349,9 @@ uint32_t rp2350_periph_read32(rp2350_periph_state_t *state, uint32_t addr) {
     if (addr >= RP2350_OTP_DATA_BASE && addr < RP2350_OTP_DATA_BASE + OTP_NUM_ROWS * 4)
         return otp_read(&state->otp, addr);
 
-    /* BOOTRAM */
-    if (addr >= 0x400E0000 && addr < 0x400E0000 + BOOTRAM_SIZE) {
-        uint32_t off = addr - 0x400E0000;
-        uint32_t val;
-        memcpy(&val, &state->bootram[off], 4);
-        return val;
-    }
+    /* BOOTRAM scratch plus adjacent bootrom registers */
+    if (addr >= RP2350_BOOTRAM_BASE && addr < RP2350_BOOTRAM_BASE + BOOTRAM_REGS_END)
+        return bootram_read(state, addr);
 
     /* TIMER1 */
     if (base >= RP2350_TIMER1_BASE && base < RP2350_TIMER1_BASE + 0x100)
@@ -351,10 +411,9 @@ void rp2350_periph_write32(rp2350_periph_state_t *state, uint32_t addr, uint32_t
         return;
     }
 
-    /* BOOTRAM */
-    if (addr >= 0x400E0000 && addr < 0x400E0000 + BOOTRAM_SIZE) {
-        uint32_t off = addr - 0x400E0000;
-        memcpy(&state->bootram[off], &val, 4);
+    /* BOOTRAM scratch plus adjacent bootrom registers */
+    if (addr >= RP2350_BOOTRAM_BASE && addr < RP2350_BOOTRAM_BASE + BOOTRAM_REGS_END) {
+        bootram_write(state, addr, val);
         return;
     }
 
@@ -395,8 +454,8 @@ void rp2350_periph_write32(rp2350_periph_state_t *state, uint32_t addr, uint32_t
 
 uint8_t rp2350_periph_read8(rp2350_periph_state_t *state, uint32_t addr) {
     /* BOOTRAM byte access */
-    if (addr >= 0x400E0000 && addr < 0x400E0000 + BOOTRAM_SIZE)
-        return state->bootram[addr - 0x400E0000];
+    if (addr >= RP2350_BOOTRAM_BASE && addr < RP2350_BOOTRAM_BASE + BOOTRAM_SIZE)
+        return state->bootram[addr - RP2350_BOOTRAM_BASE];
     /* Fall back to 32-bit read */
     uint32_t aligned = addr & ~3u;
     uint32_t val = rp2350_periph_read32(state, aligned);
@@ -405,8 +464,8 @@ uint8_t rp2350_periph_read8(rp2350_periph_state_t *state, uint32_t addr) {
 
 void rp2350_periph_write8(rp2350_periph_state_t *state, uint32_t addr, uint8_t val) {
     /* BOOTRAM byte access */
-    if (addr >= 0x400E0000 && addr < 0x400E0000 + BOOTRAM_SIZE) {
-        state->bootram[addr - 0x400E0000] = val;
+    if (addr >= RP2350_BOOTRAM_BASE && addr < RP2350_BOOTRAM_BASE + BOOTRAM_SIZE) {
+        state->bootram[addr - RP2350_BOOTRAM_BASE] = val;
         return;
     }
     /* Other peripherals: read-modify-write */
