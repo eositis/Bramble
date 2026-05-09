@@ -80,6 +80,7 @@ static inline void rv_write8(rv_cpu_state_t *cpu, uint32_t addr, uint8_t val) {
 #define OP_FENCE    0x0F
 #define OP_AMO      0x2F
 #define OP_SYSTEM   0x73
+#define OP_CUSTOM0  0x0B
 
 /* ========================================================================
  * Initialization
@@ -1023,6 +1024,33 @@ decode:
             goto illegal;
         }
 
+        rv_write_rd(cpu, rd, result);
+        break;
+    }
+
+    /* ================================================================
+     * Hazard3 custom-0 instructions
+     * Xh3bextm: h3.bextm / h3.bextmi
+     * ================================================================ */
+    case OP_CUSTOM0: {
+        if (funct3 != 4) goto illegal;
+
+        uint32_t result;
+        uint32_t nbits;
+        uint32_t shamt;
+
+        if ((funct7 & ~0x0E) == 0) {
+            /* R-format h3.bextm: funct7 encodes (nbits - 1) in bits [3:1]. */
+            nbits = ((funct7 >> 1) & 0x7) + 1;
+            shamt = cpu->x[rs2] & 0x1F;
+        } else {
+            /* I-format h3.bextmi: imm[8:6] encodes (nbits - 1), imm[4:0] is shamt. */
+            uint32_t imm = instr >> 20;
+            nbits = ((imm >> 6) & 0x7) + 1;
+            shamt = imm & 0x1F;
+        }
+
+        result = (cpu->x[rs1] >> shamt) & ((1u << nbits) - 1u);
         rv_write_rd(cpu, rd, result);
         break;
     }
