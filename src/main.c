@@ -1193,10 +1193,11 @@ skip_fuse:
 
             step_count++;
 
-            /* Advance CLINT timer and RP2350 TIMER1 */
+            /* Advance CLINT timer plus RP2350 TIMER0/TIMER1 microsecond counters */
             rv_clint_tick(&rv_bus.clint, 1);
             if (rv_bus.clint.cycle_accum == 0) {
-                /* A microsecond elapsed — tick TIMER1 */
+                /* A microsecond elapsed — tick the SDK-visible TIMER0 alias and TIMER1. */
+                timer_tick(1);
                 rp2350_timer1_tick(&rv_bus.periph, 1);
             }
 

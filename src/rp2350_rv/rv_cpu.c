@@ -944,6 +944,14 @@ decode:
             else if (funct3 == 6) result = (uint32_t)((int32_t)a > (int32_t)b ? a : b); /* MAX */
             else if (funct3 == 7) result = a > b ? a : b; /* MAXU */
             else goto illegal;
+        } else if (funct7 == 0x04) { /* Zbkb: PACK / PACKH / ZEXT.H */
+            if (funct3 == 4) {
+                result = (a & 0x0000FFFFu) | ((b & 0x0000FFFFu) << 16); /* PACK / ZEXT.H */
+            } else if (funct3 == 5) {
+                result = (a & 0x000000FFu) | ((b & 0x000000FFu) << 8);  /* PACKH */
+            } else {
+                goto illegal;
+            }
         } else if (funct7 == 0x24) { /* Zbs: BCLR, BEXT */
             uint32_t sh = b & 0x1F;
             if (funct3 == 1) result = a & ~(1u << sh);      /* BCLR */
