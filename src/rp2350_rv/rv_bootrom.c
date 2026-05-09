@@ -15,6 +15,15 @@
 #include "rp2350_rv/rp2350_memmap.h"
 #include "emulator.h"
 
+#define RV_ROM_DATA_FLASH_DEVINFO16_PTR_LITERAL 0x0200
+#define RV_ROM_DATA_FLASH_DEVINFO16_WORD        0x0204
+#define RV_ROM_DATA_GIT_REVISION_STRING         0x0210
+#define RV_ROM_DATA_TABLE_BASE                  0x0280
+#define RV_ROM_SYS_INFO_SUPPORTED_FLAGS \
+    (RV_SYS_INFO_CHIP_INFO | RV_SYS_INFO_CRITICAL | RV_SYS_INFO_CPU_INFO | \
+     RV_SYS_INFO_FLASH_DEV_INFO | RV_SYS_INFO_BOOT_RANDOM | RV_SYS_INFO_NONCE | \
+     RV_SYS_INFO_BOOT_INFO)
+
 /* Helper: write 32-bit LE word to ROM buffer */
 static void rom_w32(uint8_t *rom, uint32_t off, uint32_t val) {
     rom[off+0] = (uint8_t)(val);
@@ -61,12 +70,151 @@ static uint32_t rv_ret(void) {
     return rv_jalr(0, 1, 0);
 }
 
+static uint16_t rv_rom_flash_size_code(uint32_t flash_size) {
+    uint32_t size = 8 * 1024;
+    uint16_t code = 1;
+
+    while (size < flash_size && code < 0x0C) {
+        size <<= 1;
+        code++;
+    }
+    return code;
+}
+
+static uint16_t rv_rom_flash_devinfo_word(uint32_t flash_size) {
+    /* CS0 size in bits 8..11, D8h block erase support in bit 7. */
+    return (uint16_t)(0x0080u | (rv_rom_flash_size_code(flash_size) << 8));
+}
+
+static int rv_rom_is_stub_pc(uint32_t pc) {
+    return pc == RV_ROM_FN_TABLE_LOOKUP ||
+           pc == RV_ROM_FN_TABLE_LOOKUP_ENTRY ||
+           (pc >= RV_ROM_FN_MEMCPY && pc < RV_ROM_FN_LAST);
+}
+
+static uint32_t rv_rom_lookup_address(uint32_t code, uint32_t mask) {
+    if (mask == RV_ROM_RT_FLAG_DATA) {
+        switch (code) {
+        case RV_ROM_DATA_SOFTWARE_GIT_REVISION:
+            return RV_ROM_DATA_GIT_REVISION_STRING;
+        case RV_ROM_DATA_FLASH_DEVINFO16_PTR:
+            return RV_ROM_DATA_FLASH_DEVINFO16_PTR_LITERAL;
+        default:
+            return 0;
+        }
+    }
+
+    if (mask != RV_ROM_RT_FLAG_FUNC_RISCV && mask != RV_ROM_RT_FLAG_FUNC_RISCV_FAR) {
+        return 0;
+    }
+
+    switch (code) {
+    case RV_ROM_CODE_FLASH_ENTER_CMD_XIP:
+        return RV_ROM_FN_FLASH_ENTER;
+    case RV_ROM_CODE_FLASH_EXIT_XIP:
+        return RV_ROM_FN_FLASH_EXIT;
+    case RV_ROM_CODE_FLASH_FLUSH_CACHE:
+        return RV_ROM_FN_FLASH_FLUSH_CACHE;
+    case RV_ROM_CODE_CONNECT_INTERNAL_FLASH:
+        return RV_ROM_FN_CONNECT_INTERNAL_FLASH;
+    case RV_ROM_CODE_FLASH_ERASE:
+        return RV_ROM_FN_FLASH_ERASE;
+    case RV_ROM_CODE_FLASH_PROG:
+        return RV_ROM_FN_FLASH_PROGRAM;
+    case RV_ROM_CODE_BOOTROM_STATE_RESET:
+        return RV_ROM_FN_BOOTROM_STATE_RESET;
+    case RV_ROM_CODE_GET_SYS_INFO:
+        return RV_ROM_FN_GET_SYS_INFO;
+    case RV_ROM_CODE_REBOOT:
+        return RV_ROM_FN_REBOOT;
+    case RV_ROM_CODE_SET_BOOTROM_STACK:
+        return RV_ROM_FN_SET_STACK;
+    default:
+        return 0;
+    }
+}
+
+static int rv_rom_get_sys_info(rv_membus_state_t *bus, uint32_t out_addr,
+                               uint32_t out_words, uint32_t flags) {
+    uint32_t included = flags & RV_ROM_SYS_INFO_SUPPORTED_FLAGS;
+    uint32_t words[16];
+    uint32_t count = 0;
+
+    if (!included) {
+        return RV_BOOTROM_ERROR_INVALID_ARG;
+    }
+
+    words[count++] = included;
+
+    if (included & RV_SYS_INFO_CHIP_INFO) {
+        words[count++] = 0x00000000; /* package_id */
+        words[count++] = 0xB2350001; /* device_id_lo */
+        words[count++] = 0x00000001; /* device_id_hi */
+    }
+    if (included & RV_SYS_INFO_CRITICAL) {
+        words[count++] = 0x00000008; /* default arch = RISC-V, debug enabled */
+    }
+    if (included & RV_SYS_INFO_CPU_INFO) {
+        words[count++] = RV_PICOBIN_CPU_RISCV | (0x02u << 8);
+    }
+    if (included & RV_SYS_INFO_FLASH_DEV_INFO) {
+        words[count++] = rv_rom_flash_devinfo_word(bus->flash_size);
+    }
+    if (included & RV_SYS_INFO_BOOT_RANDOM) {
+        words[count++] = 0x2350C0DE;
+        words[count++] = 0x12345678;
+        words[count++] = 0x89ABCDEF;
+        words[count++] = 0x0BADF00D;
+    }
+    if (included & RV_SYS_INFO_NONCE) {
+        words[count++] = 0x10203040;
+        words[count++] = 0x50607080;
+    }
+    if (included & RV_SYS_INFO_BOOT_INFO) {
+        words[count++] = (uint32_t)RV_BOOT_PARTITION_NONE |
+                         ((uint32_t)RV_BOOT_TYPE_NORMAL << 8) |
+                         ((uint32_t)RV_BOOT_PARTITION_NONE << 16);
+        words[count++] = 0;
+        words[count++] = 0;
+        words[count++] = 0;
+    }
+
+    if (out_words < count) {
+        return RV_BOOTROM_ERROR_BUFFER_TOO_SMALL;
+    }
+
+    for (uint32_t i = 0; i < count; i++) {
+        rv_mem_write32(bus, out_addr + i * 4, words[i]);
+    }
+
+    return (int)count;
+}
+
 /* ========================================================================
  * ROM Initialization
  * ======================================================================== */
 
 uint32_t rv_bootrom_init(uint8_t *rom, uint32_t rom_size,
                          uint32_t flash_base, uint32_t sram_end) {
+    static const struct { uint32_t code; uint32_t addr; } fn_table[] = {
+        { RV_ROM_CODE_FLASH_ENTER_CMD_XIP,   RV_ROM_FN_FLASH_ENTER },
+        { RV_ROM_CODE_FLASH_EXIT_XIP,        RV_ROM_FN_FLASH_EXIT },
+        { RV_ROM_CODE_FLASH_FLUSH_CACHE,     RV_ROM_FN_FLASH_FLUSH_CACHE },
+        { RV_ROM_CODE_CONNECT_INTERNAL_FLASH, RV_ROM_FN_CONNECT_INTERNAL_FLASH },
+        { RV_ROM_CODE_FLASH_ERASE,           RV_ROM_FN_FLASH_ERASE },
+        { RV_ROM_CODE_FLASH_PROG,            RV_ROM_FN_FLASH_PROGRAM },
+        { RV_ROM_CODE_BOOTROM_STATE_RESET,   RV_ROM_FN_BOOTROM_STATE_RESET },
+        { RV_ROM_CODE_GET_SYS_INFO,          RV_ROM_FN_GET_SYS_INFO },
+        { RV_ROM_CODE_REBOOT,                RV_ROM_FN_REBOOT },
+        { RV_ROM_CODE_SET_BOOTROM_STACK,     RV_ROM_FN_SET_STACK },
+        { 0, 0 }
+    };
+    static const struct { uint32_t code; uint32_t addr; } data_table[] = {
+        { RV_ROM_DATA_SOFTWARE_GIT_REVISION, RV_ROM_DATA_GIT_REVISION_STRING },
+        { RV_ROM_DATA_FLASH_DEVINFO16_PTR,   RV_ROM_DATA_FLASH_DEVINFO16_PTR_LITERAL },
+        { 0, 0 }
+    };
+
     memset(rom, 0, rom_size);
 
     /* 0x0000: JAL x0, 0x20 (jump to boot code at 0x20) */
@@ -78,8 +226,11 @@ uint32_t rv_bootrom_init(uint8_t *rom, uint32_t rom_size,
     /* 0x0010: Magic and table pointers (RP2350 ROM header) */
     rom[0x10] = 'R'; rom[0x11] = 'P'; rom[0x12] = 0x02; rom[0x13] = 0x00;
     rom_w32(rom, 0x14, 0x0100);  /* Function table at 0x0100 */
-    rom_w32(rom, 0x18, 0x0200);  /* Data table at 0x0200 */
+    rom_w32(rom, 0x18, RV_ROM_DATA_TABLE_BASE);  /* Data table */
     rom_w32(rom, 0x1C, RV_ROM_FN_TABLE_LOOKUP); /* Lookup function */
+    rom_w16(rom, RV_ROM_WELL_KNOWN_LOOKUP_PTR, RV_ROM_FN_TABLE_LOOKUP);
+    rom_w16(rom, RV_ROM_WELL_KNOWN_LOOKUP_ENTRY, RV_ROM_FN_TABLE_LOOKUP_ENTRY);
+    rom_w16(rom, RV_ROM_WELL_KNOWN_ENTRY, 0x0000);
 
     /* 0x0020: Boot code */
     uint32_t sp_upper = sram_end & 0xFFFFF000;
@@ -102,18 +253,6 @@ uint32_t rv_bootrom_init(uint8_t *rom, uint32_t rom_size,
     rom_w32(rom, pc, rv_jalr(0, 5, 0)); pc += 4;
 
     /* 0x0100: Function table entries [32-bit code, 32-bit address] */
-    struct { uint32_t code; uint32_t addr; } fn_table[] = {
-        { RV_ROM_CODE_MEMCPY,      RV_ROM_FN_MEMCPY },
-        { RV_ROM_CODE_MEMSET,      RV_ROM_FN_MEMSET },
-        { RV_ROM_CODE_POPCOUNT,    RV_ROM_FN_POPCOUNT32 },
-        { RV_ROM_CODE_CLZ,         RV_ROM_FN_CLZ32 },
-        { RV_ROM_CODE_CTZ,         RV_ROM_FN_CTZ32 },
-        { RV_ROM_CODE_REVERSE,     RV_ROM_FN_REVERSE32 },
-        { RV_ROM_CODE_FLASH_ERASE, RV_ROM_FN_FLASH_ERASE },
-        { RV_ROM_CODE_FLASH_PROG,  RV_ROM_FN_FLASH_PROGRAM },
-        { RV_ROM_CODE_REBOOT,      RV_ROM_FN_REBOOT },
-        { 0, 0 }  /* End sentinel */
-    };
     uint32_t tbl = 0x0100;
     for (int i = 0; fn_table[i].code != 0; i++) {
         rom_w32(rom, tbl, fn_table[i].code);
@@ -122,40 +261,35 @@ uint32_t rv_bootrom_init(uint8_t *rom, uint32_t rom_size,
     }
     rom_w32(rom, tbl, 0);  /* End sentinel */
 
-    /* 0x0200: Data table (empty for now) */
-    rom_w32(rom, 0x0200, 0);
+    /* 0x0200: Data blobs returned by rom_data_lookup() */
+    rom_w32(rom, RV_ROM_DATA_FLASH_DEVINFO16_PTR_LITERAL, RV_ROM_DATA_FLASH_DEVINFO16_WORD);
+    rom_w16(rom, RV_ROM_DATA_FLASH_DEVINFO16_WORD, rv_rom_flash_devinfo_word(RP2350_FLASH_DEFAULT));
+    memcpy(&rom[RV_ROM_DATA_GIT_REVISION_STRING], "bramble-rv", sizeof("bramble-rv"));
 
-    /* 0x0300: Table lookup function (RISC-V code)
-     * a0 = table pointer, a1 = code to find
-     * Returns function pointer in a0 (or 0 if not found)
+    /* 0x0280: Data table entries [32-bit code, 32-bit address] */
+    tbl = RV_ROM_DATA_TABLE_BASE;
+    for (int i = 0; data_table[i].code != 0; i++) {
+        rom_w32(rom, tbl, data_table[i].code);
+        rom_w32(rom, tbl + 4, data_table[i].addr);
+        tbl += 8;
+    }
+    rom_w32(rom, tbl, 0);
+
+    /* 0x0300: RP2350 well-known lookup entrypoints. The actual dispatch happens
+     * in rv_rom_intercept(), so the ROM bodies are simple RET stubs.
      */
-    pc = RV_ROM_FN_TABLE_LOOKUP;
-    /* loop: LW t0, 0(a0) — load entry code */
-    rom_w32(rom, pc, 0x00052283); pc += 4;  /* lw t0, 0(a0) */
-    /* BEQ t0, x0, not_found (+20) */
-    rom_w32(rom, pc, 0x00028a63); pc += 4;  /* beq t0, zero, +20 */
-    /* BEQ t0, a1, found (+12) */
-    rom_w32(rom, pc, 0x00b28663); pc += 4;  /* beq t0, a1, +12 */
-    /* ADDI a0, a0, 8 — next entry */
-    rom_w32(rom, pc, 0x00850513); pc += 4;  /* addi a0, a0, 8 */
-    /* JAL x0, loop (-16) */
-    rom_w32(rom, pc, rv_jal(0, -16)); pc += 4;
-    /* found: LW a0, 4(a0) — load function pointer */
-    rom_w32(rom, pc, 0x00452503); pc += 4;  /* lw a0, 4(a0) */
-    /* RET */
-    rom_w32(rom, pc, rv_ret()); pc += 4;
-    /* not_found: ADDI a0, x0, 0 */
-    rom_w32(rom, pc, rv_addi(10, 0, 0)); pc += 4;
-    /* RET */
-    rom_w32(rom, pc, rv_ret()); pc += 4;
+    rom_w32(rom, RV_ROM_FN_TABLE_LOOKUP, rv_ret());
+    rom_w32(rom, RV_ROM_FN_TABLE_LOOKUP_ENTRY, rv_ret());
 
     /* 0x0400+: Function stubs — all are simple RET (intercepted by rv_rom_intercept) */
     for (uint32_t addr = RV_ROM_FN_MEMCPY; addr < RV_ROM_FN_LAST && addr + 4 <= rom_size; addr += 4) {
         rom_w32(rom, addr, rv_ret());
     }
 
-    fprintf(stderr, "[RV-BOOT] ROM initialized: SP=0x%08X, entry=0x%08X, %d ROM functions\n",
-            sram_end, flash_base, (int)(sizeof(fn_table)/sizeof(fn_table[0]) - 1));
+    fprintf(stderr, "[RV-BOOT] ROM initialized: SP=0x%08X, entry=0x%08X, %d ROM functions, %d data entries\n",
+            sram_end, flash_base,
+            (int)(sizeof(fn_table) / sizeof(fn_table[0]) - 1),
+            (int)(sizeof(data_table) / sizeof(data_table[0]) - 1));
 
     return 0x00000000;
 }
@@ -169,7 +303,7 @@ uint32_t rv_bootrom_init(uint8_t *rom, uint32_t rom_size,
 
 int rv_rom_intercept(rv_cpu_state_t *cpu) {
     uint32_t pc = cpu->pc;
-    if (pc < RV_ROM_FN_MEMCPY || pc >= RV_ROM_FN_LAST) return 0;
+    if (!rv_rom_is_stub_pc(pc)) return 0;
 
     rv_membus_state_t *bus = (rv_membus_state_t *)cpu->bus;
     if (!bus) return 0;
@@ -179,6 +313,15 @@ int rv_rom_intercept(rv_cpu_state_t *cpu) {
     uint32_t a2 = cpu->x[12];
 
     switch (pc) {
+    case RV_ROM_FN_TABLE_LOOKUP:
+    case RV_ROM_FN_TABLE_LOOKUP_ENTRY:
+        cpu->x[10] = rv_rom_lookup_address(a0, a1);
+        if (cpu->debug_enabled && cpu->x[10] == 0) {
+            fprintf(stderr, "[RV-ROM] unresolved lookup code=0x%04X mask=0x%X\n",
+                    a0 & 0xFFFF, a1);
+        }
+        break;
+
     case RV_ROM_FN_MEMCPY:
     case RV_ROM_FN_MEMCPY4: {
         /* memcpy(dst, src, len) — a0=dst, a1=src, a2=len */
@@ -225,6 +368,9 @@ int rv_rom_intercept(rv_cpu_state_t *cpu) {
 
     case RV_ROM_FN_FLASH_ENTER:
     case RV_ROM_FN_FLASH_EXIT:
+    case RV_ROM_FN_FLASH_FLUSH_CACHE:
+    case RV_ROM_FN_CONNECT_INTERNAL_FLASH:
+    case RV_ROM_FN_BOOTROM_STATE_RESET:
         /* Flash connect/exit XIP — no-op in emulator */
         break;
 
@@ -254,13 +400,18 @@ int rv_rom_intercept(rv_cpu_state_t *cpu) {
         break;
     }
 
+    case RV_ROM_FN_GET_SYS_INFO:
+        cpu->x[10] = (uint32_t)rv_rom_get_sys_info(bus, a0, a1, a2);
+        break;
+
     case RV_ROM_FN_REBOOT:
         fprintf(stderr, "[RV-ROM] Reboot requested\n");
+        cpu->x[10] = RV_BOOTROM_OK;
         cpu->is_halted = 1;
         break;
 
     case RV_ROM_FN_SET_STACK:
-        cpu->x[2] = a0;  /* Set SP */
+        cpu->x[10] = RV_BOOTROM_OK;
         break;
 
     default:

@@ -29,34 +29,74 @@
 #include <stdint.h>
 #include "rp2350_rv/rv_cpu.h"
 
-/* ROM function addresses (stubs placed here, intercepted by PC) */
-#define RV_ROM_FN_TABLE_LOOKUP  0x0300
-#define RV_ROM_FN_MEMCPY        0x0400
-#define RV_ROM_FN_MEMSET        0x0404
-#define RV_ROM_FN_MEMCPY4       0x0408
-#define RV_ROM_FN_MEMSET4       0x040C
-#define RV_ROM_FN_POPCOUNT32    0x0410
-#define RV_ROM_FN_CLZ32         0x0414
-#define RV_ROM_FN_CTZ32         0x0418
-#define RV_ROM_FN_REVERSE32     0x041C
-#define RV_ROM_FN_FLASH_ENTER   0x0420
-#define RV_ROM_FN_FLASH_EXIT    0x0424
-#define RV_ROM_FN_FLASH_ERASE   0x0428
-#define RV_ROM_FN_FLASH_PROGRAM 0x042C
-#define RV_ROM_FN_REBOOT        0x0430
-#define RV_ROM_FN_SET_STACK     0x0434
-#define RV_ROM_FN_LAST          0x0438
+/* RP2350 bootrom well-known offsets */
+#define RV_ROM_WELL_KNOWN_PTR_SIZE      2
+#define RV_ROM_WELL_KNOWN_LOOKUP_PTR    0x7DF8
+#define RV_ROM_WELL_KNOWN_LOOKUP_ENTRY  0x7DFA
+#define RV_ROM_WELL_KNOWN_ENTRY         0x7DFC
 
-/* ROM function table codes (used by rom_func_lookup) */
-#define RV_ROM_CODE_MEMCPY       0x4350  /* 'CP' */
-#define RV_ROM_CODE_MEMSET       0x5453  /* 'ST' */
-#define RV_ROM_CODE_POPCOUNT     0x5043  /* 'PC' */
-#define RV_ROM_CODE_CLZ          0x5A4C  /* 'ZL' */
-#define RV_ROM_CODE_CTZ          0x5A54  /* 'ZT' */
-#define RV_ROM_CODE_REVERSE      0x5652  /* 'RV' */
-#define RV_ROM_CODE_FLASH_ERASE  0x4552  /* 'RE' */
-#define RV_ROM_CODE_FLASH_PROG   0x5052  /* 'RP' */
-#define RV_ROM_CODE_REBOOT       0x4252  /* 'RB' */
+/* ROM function addresses (stubs placed here, intercepted by PC) */
+#define RV_ROM_FN_TABLE_LOOKUP        0x0300
+#define RV_ROM_FN_TABLE_LOOKUP_ENTRY  0x0304
+#define RV_ROM_FN_MEMCPY              0x0400
+#define RV_ROM_FN_MEMSET              0x0404
+#define RV_ROM_FN_MEMCPY4             0x0408
+#define RV_ROM_FN_MEMSET4             0x040C
+#define RV_ROM_FN_POPCOUNT32          0x0410
+#define RV_ROM_FN_CLZ32               0x0414
+#define RV_ROM_FN_CTZ32               0x0418
+#define RV_ROM_FN_REVERSE32           0x041C
+#define RV_ROM_FN_FLASH_ENTER         0x0420
+#define RV_ROM_FN_FLASH_EXIT          0x0424
+#define RV_ROM_FN_FLASH_ERASE         0x0428
+#define RV_ROM_FN_FLASH_PROGRAM       0x042C
+#define RV_ROM_FN_FLASH_FLUSH_CACHE   0x0430
+#define RV_ROM_FN_CONNECT_INTERNAL_FLASH 0x0434
+#define RV_ROM_FN_BOOTROM_STATE_RESET 0x0438
+#define RV_ROM_FN_GET_SYS_INFO        0x043C
+#define RV_ROM_FN_REBOOT              0x0440
+#define RV_ROM_FN_SET_STACK           0x0444
+#define RV_ROM_FN_LAST                0x0448
+
+/* RP2350 table lookup flags */
+#define RV_ROM_RT_FLAG_FUNC_RISCV      0x0001
+#define RV_ROM_RT_FLAG_FUNC_RISCV_FAR  0x0003
+#define RV_ROM_RT_FLAG_DATA            0x0040
+
+/* RP2350 bootrom error codes */
+#define RV_BOOTROM_OK                     0
+#define RV_BOOTROM_ERROR_INVALID_ARG     -5
+#define RV_BOOTROM_ERROR_BUFFER_TOO_SMALL -13
+
+/* ROM function/data table codes (matches Pico SDK bootrom_constants.h) */
+#define RV_ROM_TABLE_CODE(c1, c2)     ((uint32_t)(c1) | ((uint32_t)(c2) << 8))
+#define RV_ROM_CODE_CONNECT_INTERNAL_FLASH RV_ROM_TABLE_CODE('I', 'F')
+#define RV_ROM_CODE_FLASH_EXIT_XIP        RV_ROM_TABLE_CODE('E', 'X')
+#define RV_ROM_CODE_FLASH_FLUSH_CACHE     RV_ROM_TABLE_CODE('F', 'C')
+#define RV_ROM_CODE_FLASH_ENTER_CMD_XIP   RV_ROM_TABLE_CODE('C', 'X')
+#define RV_ROM_CODE_FLASH_ERASE           RV_ROM_TABLE_CODE('R', 'E')
+#define RV_ROM_CODE_FLASH_PROG            RV_ROM_TABLE_CODE('R', 'P')
+#define RV_ROM_CODE_REBOOT                RV_ROM_TABLE_CODE('R', 'B')
+#define RV_ROM_CODE_BOOTROM_STATE_RESET   RV_ROM_TABLE_CODE('S', 'R')
+#define RV_ROM_CODE_SET_BOOTROM_STACK     RV_ROM_TABLE_CODE('S', 'S')
+#define RV_ROM_CODE_GET_SYS_INFO          RV_ROM_TABLE_CODE('G', 'S')
+#define RV_ROM_DATA_SOFTWARE_GIT_REVISION RV_ROM_TABLE_CODE('G', 'R')
+#define RV_ROM_DATA_FLASH_DEVINFO16_PTR   RV_ROM_TABLE_CODE('F', 'D')
+
+/* SYS_INFO flags */
+#define RV_SYS_INFO_CHIP_INFO       0x0001
+#define RV_SYS_INFO_CRITICAL        0x0002
+#define RV_SYS_INFO_CPU_INFO        0x0004
+#define RV_SYS_INFO_FLASH_DEV_INFO  0x0008
+#define RV_SYS_INFO_BOOT_RANDOM     0x0010
+#define RV_SYS_INFO_NONCE           0x0020
+#define RV_SYS_INFO_BOOT_INFO       0x0040
+
+/* Boot type / CPU identifiers used in synthesized sys info */
+#define RV_BOOT_TYPE_NORMAL         0x00
+#define RV_BOOT_PARTITION_NONE      0xFF
+#define RV_PICOBIN_CPU_ARM          0x00
+#define RV_PICOBIN_CPU_RISCV        0x01
 
 /* Populate the RP2350 ROM buffer with RISC-V bootrom code and function table. */
 uint32_t rv_bootrom_init(uint8_t *rom, uint32_t rom_size,
