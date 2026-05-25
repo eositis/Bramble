@@ -911,7 +911,12 @@ skip_fuse:
     }
 
     fprintf(stderr,"[Init] Initializing dual-core RP2040 emulator...\n");
+    /* dual_core_init() resets num_active_cores to 1; preserve -cores N from argv */
+    int user_active_cores = num_active_cores;
     dual_core_init();
+    if (user_active_cores > 1) {
+        num_active_cores = user_active_cores;
+    }
 
     /* JIT basic block compilation */
     if (jit_mode) {

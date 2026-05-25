@@ -18,3 +18,4 @@ bramble_tests
 python/
 mpy.bin
 cpy.bin
+megaflash.uf2
