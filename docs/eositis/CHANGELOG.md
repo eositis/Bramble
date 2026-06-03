@@ -89,9 +89,7 @@ No local changes in this section. Upstream includes through v0.45.0: virtual net
 
 ---
 
-## Unreleased
-
-### UART console (`-uart-console`, docs)
+## 2026-06-02 — `b7c543a` — UART TCP console aliases
 
 | Change | Reason |
 |--------|--------|
@@ -99,3 +97,9 @@ No local changes in this section. Upstream includes through v0.45.0: virtual net
 | `-uart-console-mirror` | Optional guest TX copy to host stderr |
 | `docs/eositis/UART-CONSOLE.md`, `scripts/connect-uart-console.sh` | Usage for nc/socat; Windows via WSL/PuTTY |
 | `UART_CONSOLE_PORT` in `run-megaflash-stub.sh` | Optional TCP console when running MegaFlash stub |
+
+---
+
+## Unreleased
+
+*(none)*

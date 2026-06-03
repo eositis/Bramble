@@ -111,7 +111,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Finding** | Already implemented as `-net-uart0` / `netbridge.c`; added discoverable aliases and docs |
 | **Actions** | `-uart-console`, `-uart-console-mirror`, `scripts/connect-uart-console.sh`, `docs/eositis/UART-CONSOLE.md` |
 | **Outcome** | Use `nc localhost 4444` with `-uart-console 4444`; Windows via WSL or remote TCP client |
-| **Commit** | *(pending)* |
+| **Commit** | `b7c543a` — feat(uart): -uart-console aliases and docs |
 
 ---
 
