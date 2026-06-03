@@ -58,6 +58,7 @@ set(EMU_SOURCES
     src/cyw43.c
     src/tapif.c
     src/devtools.c
+    src/a2bus.c
     src/vnet.c
     src/sdd.c
     src/sdd_thermo.c

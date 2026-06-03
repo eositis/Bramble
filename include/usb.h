@@ -172,4 +172,7 @@ int      usb_cdc_stdio_active(void);
 /* Set to 1 to allow USB CDC IN data to appear on stdout (set by -stdin flag) */
 extern int usb_cdc_stdout_enabled;
 
+/* Set to 1 to log USB host enumeration state transitions to stderr (-trace-usb) */
+extern int usb_enum_trace_enabled;
+
 #endif /* USB_H */

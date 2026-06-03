@@ -92,6 +92,17 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 
 ---
 
+## 2026-06-02 — Session: Commit MegaFlash bring-up WIP
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Commit current state |
+| **Actions** | Staged all MegaFlash emulator changes (`cpu`, `membus`, `thumb32`, `nvic`, `a2bus`, `scripts`, tests); stripped agent debug log blocks to `~/Documents/junk/`; verified `321/321` tests |
+| **Outcome** | Full working-tree snapshot on `main` |
+| **Commit** | *(see git log — `feat(megaflash): …`)* |
+
+---
+
 <!-- Template for future entries:
 
 ## YYYY-MM-DD — Session: <title>

@@ -21,6 +21,59 @@
 
 usb_state_t usb_state;
 int usb_cdc_stdout_enabled = 0;
+int usb_enum_trace_enabled = 0;
+
+static const char *usb_enum_state_name(usb_enum_state_t state) {
+    switch (state) {
+    case USB_ENUM_DISABLED: return "DISABLED";
+    case USB_ENUM_WAIT_PULLUP: return "WAIT_PULLUP";
+    case USB_ENUM_BUS_RESET: return "BUS_RESET";
+    case USB_ENUM_GET_DESC_8: return "GET_DESC_8";
+    case USB_ENUM_SET_ADDRESS: return "SET_ADDRESS";
+    case USB_ENUM_GET_DESC_FULL: return "GET_DESC_FULL";
+    case USB_ENUM_GET_CONFIG_SHORT: return "GET_CONFIG_SHORT";
+    case USB_ENUM_GET_CONFIG_FULL: return "GET_CONFIG_FULL";
+    case USB_ENUM_SET_CONFIG: return "SET_CONFIG";
+    case USB_ENUM_CDC_SET_LINE_CODING: return "CDC_SET_LINE_CODING";
+    case USB_ENUM_CDC_SET_CTRL_LINE: return "CDC_SET_CTRL_LINE";
+    case USB_ENUM_ACTIVE: return "ACTIVE";
+    default: return "?";
+    }
+}
+
+static const char *usb_ctrl_state_name(usb_ctrl_state_t state) {
+    switch (state) {
+    case USB_CTRL_IDLE: return "IDLE";
+    case USB_CTRL_SETUP_SENT: return "SETUP_SENT";
+    case USB_CTRL_WAIT_DATA_IN: return "WAIT_DATA_IN";
+    case USB_CTRL_WAIT_STATUS_OUT: return "WAIT_STATUS_OUT";
+    case USB_CTRL_WAIT_DATA_OUT: return "WAIT_DATA_OUT";
+    case USB_CTRL_WAIT_STATUS_IN: return "WAIT_STATUS_IN";
+    case USB_CTRL_DONE: return "DONE";
+    default: return "?";
+    }
+}
+
+static void usb_trace_status(const char *note) {
+    if (!usb_enum_trace_enabled) {
+        return;
+    }
+
+    fprintf(stderr,
+            "[USB-trace] %s enum=%s ctrl=%s delay=%d main_en=%d pullup=%d "
+            "setup_rec=%d cdc_in=%d cdc_out=%d stdio_active=%d stdout_bridge=%d\n",
+            note ? note : "status",
+            usb_enum_state_name(usb_state.enum_state),
+            usb_ctrl_state_name(usb_state.ctrl_state),
+            usb_state.delay,
+            (usb_state.main_ctrl & USB_MAIN_CTRL_EN) ? 1 : 0,
+            (usb_state.sie_ctrl & USB_SIE_CTRL_PULLUP_EN) ? 1 : 0,
+            (usb_state.sie_status & USB_SIE_SETUP_REC) ? 1 : 0,
+            usb_state.cdc_in_ep,
+            usb_state.cdc_out_ep,
+            usb_cdc_stdio_active(),
+            usb_cdc_stdout_enabled);
+}
 
 /* ========================================================================
  * DPRAM Helpers
@@ -489,15 +542,27 @@ static void usb_cdc_rx_drain(void) {
  * ======================================================================== */
 
 void usb_step(void) {
+    static usb_enum_state_t trace_last_enum = USB_ENUM_DISABLED;
+    static usb_ctrl_state_t trace_last_ctrl = USB_CTRL_IDLE;
+    static int trace_logged_enable = 0;
+
     /* Only active when controller is enabled */
     if (!(usb_state.main_ctrl & USB_MAIN_CTRL_EN)) {
         return;
+    }
+
+    if (usb_enum_trace_enabled && !trace_logged_enable) {
+        trace_logged_enable = 1;
+        usb_trace_status("controller enabled");
     }
 
     /* First time enabled: start enumeration */
     if (usb_state.enum_state == USB_ENUM_DISABLED) {
         usb_state.enum_state = USB_ENUM_WAIT_PULLUP;
         usb_state.sie_status |= USB_SIE_VBUS_DETECTED;
+        if (usb_enum_trace_enabled) {
+            usb_trace_status("VBUS detected, waiting for pull-up");
+        }
     }
 
     /* Advance control transfer */
@@ -505,6 +570,17 @@ void usb_step(void) {
 
     /* Advance enumeration */
     usb_enum_step();
+
+    if (usb_enum_trace_enabled &&
+        (usb_state.enum_state != trace_last_enum ||
+         usb_state.ctrl_state != trace_last_ctrl)) {
+        usb_trace_status("transition");
+        trace_last_enum = usb_state.enum_state;
+        trace_last_ctrl = usb_state.ctrl_state;
+        if (usb_state.enum_state == USB_ENUM_ACTIVE) {
+            usb_trace_status("enumeration complete");
+        }
+    }
 
     /* Handle CDC data when active */
     if (usb_state.enum_state == USB_ENUM_ACTIVE) {
@@ -589,8 +665,15 @@ uint32_t usb_read32(uint32_t addr) {
 }
 
 void usb_write32(uint32_t addr, uint32_t val) {
+    static int trace_write_budget = 40;
     uint32_t base = addr & ~0x3000;
     uint32_t alias = (addr >> 12) & 0x3;
+
+    if (usb_enum_trace_enabled && trace_write_budget > 0) {
+        trace_write_budget--;
+        fprintf(stderr, "[USB-trace] write32 addr=0x%08X val=0x%08X base=0x%08X\n",
+                addr, val, base);
+    }
 
     /* DPRAM writes (no alias for DPRAM) */
     if (base >= USBCTRL_DPRAM_BASE && base < USBCTRL_DPRAM_BASE + USBCTRL_DPRAM_SIZE) {
@@ -628,9 +711,15 @@ void usb_write32(uint32_t addr, uint32_t val) {
         break;
     case USB_MAIN_CTRL:
         ALIAS_APPLY(usb_state.main_ctrl);
+        if (usb_enum_trace_enabled) {
+            usb_trace_status("write MAIN_CTRL");
+        }
         break;
     case USB_SIE_CTRL:
         ALIAS_APPLY(usb_state.sie_ctrl);
+        if (usb_enum_trace_enabled) {
+            usb_trace_status("write SIE_CTRL");
+        }
         break;
     case USB_SIE_STATUS:
         /* W1C for most bits */

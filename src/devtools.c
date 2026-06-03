@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include "emulator.h"
 #include "devtools.h"
+#include "a2bus.h"
 
 /* ========================================================================
  * ARM Semihosting
@@ -533,8 +534,8 @@ int script_enabled = 0;
 
 typedef struct {
     uint32_t time_us;
-    int type;     /* 0=uart, 1=gpio */
-    int channel;  /* uart num or gpio pin */
+    int type;     /* 0=uart, 1=gpio, 2=a2phi, 3=a2read, 4=a2write, 5=pioburst, 6=core1launch */
+    int channel;  /* uart num, gpio pin, addr nibble, or burst count */
     uint8_t data[256];
     int data_len;
     int gpio_val;
@@ -586,6 +587,27 @@ int script_init(const char *path) {
             ev->type = 1;
             ev->channel = atoi(cmd + 4);
             ev->gpio_val = atoi(arg);
+        } else if (strcmp(cmd, "a2phi") == 0) {
+            ev->type = 2;
+        } else if (strcmp(cmd, "a2read") == 0) {
+            ev->type = 3;
+            ev->channel = (int)strtoul(arg, NULL, 0);
+        } else if (strcmp(cmd, "a2write") == 0) {
+            unsigned addr = 0, data = 0;
+            if (sscanf(arg, "%u %u", &addr, &data) >= 2) {
+                ev->type = 4;
+                ev->channel = (int)addr;
+                ev->gpio_val = (int)data;
+            }
+        } else if (strcmp(cmd, "pioburst") == 0) {
+            ev->type = 5;
+            ev->channel = atoi(arg);
+            if (ev->channel <= 0) ev->channel = 64;
+        } else if (strcmp(cmd, "core1launch") == 0) {
+            ev->type = 6;
+            strncpy((char *)ev->data, arg, sizeof(ev->data) - 1);
+            ev->data[sizeof(ev->data) - 1] = '\0';
+            ev->data_len = (int)strlen((char *)ev->data);
         }
     }
     fclose(f);
@@ -610,6 +632,38 @@ void script_poll(uint32_t elapsed_us) {
             }
         } else if (ev->type == 1) {
             gpio_set_input_pin((uint8_t)ev->channel, (uint8_t)ev->gpio_val);
+            a2bus_pio_burst(8);
+        } else if (ev->type == 2) {
+            a2bus_phi0_pulse_for_detect();
+        } else if (ev->type == 3) {
+            a2bus_inject_read((uint8_t)ev->channel);
+        } else if (ev->type == 4) {
+            a2bus_inject_write((uint8_t)ev->channel, (uint8_t)ev->gpio_val);
+        } else if (ev->type == 5) {
+            a2bus_pio_burst((unsigned)ev->channel);
+        } else if (ev->type == 6) {
+            /* MegaFlash defaults: core1Main@0x20000120, stack@0x20080800, VTOR@0x10000100 */
+            uint32_t entry = 0x20000120u;
+            uint32_t sp = 0x20080800u;
+            uint32_t vtor = 0x10000100u;
+            if (ev->data_len > 0) {
+                unsigned e = 0, s = 0, v = 0;
+                int n = sscanf((char *)ev->data, "%x %x %x", &e, &s, &v);
+                if (n >= 1) entry = e;
+                if (n >= 2) sp = s;
+                if (n >= 3) vtor = v;
+            }
+            if (!cores[CORE1].is_halted && cores[CORE1].r[15] != 0 &&
+                cores[CORE1].r[15] != 0xFFFFFFFFu) {
+                continue;
+            }
+            sio_force_core1_launch(entry, sp, vtor);
+            /* Retry until launch succeeds (guest may not be ready at first script time). */
+            if (cores[CORE1].is_halted || cores[CORE1].r[15] == 0) {
+                ev->fired = 0;
+            } else {
+                fprintf(stderr, "[Script] core1 running at PC=0x%08X\n", cores[CORE1].r[15]);
+            }
         }
     }
 }

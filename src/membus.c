@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/time.h>
 #include "emulator.h"
 #include "gpio.h"
 #include "timer.h"
@@ -18,6 +19,7 @@
 #include "rtc.h"
 #include "gdb.h"
 #include "devtools.h"
+#include "thumb32.h"
 
 /* ========================================================================
  * XIP Cache Control State (0x14000000)
@@ -546,6 +548,94 @@ static inline uint8_t *get_ram(void) {
     return active_ram;
 }
 
+int mem_guest_memset(uint32_t dest, int val, uint32_t len) {
+    if (!active_ram || len == 0) {
+        return 0;
+    }
+    if (dest < active_ram_base || dest + len > active_ram_base + active_ram_size) {
+        return 0;
+    }
+    memset(get_ram() + (dest - active_ram_base), val & 0xFF, len);
+    icache_invalidate_range(dest, len);
+    return 1;
+}
+
+int mem_guest_memcpy(uint32_t dest, uint32_t src_flash, uint32_t len) {
+    if (!active_ram || len == 0) {
+        return 0;
+    }
+    if (dest < active_ram_base || dest + len > active_ram_base + active_ram_size) {
+        return 0;
+    }
+    if (src_flash < FLASH_BASE || src_flash + len > FLASH_BASE + FLASH_SIZE) {
+        return 0;
+    }
+    memcpy(get_ram() + (dest - active_ram_base),
+           cpu.flash + (src_flash - FLASH_BASE), len);
+    icache_invalidate_range(dest, len);
+    return 1;
+}
+
+int mem_guest_memset_words(uint32_t dest, uint32_t word, uint32_t len) {
+    if (!active_ram || len == 0 || (len & 3u)) {
+        return 0;
+    }
+    if (dest < active_ram_base || dest + len > active_ram_base + active_ram_size) {
+        return 0;
+    }
+    uint8_t *base = get_ram() + (dest - active_ram_base);
+    for (uint32_t off = 0; off < len; off += 4) {
+        memcpy(base + off, &word, 4);
+    }
+    icache_invalidate_range(dest, len);
+    return 1;
+}
+
+/* Wake a single alarm-pool node (handler in flash, wake byte at +8). */
+void membus_alarm_pool_wake_node(uint32_t node_addr) {
+    if (node_addr < active_ram_base || node_addr + 8 >= active_ram_base + active_ram_size)
+        return;
+    uint8_t *ram = get_ram();
+    uint32_t off = node_addr - active_ram_base;
+    uint32_t handler;
+    memcpy(&handler, ram + off + 4, 4);
+    if (handler < FLASH_BASE || handler >= FLASH_BASE + FLASH_SIZE)
+        return;
+    ram[off + 8] = 1;
+}
+
+void membus_alarm_pool_wake_pending(void) {
+    uint32_t fired = timer_state.intr & 0xFu;
+    if (membus_rp2350_mode && membus_rp2350_periph) {
+        rp2350_timer1_state_t *t1 = &((rp2350_periph_state_t *)membus_rp2350_periph)->timer1;
+        fired |= t1->intr & 0xFu;
+    }
+    if (!fired)
+        return;
+
+    uint8_t *ram = get_ram();
+    uint32_t woke = 0;
+    for (uint32_t off = 0; off + 9 < active_ram_size; off += 4) {
+        uint32_t next;
+        uint32_t handler;
+        memcpy(&next, ram + off, 4);
+        memcpy(&handler, ram + off + 4, 4);
+        if (!(handler & 1u))
+            continue;
+        uint32_t h = handler & ~1u;
+        if (h < FLASH_BASE || h >= FLASH_BASE + FLASH_SIZE)
+            continue;
+        if (next != 0 && next != 0x400B0000u && next != 0x400B8000u &&
+            (next < active_ram_base || next >= active_ram_base + active_ram_size))
+            continue;
+        if (ram[off + 8] == 0) {
+            ram[off + 8] = 1;
+            woke++;
+        }
+    }
+    
+}
+
 /* ========================================================================
  * Clock-Domain Peripheral Address Check
  *
@@ -781,6 +871,19 @@ static void sio_interp_write(int interp_idx, uint32_t reg_offset, uint32_t val) 
 
 static uint32_t sio_fifo_sticky[NUM_CORES] = {0};
 
+/* Map secure or non-secure SIO window to a core-local register offset. */
+static inline int sio_reg_offset(uint32_t addr, uint32_t *offset_out) {
+    if (addr >= SIO_BASE && addr < SIO_BASE + 0x200) {
+        *offset_out = addr - SIO_BASE;
+        return 1;
+    }
+    if (membus_rp2350_mode && addr >= SIO_NONSEC_BASE && addr < SIO_NONSEC_BASE + 0x200) {
+        *offset_out = addr - SIO_NONSEC_BASE;
+        return 1;
+    }
+    return 0;
+}
+
 static inline int sio_current_core(void) {
     int core_id = get_active_core();
     if (core_id < 0 || core_id >= NUM_CORES) {
@@ -927,6 +1030,10 @@ static void sio_write32(uint32_t offset, uint32_t val) {
         sio_fifo_sticky[core_id] &= ~(val & (SIO_FIFO_ST_ROE | SIO_FIFO_ST_WOF));
         break;
     case SIO_FIFO_WR_OFFSET:
+        sio_fifo_wr_total++;
+        if (multicore_trace_enabled) {
+            fprintf(stderr, "[MC-trace] SIO FIFO_WR core%d <- 0x%08X\n", core_id, val);
+        }
         if (other_core == CORE1 && sio_core1_bootrom_handle_fifo_write(val)) {
             break;
         }
@@ -1107,10 +1214,19 @@ void mem_write32(uint32_t addr, uint32_t val) {
         return;
     }
 
-    /* SIO core-local registers */
-    if (addr >= SIO_BASE && addr < SIO_BASE + 0x100) {
-        sio_write32(addr - SIO_BASE, val);
+    /* RP2350 TIMER0 (0x400B0000) / TIMER1 (0x400B8000) — before late rp2350 routing */
+    if (membus_rp2350_mode && get_rp2350_periph() && timer_rp2350_bus_match(addr)) {
+        timer_rp2350_bus_write32(get_rp2350_periph(), addr, val);
         return;
+    }
+
+    /* SIO core-local registers (secure + RP2350 non-secure alias) */
+    {
+        uint32_t sio_off;
+        if (sio_reg_offset(addr, &sio_off)) {
+            sio_write32(sio_off, val);
+            return;
+        }
     }
 
     /* GPIO registers - IO_BANK0 base + atomic alias regions for interrupt registers.
@@ -1425,13 +1541,25 @@ void mem_write16(uint32_t addr, uint16_t val) {
 
     /* Stub out peripheral writes for now. */
     if (addr >= 0x40000000 && addr < 0x50000000) return;   /* APB/AHB peripherals */
-    if (addr >= SIO_BASE     && addr < SIO_BASE + 0x1000) return;
+    {
+        uint32_t sio_off;
+        if (sio_reg_offset(addr, &sio_off)) {
+            uint32_t cur = sio_read32(sio_off & ~3u);
+            uint32_t bo = addr & 2u;
+            uint32_t mask = 0xFFFFu << (bo * 8);
+            sio_write32(sio_off & ~3u, (cur & ~mask) | ((uint32_t)val << (bo * 8)));
+            return;
+        }
+    }
+    if (addr >= SIO_BASE && addr < SIO_BASE + 0x1000) return;
+    if (membus_rp2350_mode && addr >= SIO_NONSEC_BASE && addr < SIO_NONSEC_BASE + 0x1000) return;
 }
 
 void mem_write8(uint32_t addr, uint8_t val) {
     if (__builtin_expect(gdb.active, 0))
         gdb_check_watchpoint_write(addr, 1);
     addr = sram_alias_translate(addr);
+    thumb32_exclusive_monitor_clear(addr);
 
     if (addr >= FLASH_BASE && addr < FLASH_BASE + FLASH_SIZE) {
         return;  /* Flash writes ignored */
@@ -1478,9 +1606,27 @@ void mem_write8(uint32_t addr, uint8_t val) {
         return;
     }
 
-    /* Stub out peripheral writes for now. */
-    if (addr >= 0x40000000 && addr < 0x50000000) return;   /* APB/AHB peripherals */
-    if (addr >= SIO_BASE     && addr < SIO_BASE + 0x1000) return;
+    /* APB/AHB peripherals — RMW via 32-bit register write */
+    if (addr >= 0x40000000 && addr < 0x50000000) {
+        uint32_t a32 = addr & ~3u;
+        uint32_t cur = mem_read32(a32);
+        uint32_t bo = addr & 3u;
+        uint32_t mask = 0xFFu << (bo * 8);
+        mem_write32(a32, (cur & ~mask) | ((uint32_t)val << (bo * 8)));
+        return;
+    }
+    {
+        uint32_t sio_off;
+        if (sio_reg_offset(addr, &sio_off)) {
+            uint32_t cur = sio_read32(sio_off & ~3u);
+            uint32_t bo = addr & 3u;
+            uint32_t mask = 0xFFu << (bo * 8);
+            sio_write32(sio_off & ~3u, (cur & ~mask) | ((uint32_t)val << (bo * 8)));
+            return;
+        }
+    }
+    if (addr >= SIO_BASE && addr < SIO_BASE + 0x1000) return;
+    if (membus_rp2350_mode && addr >= SIO_NONSEC_BASE && addr < SIO_NONSEC_BASE + 0x1000) return;
 }
 
 uint32_t mem_read32(uint32_t addr) {
@@ -1488,6 +1634,8 @@ uint32_t mem_read32(uint32_t addr) {
         gdb_check_watchpoint_read(addr, 4);
     /* SRAM alias translation */
     addr = sram_alias_translate(addr);
+
+    
 
     /* Fast path: RAM reads are extremely common */
     if (addr >= active_ram_base && addr < active_ram_base + active_ram_size) {
@@ -1571,9 +1719,17 @@ uint32_t mem_read32(uint32_t addr) {
         return timer_read32(reg_addr);
     }
 
-    /* SIO core-local registers */
-    if (addr >= SIO_BASE && addr < SIO_BASE + 0x100) {
-        return sio_read32(addr - SIO_BASE);
+    /* RP2350 TIMER0 / TIMER1 */
+    if (membus_rp2350_mode && get_rp2350_periph() && timer_rp2350_bus_match(addr)) {
+        return timer_rp2350_bus_read32(get_rp2350_periph(), addr);
+    }
+
+    /* SIO core-local registers (secure + RP2350 non-secure alias) */
+    {
+        uint32_t sio_off;
+        if (sio_reg_offset(addr, &sio_off)) {
+            return sio_read32(sio_off);
+        }
     }
 
     /* GPIO registers */
@@ -1582,7 +1738,7 @@ uint32_t mem_read32(uint32_t addr) {
     }
 
     /* SIO spinlock state and lock registers */
-    if (addr == SIO_BASE + 0x5C) {
+    if (addr == SIO_BASE + 0x5C || (membus_rp2350_mode && addr == SIO_NONSEC_BASE + 0x5C)) {
         return sio_spinlock_state_bitmap();
     }
     if (addr >= SPINLOCK_BASE && addr < SPINLOCK_BASE + SPINLOCK_SIZE * 4) {
@@ -1809,6 +1965,12 @@ uint8_t mem_read8(uint32_t addr) {
         uint32_t val32 = usb_read32(addr & ~0x3);
         uint32_t bo = addr & 0x3;
         return (uint8_t)((val32 >> (bo * 8)) & 0xFF);
+    }
+
+    /* APB/AHB peripherals (TIMER, etc.) — use 32-bit register read */
+    if (addr >= 0x40000000 && addr < 0x50000000) {
+        uint32_t word = mem_read32(addr & ~3u);
+        return (uint8_t)((word >> ((addr & 3) * 8)) & 0xFF);
     }
 
     return 0xFF;  /* Unmapped reads return 0xFF */

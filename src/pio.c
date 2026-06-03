@@ -145,8 +145,8 @@ static uint32_t read_pins(uint8_t base, uint8_t count) {
     if (count == 0) return 0;
     uint32_t val = 0;
     for (int i = 0; i < count && i < 32; i++) {
-        uint8_t pin = (base + i) % 30;
-        if (gpio_get_pin(pin))
+        uint8_t pin = (uint8_t)(base + i);
+        if (pin < NUM_GPIO_PINS && gpio_get_pin(pin))
             val |= (1u << i);
     }
     return val;
@@ -154,8 +154,9 @@ static uint32_t read_pins(uint8_t base, uint8_t count) {
 
 static void write_pins(uint8_t base, uint8_t count, uint32_t val) {
     for (int i = 0; i < count && i < 32; i++) {
-        uint8_t pin = (base + i) % 30;
-        gpio_set_pin(pin, (val >> i) & 1);
+        uint8_t pin = (uint8_t)(base + i);
+        if (pin < NUM_GPIO_PINS)
+            gpio_set_pin(pin, (val >> i) & 1);
     }
 }
 
@@ -236,10 +237,15 @@ void pio_sm_exec(int pio_num, int sm_num, uint16_t instr) {
 
         switch (source) {
         case 0: /* GPIO (absolute pin number) */
-            condition_met = (gpio_get_pin(index % 30) == polarity);
+            condition_met = (index < NUM_GPIO_PINS &&
+                             gpio_get_pin(index) == polarity);
             break;
         case 1: /* PIN (relative to IN_BASE) */
-            condition_met = (gpio_get_pin((sm_in_base(s) + index) % 30) == polarity);
+            {
+                uint8_t pin = (uint8_t)(sm_in_base(s) + index);
+                condition_met = (pin < NUM_GPIO_PINS &&
+                                 gpio_get_pin(pin) == polarity);
+            }
             break;
         case 2: /* IRQ flag */
             condition_met = ((p->irq >> (index & 0x07)) & 1) == polarity;
@@ -510,6 +516,17 @@ void pio_sm_exec(int pio_num, int sm_num, uint16_t instr) {
 /* ========================================================================
  * PIO Step: execute one cycle for all enabled SMs
  * ======================================================================== */
+
+void pio_inject_rx(int pio_num, int sm_num, uint32_t word) {
+    if (pio_num < 0 || pio_num >= PIO_NUM_BLOCKS || sm_num < 0 || sm_num >= PIO_NUM_SM) {
+        return;
+    }
+    pio_block_t *p = &pio_state[pio_num];
+    if (!fifo_push(&p->sm[sm_num].rx_fifo, word)) {
+        return;
+    }
+    pio_check_irq(pio_num);
+}
 
 void pio_step(void) {
     for (int b = 0; b < PIO_NUM_BLOCKS; b++) {

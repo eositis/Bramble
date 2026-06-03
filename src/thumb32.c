@@ -249,6 +249,124 @@ static void t32_ldst_multiple(uint32_t pc, uint16_t upper, uint16_t lower) {
 }
 
 /* ========================================================================
+ * Load/store exclusive (RP2350 M33 software spinlocks: ldaexb/strexb/stlb)
+ * Mis-decoding these as LDRD/STRD corrupts adjacent bytes and breaks async_context.
+ * ======================================================================== */
+
+typedef struct {
+    uint32_t addr;
+    int      valid;
+} exclusive_monitor_t;
+
+static exclusive_monitor_t exclusive_monitor[NUM_CORES];
+
+void thumb32_exclusive_monitor_clear(uint32_t addr) {
+    for (int c = 0; c < NUM_CORES; c++) {
+        if (exclusive_monitor[c].valid && exclusive_monitor[c].addr == addr) {
+            exclusive_monitor[c].valid = 0;
+        }
+    }
+}
+
+static int t32_exclusive_byte_suffix(uint16_t lower) {
+    switch (lower & 0xFFu) {
+    case 0x8F: /* stlb */
+    case 0xCF: /* ldaexb */
+    case 0xE0: /* stlexb (release) */
+    case 0x40:
+    case 0x41:
+    case 0x42:
+    case 0x44:
+    case 0x45:
+    case 0x46:
+    case 0x4C:
+    case 0x4E:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static int t32_is_exclusive_ldst(uint16_t upper, uint16_t lower) {
+    if ((upper & 0xF800) != 0xE800) {
+        return 0;
+    }
+    /* RP2350 M33 software spinlocks: ldaexb/strexb/stlb in E8C0..E8DF */
+    if ((upper & 0xFFF0) >= 0xE8C0 && (upper & 0xFFF0) <= 0xE8D0 &&
+        t32_exclusive_byte_suffix(lower)) {
+        return 1;
+    }
+    return 0;
+}
+
+/* LDAH/STLH (load/store halfword with acquire/release) — suffix 0x9F in E8xx.
+ * Mis-decoding as LDRD/STRD corrupts registers (e.g. u2_push_rx_macraw). */
+static int t32_is_halfword_acqrel(uint16_t upper, uint16_t lower) {
+    if ((upper & 0xFE00) != 0xE800) {
+        return 0;
+    }
+    return (lower & 0x00FF) == 0x009F;
+}
+
+static void t32_halfword_acqrel(uint32_t pc, uint16_t upper, uint16_t lower) {
+    (void)pc;
+    uint32_t insn = ((uint32_t)upper << 16) | lower;
+    int      Rn   = upper & 0xF;
+    int      Rt   = (insn >> 12) & 0xF;
+    int      L    = (upper >> 4) & 1;
+    uint32_t addr = cpu.r[Rn];
+
+    if (L) {
+        cpu.r[Rt] = mem_read16(addr);
+    } else {
+        mem_write16(addr, (uint16_t)(cpu.r[Rt] & 0xFFFF));
+    }
+}
+
+static void t32_exclusive_ldst(uint32_t pc, uint16_t upper, uint16_t lower) {
+    (void)pc;
+    uint32_t insn = ((uint32_t)upper << 16) | lower;
+    int      Rn   = upper & 0xF;
+    int      Rt   = (insn >> 12) & 0xF;
+    int      Rd   = (insn >> 8) & 0xF;
+    uint32_t addr = cpu.r[Rn];
+    int      ac   = get_active_core();
+    uint8_t  sfx  = (uint8_t)(lower & 0xFFu);
+
+    if (sfx == 0x8F) {
+        /* STLB Rt, [Rn] */
+        mem_write8(addr, (uint8_t)cpu.r[Rt]);
+        exclusive_monitor[ac].valid = 0;
+        return;
+    }
+
+    if (sfx == 0xCF) {
+        /* LDAEXB Rt, [Rn] */
+        cpu.r[Rt] = mem_read8(addr);
+        exclusive_monitor[ac].addr  = addr;
+        exclusive_monitor[ac].valid = 1;
+        return;
+    }
+
+    if (sfx == 0xE0) {
+        /* STLEXB Rd, Rt, [Rn] — release-ordered byte store */
+        mem_write8(addr, (uint8_t)cpu.r[Rt]);
+        cpu.r[Rd] = 0;
+        exclusive_monitor[ac].valid = 0;
+        return;
+    }
+
+    /* STREXB Rd, Rt, [Rn] */
+    if (exclusive_monitor[ac].valid && exclusive_monitor[ac].addr == addr) {
+        mem_write8(addr, (uint8_t)cpu.r[Rt]);
+        cpu.r[Rd] = 0;
+        exclusive_monitor[ac].valid = 0;
+    } else {
+        cpu.r[Rd] = 1;
+    }
+}
+
+/* ========================================================================
  * Load/Store Double
  * upper: 1110 1101 W L Rn   (load/store with imm8, P/U from lower)
  * upper pattern: (upper & 0xFE50) == 0xE840 → STRD, 0xE850 → LDRD
@@ -830,8 +948,14 @@ int thumb32_step(uint32_t pc, uint16_t upper, uint16_t lower) {
             /* Simpler: upper[8]=is_DB, upper[7]=L */
             /* Check for LDRD/STRD: upper[6]=1 and upper[7:5] pattern */
             if (upper & 0x0040) {
-                /* LDRD/STRD: upper[6]=1 */
-                t32_ldrd_strd(pc, upper, lower);
+                if (t32_is_exclusive_ldst(upper, lower)) {
+                    t32_exclusive_ldst(pc, upper, lower);
+                } else if (t32_is_halfword_acqrel(upper, lower)) {
+                    t32_halfword_acqrel(pc, upper, lower);
+                } else {
+                    /* LDRD/STRD: upper[6]=1 */
+                    t32_ldrd_strd(pc, upper, lower);
+                }
             } else {
                 /* LDM/STM T2 */
                 /* Check for TBB/TBH: upper = 0xE8DF or 0xE89F ... actually */
@@ -845,11 +969,20 @@ int thumb32_step(uint32_t pc, uint16_t upper, uint16_t lower) {
             return 1;
         }
         if (bits_10_9 == 1) {
-            /* LDRD/STRD with different pre/post-index forms (0xE9xx) */
-            t32_ldrd_strd(pc, upper, lower);
+            /* 0xEA/0xEB: data-processing (add.w etc.); 0xE9: LDRD/STRD T2 */
+            if ((upper & 0x0F00) >= 0x0A00) {
+                t32_dp_shifted_reg(pc, upper, lower);
+            } else if (t32_is_exclusive_ldst(upper, lower)) {
+                t32_exclusive_ldst(pc, upper, lower);
+            } else {
+                t32_ldrd_strd(pc, upper, lower);
+            }
             return 1;
         }
-        /* bits_10_9 == 2 or 3: Data processing shifted register */
+        /* VLDR/VSTR Dn (0xED9x / 0xED8x) — not generic 0xED00 data-processing */
+        if ((upper & 0xFFF0) == 0xED90 || (upper & 0xFFF0) == 0xED80) {
+            return 1;
+        }
         t32_dp_shifted_reg(pc, upper, lower);
         return 1;
     }

@@ -43,6 +43,7 @@
 #include "rp2350_rv/rv_membus.h"
 #include "rp2350_rv/rv_bootrom.h"
 #include "rp2350_rv/rp2350_periph.h"
+#include "rp2350_rv/rp2350_memmap.h"
 #include "rp2350_rv/rv_icache.h"
 #include "rp2350_arm/m33_cpu.h"
 #include "thumb32.h"
@@ -2125,6 +2126,27 @@ TEST(test_fifo_try_push_full) {
     for (int i = 0; i < FIFO_DEPTH; i++) fifo_push(0, i);
     ASSERT_TRUE(fifo_is_full(0), "Full FIFO reports full");
     ASSERT_EQ(0, fifo_try_push(0, 99), "try_push full returns 0");
+    PASS();
+}
+
+TEST(test_core1_launch_fifo_handshake) {
+    dual_core_init();
+    sio_fifo_wr_total = 0;
+    sio_set_core1_reset(0);
+    set_active_core(CORE0);
+
+    const uint32_t seq[] = {
+        0u, 0u, 1u, 0x10000100u, 0x20082000u, 0x10000001u
+    };
+    for (int i = 0; i < 6; i++) {
+        mem_write32(SIO_BASE + 0x54u, seq[i]);
+        (void)mem_read32(SIO_BASE + 0x58u);
+    }
+
+    ASSERT_TRUE(!cores[CORE1].is_halted, "Core1 should be unhalted after launch");
+    ASSERT_EQ(0x10000000u, cores[CORE1].r[15], "Core1 PC from launch");
+    ASSERT_EQ(0x20082000u, cores[CORE1].r[13], "Core1 SP from launch");
+    ASSERT_TRUE(sio_fifo_wr_total >= 6u, "SIO FIFO_WR should record launch writes");
     PASS();
 }
 
@@ -4358,6 +4380,25 @@ TEST(test_m33_thumb2_movw_movt) {
     PASS();
 }
 
+TEST(test_m33_thumb2_addw_ldah) {
+    reset_cpu();
+    /* add.w r3, r3, r2, lsl #2 @ u2_push_rx_macraw (must not be decoded as LDRD) */
+    cpu.r[2] = 3;
+    cpu.r[3] = 0x20001000u;
+    thumb32_step(0x10006036, 0xEB03, 0x0382);
+    ASSERT_EQ(0x2000100Cu, cpu.r[3], "add.w r3, r3, r2, lsl #2");
+    /* ldah r0, [r3] — load halfword with acquire (suffix 0x9F) */
+    mem_write16(0x20001000u, 0x1234);
+    cpu.r[3] = 0x20001000u;
+    thumb32_step(0x10006078, 0xE8D3, 0x0F9F);
+    ASSERT_EQ(0x1234u, cpu.r[0], "ldah r0, [r3]");
+    /* stlh r0, [r3] */
+    cpu.r[0] = 0x5678;
+    thumb32_step(0x100060E0, 0xE8C3, 0x0F9F);
+    ASSERT_EQ(0x5678u, mem_read16(0x20001000u), "stlh r0, [r3]");
+    PASS();
+}
+
 /* ========================================================================
  * RISC-V Hazard3 Tests
  * ======================================================================== */
@@ -4657,7 +4698,7 @@ TEST(test_rv_periph_timer1) {
     rp2350_periph_state_t periph;
     rp2350_periph_init(&periph);
     /* Write alarm and tick */
-    rp2350_periph_write32(&periph, 0x400B8010, 100);  /* ALARM0 = 100 */
+    rp2350_periph_write32(&periph, RP2350_TIMER1_BASE + 0x10, 100);  /* ALARM0 = 100 */
     ASSERT_EQ(1, periph.timer1.armed & 1, "Alarm 0 should be armed");
     rp2350_timer1_tick(&periph, 100);
     ASSERT_TRUE(periph.timer1.intr & 1, "Alarm 0 should fire at 100us");
@@ -4872,6 +4913,7 @@ int main(void) {
     RUN_TEST(test_fifo_empty_check);
     RUN_TEST(test_fifo_try_pop_empty);
     RUN_TEST(test_fifo_try_push_full);
+    RUN_TEST(test_core1_launch_fifo_handshake);
     END_CATEGORY("FIFO");
 
     BEGIN_CATEGORY("Bitwise Instructions");
@@ -5187,6 +5229,7 @@ int main(void) {
     RUN_TEST(test_m33_basepri);
     RUN_TEST(test_m33_thumb2_sdiv);
     RUN_TEST(test_m33_thumb2_movw_movt);
+    RUN_TEST(test_m33_thumb2_addw_ldah);
     END_CATEGORY("Cortex-M33");
 
     BEGIN_CATEGORY("RISC-V CPU");

@@ -1,13 +1,13 @@
 # Change log (eositis fork)
 
 Baseline: **clone from `origin/main`** (upstream Bramble v0.45.0, RP2350 M33/RISC-V emulator).  
-Scope: local commits on `main` plus **uncommitted** MegaFlash bring-up work.
+Scope: local commits on `main` after clone.
 
 ---
 
-## Unreleased (working tree — not yet committed)
+## 2026-06-02 — MegaFlash M33 bring-up (see git log for hash)
 
-MegaFlash / RP2350 M33 bring-up. ~+1896 / −243 lines across 21 tracked files + new `a2bus` and `scripts/`.
+MegaFlash / RP2350 M33 bring-up. ~+1896 / −243 lines across 21 tracked files + new `a2bus` and `scripts/`. Removed temporary agent debug logging to `~/Documents/junk/` before commit.
 
 ### CPU / dual-core (`src/cpu.c`, `include/emulator.h`)
 
@@ -89,4 +89,6 @@ No local changes in this section. Upstream includes through v0.45.0: virtual net
 
 ---
 
-*When committing, move items from **Unreleased** into a dated section and reference the git commit hash.*
+## Unreleased
+
+*(none)*

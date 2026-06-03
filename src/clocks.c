@@ -388,7 +388,14 @@ static void psm_write(uint32_t addr, uint32_t val, uint32_t alias) {
             clocks_state.psm_frce_off = apply_alias_write(
                 clocks_state.psm_frce_off, val, alias) & mask;
             if ((clocks_state.psm_frce_off & proc1_mask) != prev_proc1) {
-                sio_set_core1_reset((clocks_state.psm_frce_off & proc1_mask) != 0);
+                int proc1_off = (clocks_state.psm_frce_off & proc1_mask) != 0;
+                if (multicore_trace_enabled) {
+                    fprintf(stderr,
+                            "[MC-trace] PSM_FRCE_OFF write -> proc1 %s (frce_off=0x%08X)\n",
+                            proc1_off ? "held off" : "released",
+                            clocks_state.psm_frce_off);
+                }
+                sio_set_core1_reset(proc1_off);
             }
             break;
         case PSM_WDSEL_OFFSET:

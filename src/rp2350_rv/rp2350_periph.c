@@ -7,8 +7,87 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <sys/time.h>
 #include "rp2350_rv/rp2350_periph.h"
 #include "rp2350_rv/rp2350_memmap.h"
+#include "nvic.h"
+#include "timer.h"
+#include "emulator.h"
+
+
+/* RP2350 timer adds LOCKED (0x34) and SOURCE (0x38); INTR/INTE/INTF/INTS are +8 vs RP2040. */
+enum {
+    TIMER2350_MAP_DIRECT = 0,
+    TIMER2350_MAP_LOCKED = 1,
+    TIMER2350_MAP_SOURCE = 2,
+    TIMER2350_MAP_IGNORE = 3,
+};
+
+static int timer_rp2350_translate_offset(uint32_t offset, uint32_t *rp2040_offset) {
+    if (offset <= 0x30) {
+        *rp2040_offset = offset;
+        return TIMER2350_MAP_DIRECT;
+    }
+    switch (offset) {
+    case 0x34: return TIMER2350_MAP_LOCKED;
+    case 0x38: return TIMER2350_MAP_SOURCE;
+    case 0x3C: *rp2040_offset = 0x34; return TIMER2350_MAP_DIRECT; /* INTR */
+    case 0x40: *rp2040_offset = 0x38; return TIMER2350_MAP_DIRECT; /* INTE */
+    case 0x44: *rp2040_offset = 0x3C; return TIMER2350_MAP_DIRECT; /* INTF */
+    case 0x48: *rp2040_offset = 0x40; return TIMER2350_MAP_DIRECT; /* INTS */
+    default: return TIMER2350_MAP_IGNORE;
+    }
+}
+
+/* RP2040-style atomic aliases: XOR +0x1000, SET +0x2000, CLR +0x3000 */
+static void timer_rp2040_write_alias(uint32_t rp2040_reg, uint32_t alias, uint32_t val) {
+    if (alias == 0x0000) {
+        timer_write32(rp2040_reg, val);
+    } else {
+        uint32_t cur = timer_read32(rp2040_reg);
+        if (alias == 0x2000) {
+            val = cur | val;
+        } else if (alias == 0x3000) {
+            val = cur & ~val;
+        } else { /* XOR 0x1000 */
+            val = cur ^ val;
+        }
+        timer_write32(rp2040_reg, val);
+    }
+}
+
+static void timer_log_inte(int timer_num, uint32_t val) {
+    static int logged[2];
+    if (val != 0 && !logged[timer_num]) {
+        logged[timer_num] = 1;
+        fprintf(stderr, "[Init] TIMER%d INTE=0x%X (alarm IRQs armed)\n", timer_num, val & 0xF);
+    }
+}
+
+static void timer_bus_trace_write(uint32_t addr, uint32_t val, int timer_num) {
+    static int counts[2];
+    if (counts[timer_num]++ < 8) {
+        fprintf(stderr, "[TimerBus] TIMER%d write 0x%08X = 0x%08X\n", timer_num, addr, val);
+    }
+}
+
+static uint32_t timer1_read(rp2350_timer1_state_t *t, uint32_t offset);
+static void timer1_write(rp2350_timer1_state_t *t, uint32_t offset, uint32_t val);
+
+static void timer1_write_alias(rp2350_timer1_state_t *t, uint32_t offset, uint32_t alias, uint32_t val) {
+    if (alias == 0x0000) {
+        timer1_write(t, offset, val);
+        return;
+    }
+    uint32_t cur = timer1_read(t, offset);
+    if (alias == 0x2000) {
+        timer1_write(t, offset, cur | val);
+    } else if (alias == 0x3000) {
+        timer1_write(t, offset, cur & ~val);
+    } else {
+        timer1_write(t, offset, cur ^ val);
+    }
+}
 
 /* ========================================================================
  * Initialization
@@ -72,16 +151,12 @@ int rp2350_periph_match(uint32_t addr) {
     if (addr >= RP2350_OTP_DATA_BASE && addr < RP2350_OTP_DATA_BASE + OTP_NUM_ROWS * 4) return 1;
     /* BOOTRAM scratch plus adjacent bootrom-owned registers */
     if (addr >= RP2350_BOOTRAM_BASE && addr < RP2350_BOOTRAM_BASE + BOOTRAM_REGS_END) return 1;
-    /* TIMER1 */
-    if (base >= RP2350_TIMER1_BASE && base < RP2350_TIMER1_BASE + 0x100) return 1;
     /* GLITCH */
     if (base >= RP2350_GLITCH_BASE && base < RP2350_GLITCH_BASE + 0x20) return 1;
     /* CORESIGHT */
     if (base >= RP2350_CORESIGHT_BASE && base < RP2350_CORESIGHT_BASE + 0x40) return 1;
     /* ACCESSCTRL */
     if (base >= RP2350_ACCESSCTRL_BASE && base < RP2350_ACCESSCTRL_BASE + 0x100) return 1;
-    /* TIMER0 at RP2350 address (moved from 0x40054000 to 0x400B0000) */
-    if (base >= RP2350_TIMER0_BASE && base < RP2350_TIMER0_BASE + 0x100) return 1;
 
     return 0;
 }
@@ -274,12 +349,26 @@ static void bootram_write(rp2350_periph_state_t *state, uint32_t addr, uint32_t 
 }
 
 /* ========================================================================
- * TIMER1 (0x400B8000) — same register layout as RP2040 timer
+ * TIMER1 (0x400B8000) — RP2350 register layout (not RP2040 offsets)
  * ======================================================================== */
+
+static void timer1_fire_alarm(rp2350_timer1_state_t *t, int i) {
+    t->intr |= (1u << i);
+    t->armed &= ~(1u << i);
+    if (t->inte & (1u << i)) {
+        nvic_signal_irq(4 + i); /* TIMER1_IRQ_0..3 */
+    }
+    
+}
 
 static uint32_t timer1_read(rp2350_timer1_state_t *t, uint32_t offset) {
     switch (offset) {
-    case 0x08: return (uint32_t)(t->time_us >> 32);  /* TIMEHR (latched on TIMELR read) */
+    case 0x08:
+        /* TIMEHR; nonzero only when alarm INTR pending (do not fake timeout here —
+         * a nonzero byte at timer_hw+8 makes firmware blx through alarm registers). */
+        if (t->intr & 0xF)
+            return 1;
+        return (uint32_t)(t->time_us >> 32);
     case 0x0C:
         t->latched_high = (uint32_t)(t->time_us >> 32);
         return (uint32_t)t->time_us;  /* TIMELR */
@@ -291,10 +380,12 @@ static uint32_t timer1_read(rp2350_timer1_state_t *t, uint32_t offset) {
     case 0x24: return (uint32_t)(t->time_us >> 32);  /* TIMERAWH */
     case 0x28: return (uint32_t)t->time_us;           /* TIMERAWL */
     case 0x30: return t->paused;
-    case 0x34: return t->intr;
-    case 0x38: return t->inte;
-    case 0x3C: return t->intf;
-    case 0x40: return (t->intr | t->intf) & t->inte;  /* INTS */
+    case 0x34: return 0;  /* LOCKED — not latched in this model */
+    case 0x38: return 0;  /* SOURCE */
+    case 0x3C: return t->intr;
+    case 0x40: return t->inte;
+    case 0x44: return t->intf;
+    case 0x48: return (t->intr | t->intf) & t->inte;  /* INTS */
     default: return 0;
     }
 }
@@ -309,9 +400,32 @@ static void timer1_write(rp2350_timer1_state_t *t, uint32_t offset, uint32_t val
     case 0x1C: t->alarm[3] = val; t->armed |= 8; break;
     case 0x20: t->armed &= ~val; break;  /* W1C */
     case 0x30: t->paused = val & 1; break;
-    case 0x34: t->intr &= ~val; break;   /* W1C */
-    case 0x38: t->inte = val & 0xF; break;
-    case 0x3C: t->intf = val & 0xF; break;
+    case 0x34: /* LOCKED */ break;
+    case 0x38: /* SOURCE */ break;
+    case 0x3C: t->intr &= ~val; break;   /* INTR W1C */
+    case 0x40:
+        t->inte = val & 0xF;
+        timer_log_inte(1, t->inte);
+        {
+            uint32_t ints = (t->intr | t->intf) & t->inte;
+            for (int i = 0; i < 4; i++) {
+                if (ints & (1u << i)) {
+                    nvic_signal_irq(4 + i);
+                }
+            }
+        }
+        break;
+    case 0x44:
+        t->intf = val & 0xF;
+        {
+            uint32_t ints = (t->intr | t->intf) & t->inte;
+            for (int i = 0; i < 4; i++) {
+                if (ints & (1u << i)) {
+                    nvic_signal_irq(4 + i);
+                }
+            }
+        }
+        break;
     default: break;
     }
 }
@@ -320,12 +434,84 @@ void rp2350_timer1_tick(rp2350_periph_state_t *state, uint32_t us) {
     rp2350_timer1_state_t *t = &state->timer1;
     if (t->paused || us == 0) return;
     t->time_us += us;
+    
     /* Check alarms */
     uint32_t time_lo = (uint32_t)t->time_us;
     for (int i = 0; i < 4; i++) {
         if ((t->armed & (1u << i)) && (int32_t)(time_lo - t->alarm[i]) >= 0) {
-            t->intr |= (1u << i);
-            t->armed &= ~(1u << i);
+            timer1_fire_alarm(t, i);
+        }
+    }
+}
+
+/* ========================================================================
+ * RP2350 TIMER0/TIMER1 membus routing (full SET/CLR/XOR alias regions)
+ * ======================================================================== */
+
+int timer_rp2350_bus_match(uint32_t addr) {
+    /* TIMER0..TIMER1 span on RP2350 includes all SET/CLR/XOR alias combinations */
+    if (addr >= RP2350_TIMER0_BASE && addr < RP2350_TIMER1_BASE) return 1;
+    if (addr >= RP2350_TIMER1_BASE && addr < RP2350_TIMER1_BASE + 0x8000) return 1;
+    return 0;
+}
+
+uint32_t timer_rp2350_bus_read32(rp2350_periph_state_t *state, uint32_t addr) {
+    uint32_t base = addr & ~0x3000u;
+
+    if (base >= RP2350_TIMER1_BASE && base < RP2350_TIMER1_BASE + 0x100) {
+        uint32_t off = base - RP2350_TIMER1_BASE;
+        uint32_t val = timer1_read(&state->timer1, off);
+        
+        return val;
+    }
+
+    if (base >= RP2350_TIMER0_BASE && base < RP2350_TIMER0_BASE + 0x100) {
+        uint32_t off = base - RP2350_TIMER0_BASE;
+        uint32_t mapped;
+        uint32_t val = 0;
+        switch (timer_rp2350_translate_offset(off, &mapped)) {
+        case TIMER2350_MAP_DIRECT:
+            val = timer_read32(TIMER_BASE + mapped);
+            break;
+        case TIMER2350_MAP_LOCKED:
+        case TIMER2350_MAP_SOURCE:
+            val = 0;
+            break;
+        default:
+            val = 0;
+            break;
+        }
+        
+        return val;
+    }
+
+    return 0;
+}
+
+void timer_rp2350_bus_write32(rp2350_periph_state_t *state, uint32_t addr, uint32_t val) {
+    uint32_t alias = addr & 0x3000u;
+    uint32_t base = addr & ~0x3000u;
+
+    if (base >= RP2350_TIMER1_BASE && base < RP2350_TIMER1_BASE + 0x100) {
+        timer_bus_trace_write(addr, val, 1);
+        
+        timer1_write_alias(&state->timer1, base - RP2350_TIMER1_BASE, alias, val);
+        return;
+    }
+
+    if (base >= RP2350_TIMER0_BASE && base < RP2350_TIMER0_BASE + 0x100) {
+        uint32_t off = base - RP2350_TIMER0_BASE;
+        uint32_t mapped;
+        timer_bus_trace_write(addr, val, 0);
+        
+        switch (timer_rp2350_translate_offset(off, &mapped)) {
+        case TIMER2350_MAP_DIRECT:
+            timer_rp2040_write_alias(TIMER_BASE + mapped, alias, val);
+            break;
+        case TIMER2350_MAP_LOCKED:
+        case TIMER2350_MAP_SOURCE:
+        default:
+            break;
         }
     }
 }
@@ -359,16 +545,6 @@ uint32_t rp2350_periph_read32(rp2350_periph_state_t *state, uint32_t addr) {
     if (addr >= RP2350_BOOTRAM_BASE && addr < RP2350_BOOTRAM_BASE + BOOTRAM_REGS_END)
         return bootram_read(state, addr);
 
-    /* TIMER1 */
-    if (base >= RP2350_TIMER1_BASE && base < RP2350_TIMER1_BASE + 0x100)
-        return timer1_read(&state->timer1, base - RP2350_TIMER1_BASE);
-
-    /* TIMER0 at RP2350 address — redirect to RP2040 timer via offset translation */
-    if (base >= RP2350_TIMER0_BASE && base < RP2350_TIMER0_BASE + 0x100) {
-        extern uint32_t timer_read32(uint32_t addr);
-        return timer_read32(0x40054000 + (base - RP2350_TIMER0_BASE));
-    }
-
     /* GLITCH */
     if (base >= RP2350_GLITCH_BASE && base < RP2350_GLITCH_BASE + 0x20) {
         uint32_t idx = (base - RP2350_GLITCH_BASE) / 4;
@@ -385,6 +561,11 @@ uint32_t rp2350_periph_read32(rp2350_periph_state_t *state, uint32_t addr) {
     if (base >= 0x40160000 && base < 0x40160000 + 0x100) {
         uint32_t idx = (base - 0x40160000) / 4;
         return (idx < 64) ? state->accessctrl_regs[idx] : 0;
+    }
+
+    /* TIMER1 (direct test/API access; membus uses timer_rp2350_bus_*) */
+    if (base >= RP2350_TIMER1_BASE && base < RP2350_TIMER1_BASE + 0x100) {
+        return timer1_read(&state->timer1, base - RP2350_TIMER1_BASE);
     }
 
     return 0;
@@ -423,19 +604,6 @@ void rp2350_periph_write32(rp2350_periph_state_t *state, uint32_t addr, uint32_t
         return;
     }
 
-    /* TIMER1 */
-    if (base >= RP2350_TIMER1_BASE && base < RP2350_TIMER1_BASE + 0x100) {
-        timer1_write(&state->timer1, base - RP2350_TIMER1_BASE, val);
-        return;
-    }
-
-    /* TIMER0 at RP2350 address — redirect */
-    if (base >= RP2350_TIMER0_BASE && base < RP2350_TIMER0_BASE + 0x100) {
-        extern void timer_write32(uint32_t addr, uint32_t val);
-        timer_write32(0x40054000 + (base - RP2350_TIMER0_BASE), val);
-        return;
-    }
-
     /* GLITCH */
     if (base >= RP2350_GLITCH_BASE && base < RP2350_GLITCH_BASE + 0x20) {
         uint32_t idx = (base - RP2350_GLITCH_BASE) / 4;
@@ -454,6 +622,12 @@ void rp2350_periph_write32(rp2350_periph_state_t *state, uint32_t addr, uint32_t
     if (base >= 0x40160000 && base < 0x40160000 + 0x100) {
         uint32_t idx = (base - 0x40160000) / 4;
         if (idx < 64) state->accessctrl_regs[idx] = val;
+        return;
+    }
+
+    /* TIMER1 (direct test/API access; membus uses timer_rp2350_bus_*) */
+    if (base >= RP2350_TIMER1_BASE && base < RP2350_TIMER1_BASE + 0x100) {
+        timer1_write(&state->timer1, base - RP2350_TIMER1_BASE, val);
         return;
     }
 }

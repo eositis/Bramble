@@ -1,0 +1,22 @@
+# MegaFlash Apple II bus stub for Bramble (-script)
+# Requires core0 past U2_Init before core1launch (see sio_core1_guest_ready).
+# Use: ./scripts/run-megaflash-stub.sh
+
+# Idle bus: nDEVSEL high (before any slot cycle)
+10ms: gpio20 1
+10ms: gpio19 0
+
+# PHI0 edge for IsAppleConnected (must be before multicore_launch on core0)
+200ms: a2phi
+
+# Fallback if firmware skips multicore_launch (e.g. Apple already "connected")
+800ms: core1launch
+
+# Read MegaFlash STATUSREG ($C0C0, addr nibble 0)
+700ms: a2read 0
+
+# Optional: read PARAMREG ($C0C1)
+750ms: a2read 1
+
+# Extra PIO ticks (helps listener SM if a cycle was mid-flight)
+800ms: pioburst 32

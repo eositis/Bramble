@@ -339,6 +339,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "  -gdb [port] Start GDB server (default port: %d)\n", GDB_DEFAULT_PORT);
         fprintf(stderr, "  -clock <MHz> Set CPU clock frequency (default: 1, real: 125)\n");
         fprintf(stderr, "  -cores <N|auto> Active cores per instance (1, 2, or auto; default: 1)\n");
+        fprintf(stderr, "  -threaded           Use pthread-per-core (optional; -cores auto implies threaded)\n");
         fprintf(stderr, "  -thread-quantum <N> Guest instructions per threaded timeslice (default: 64)\n");
         fprintf(stderr, "  -no-boot2  Skip boot2 even if detected in firmware\n");
         fprintf(stderr, "  -debug-mem Log unmapped peripheral accesses\n");
@@ -389,6 +390,8 @@ int main(int argc, char **argv) {
         fprintf(stderr, "  -stack-check          Track per-core stack watermark\n");
         fprintf(stderr, "  -irq-latency          Measure IRQ delivery latency (cycles)\n");
         fprintf(stderr, "  -log-uart             Log UART TX/RX bytes\n");
+        fprintf(stderr, "  -trace-usb            Log USB enumeration state to stderr\n");
+        fprintf(stderr, "  -trace-mc             Log multicore FIFO launch / PSM to stderr\n");
         fprintf(stderr, "  -log-spi              Log SPI MOSI/MISO bytes\n");
         fprintf(stderr, "  -log-i2c              Log I2C transactions\n");
         fprintf(stderr, "  -gpio-trace <file>    Record GPIO changes as VCD (GTKWave format)\n");
@@ -481,9 +484,10 @@ int main(int argc, char **argv) {
                         fprintf(stderr, "[Error] -cores must be 1, 2, or auto\n");
                         return EXIT_FAILURE;
                     }
-                    threaded_mode = 1;
                 }
             }
+        } else if (strcmp(argv[i], "-threaded") == 0) {
+            threaded_mode = 1;
         } else if (strcmp(argv[i], "-thread-quantum") == 0) {
             if (i + 1 < argc) {
                 thread_quantum = atoi(argv[++i]);
@@ -670,6 +674,10 @@ int main(int argc, char **argv) {
             irq_latency_enabled = 1;
         } else if (strcmp(argv[i], "-log-uart") == 0) {
             log_uart_enabled = 1;
+        } else if (strcmp(argv[i], "-trace-usb") == 0) {
+            usb_enum_trace_enabled = 1;
+        } else if (strcmp(argv[i], "-trace-mc") == 0) {
+            multicore_trace_enabled = 1;
         } else if (strcmp(argv[i], "-log-spi") == 0) {
             log_spi_enabled = 1;
         } else if (strcmp(argv[i], "-log-i2c") == 0) {
@@ -916,6 +924,10 @@ skip_fuse:
     dual_core_init();
     if (user_active_cores > 1) {
         num_active_cores = user_active_cores;
+        /* Arm SIO FIFO launch handler before firmware runs multicore_launch_core1().
+         * Otherwise waiting_for_launch stays 0 until PSM_FRCE_OFF releases proc1,
+         * and all launch words are ignored (Core 1 stays halted at PC=0). */
+        sio_set_core1_reset(0);
     }
 
     /* JIT basic block compilation */
@@ -1107,6 +1119,8 @@ skip_fuse:
         rp2350_periph_init(&m33_periph);
         membus_rp2350_periph = &m33_periph;
         fprintf(stderr, "[M33] RP2350 peripherals enabled\n");
+        fprintf(stderr, "[M33] TIMER0 at 0x400B0000 uses RP2350 register offsets (INTR/INTE +8)\n");
+        fprintf(stderr, "[M33] NVIC supports 52 external IRQs (user IRQs 46-51 / SPARE)\n");
     }
 
     /* RV32 mode also enables RP2350 in shared membus (for fallthrough reads) */
@@ -1278,8 +1292,17 @@ skip_fuse:
         corepool_start_threads();
 
         /* Main thread handles I/O polling and watchdog */
-        while (any_core_running() && corepool.running) {
+        {
+            static uint32_t script_elapsed_us = 0;
+            while (any_core_running() && corepool.running) {
             usleep(1000);  /* 1ms polling interval */
+            script_elapsed_us += 1000;
+
+            if (script_enabled) {
+                corepool_lock();
+                script_poll(script_elapsed_us);
+                corepool_unlock();
+            }
 
             /* Poll stdin */
             if (stdin_enabled) {
@@ -1341,6 +1364,7 @@ skip_fuse:
                     break;
                 }
             }
+            }
         }
 
         corepool_stop_threads();
@@ -1378,8 +1402,15 @@ skip_fuse:
             if (__builtin_expect(fault_count > 0, 0))
                 fault_check(global_cycle_count);
             if (__builtin_expect(script_enabled, 0)) {
-                uint32_t eus = (timing_config.cycles_per_us > 0)
-                    ? (uint32_t)(global_cycle_count / timing_config.cycles_per_us) : 0;
+                /* Guest µs for scripts: TIMER0, or infer from core0 steps if timer lags */
+                uint32_t eus = (uint32_t)(timer_state.time_us & 0xFFFFFFFFu);
+                if (timing_config.cycles_per_us > 0) {
+                    uint32_t step_us =
+                        (uint32_t)(cores[CORE0].step_count / timing_config.cycles_per_us);
+                    if (step_us > eus) {
+                        eus = step_us;
+                    }
+                }
                 script_poll(eus);
             }
 

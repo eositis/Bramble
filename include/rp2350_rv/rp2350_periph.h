@@ -151,4 +151,9 @@ void rp2350_periph_write8(rp2350_periph_state_t *state, uint32_t addr, uint8_t v
 /* Timer1 tick (called from CLINT tick) */
 void rp2350_timer1_tick(rp2350_periph_state_t *state, uint32_t us);
 
+/* RP2350 TIMER0/TIMER1 bus routing (full 16KB alias regions, M33 membus) */
+int timer_rp2350_bus_match(uint32_t addr);
+uint32_t timer_rp2350_bus_read32(rp2350_periph_state_t *state, uint32_t addr);
+void timer_rp2350_bus_write32(rp2350_periph_state_t *state, uint32_t addr, uint32_t val);
+
 #endif /* RP2350_PERIPH_H */

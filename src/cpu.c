@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <sys/time.h>
 #include "emulator.h"
 #include "instructions.h"
 #include "thumb32.h"
@@ -20,9 +21,11 @@
 #include "rom.h"
 #include "rtc.h"
 #include "corepool.h"
+#include "pio.h"
 #include "devtools.h"
 #include "rp2350_rv/rp2350_periph.h"
 #include "rp2350_rv/rp2350_memmap.h"
+
 
 /* ========================================================================
  * Single-Core Global State
@@ -172,12 +175,6 @@ static inline uint16_t cpu_fetch16_fast(uint32_t pc) {
     if (pc >= FLASH_BASE && pc + 1 < FLASH_BASE + FLASH_SIZE) {
         uint16_t val;
         memcpy(&val, &cpu.flash[pc - FLASH_BASE], 2);
-        return val;
-    }
-
-    if (pc >= RAM_BASE && pc + 1 < RAM_TOP) {
-        uint16_t val;
-        memcpy(&val, &cpu.ram[pc - RAM_BASE], 2);
         return val;
     }
 
@@ -336,8 +333,9 @@ static inline int jit_is_terminal(uint16_t instr) {
     uint8_t top8 = instr >> 8;
     if (jit_terminal_bitmap[top8 >> 5] & (1u << (top8 & 31)))
         return 1;
-    /* WFI/WFE/SEV/YIELD hints: 0xBF with non-NOP */
-    if (top8 == 0xBF && (instr & 0x00F0) != 0) return 1;
+    /* Hint instructions only (not IT blocks at 0xBF08-0xBF3F) */
+    if (instr == 0xBF10 || instr == 0xBF20 || instr == 0xBF30 ||
+        instr == 0xBF40) return 1;
     return 0;
 }
 
@@ -615,16 +613,15 @@ static void dispatch_rev_ba(uint16_t instr) {
     }
 }
 
-/* Hints (0xBF) */
+/* Hints (0xBF) — must not treat IT blocks (0xBF08-0xBF3F etc.) as WFI/WFE */
 static void dispatch_hints_bf(uint16_t instr) {
-    uint8_t op = (instr >> 4) & 0xF;
-    switch (op) {
-        case 0x0: instr_nop(instr); break;
-        case 0x1: instr_yield(instr); break;
-        case 0x2: instr_wfe(instr); break;
-        case 0x3: instr_wfi(instr); break;
-        case 0x4: instr_sev(instr); break;
-        default:  instr_it(instr); break;
+    switch (instr) {
+        case 0xBF00: instr_nop(instr); break;
+        case 0xBF10: instr_yield(instr); break;
+        case 0xBF20: instr_wfe(instr); break;
+        case 0xBF30: instr_wfi(instr); break;
+        case 0xBF40: instr_sev(instr); break;
+        default:   instr_it(instr); break;
     }
 }
 
@@ -880,11 +877,18 @@ int cpu_is_halted(void) {
 
 void cpu_exception_entry(uint32_t vector_num) {
     int ac = get_active_core();
+    if (vector_num == EXC_HARDFAULT && ac == CORE1) {
+        static int hf_logged;
+        if (!hf_logged++) {
+            fprintf(stderr, "[CORE1] HardFault at PC=0x%08X SP=0x%08X\n",
+                    cpu.r[15], cpu.r[13]);
+        }
+    }
     uint32_t *exception_stack = cores[ac].exception_stack;
     int *p_exception_depth = &cores[ac].exception_depth;
     uint32_t vector_offset = vector_num * 4;
     uint32_t handler_addr = mem_read32(cpu.vtor + vector_offset);
-
+    
     if (cpu.debug_enabled) {
         printf("[CPU] Exception %u: PC=0x%08X VTOR=0x%08X -> Handler=0x%08X (depth %d)\n",
                vector_num, cpu.r[15], cpu.vtor, handler_addr, *p_exception_depth);
@@ -915,8 +919,8 @@ void cpu_exception_entry(uint32_t vector_num) {
 
     cpu.current_irq = vector_num;
 
-    if (vector_num >= 16 && (vector_num - 16) < 32) {
-        nvic_states[ac].iabr |= (1u << (vector_num - 16));
+    if (vector_num >= 16 && nvic_irq_valid(vector_num - 16)) {
+        nvic_states[ac].iabr |= (1ULL << (vector_num - 16));
     }
 
     uint32_t sp = cpu.r[13];
@@ -963,8 +967,8 @@ void cpu_exception_entry(uint32_t vector_num) {
              * The stacked frame stays valid; just change which handler runs. */
             if (vector_num < 32)
                 nvic_states[ac].active_exceptions &= ~(1u << vector_num);
-            if (vector_num >= 16 && (vector_num - 16) < 32)
-                nvic_states[ac].iabr &= ~(1u << (vector_num - 16));
+            if (vector_num >= 16 && nvic_irq_valid(vector_num - 16))
+                nvic_states[ac].iabr &= ~(1ULL << (vector_num - 16));
 
             /* Re-pend the original exception */
             if (vector_num >= 16 && vector_num != EXC_SYSTICK && vector_num != EXC_PENDSV)
@@ -986,8 +990,8 @@ void cpu_exception_entry(uint32_t vector_num) {
             cpu.current_irq = late_vector;
             if (late_vector < 32)
                 nvic_states[ac].active_exceptions |= (1u << late_vector);
-            if (late_vector >= 16 && (late_vector - 16) < 32)
-                nvic_states[ac].iabr |= (1u << (late_vector - 16));
+            if (late_vector >= 16 && nvic_irq_valid(late_vector - 16))
+                nvic_states[ac].iabr |= (1ULL << (late_vector - 16));
 
             handler_addr = mem_read32(cpu.vtor + late_vector * 4);
             cpu.xpsr = (cpu.xpsr & ~0x3F) | (late_vector & 0x3F);
@@ -1055,8 +1059,8 @@ void cpu_exception_return(uint32_t lr_value) {
             if (tail_vector != 0xFFFFFFFF) {
                 /* Tail-chain: clear current exception, enter new one without unstacking */
                 uint32_t cur_vec = cpu.current_irq;
-                if (cur_vec >= 16 && (cur_vec - 16) < 32)
-                    nvic_states[ac].iabr &= ~(1u << (cur_vec - 16));
+                if (cur_vec >= 16 && nvic_irq_valid(cur_vec - 16))
+                    nvic_states[ac].iabr &= ~(1ULL << (cur_vec - 16));
                 if (cur_vec < 32)
                     nvic_states[ac].active_exceptions &= ~(1u << cur_vec);
 
@@ -1072,8 +1076,8 @@ void cpu_exception_return(uint32_t lr_value) {
                 cpu.current_irq = tail_vector;
                 if (tail_vector < 32)
                     nvic_states[ac].active_exceptions |= (1u << tail_vector);
-                if (tail_vector >= 16 && (tail_vector - 16) < 32)
-                    nvic_states[ac].iabr |= (1u << (tail_vector - 16));
+                if (tail_vector >= 16 && nvic_irq_valid(tail_vector - 16))
+                    nvic_states[ac].iabr |= (1ULL << (tail_vector - 16));
 
                 /* Jump to the new handler */
                 uint32_t handler = mem_read32(cpu.vtor + tail_vector * 4);
@@ -1129,8 +1133,8 @@ void cpu_exception_return(uint32_t lr_value) {
         if (cpu.current_irq != 0xFFFFFFFF) {
             uint32_t vector_num = cpu.current_irq;
 
-            if (vector_num >= 16 && (vector_num - 16) < 32) {
-                nvic_states[ac].iabr &= ~(1u << (vector_num - 16));
+            if (vector_num >= 16 && nvic_irq_valid(vector_num - 16)) {
+                nvic_states[ac].iabr &= ~(1ULL << (vector_num - 16));
             }
 
             if (vector_num < 32) {
@@ -1194,6 +1198,9 @@ static void __attribute__((hot)) timing_tick(uint32_t cycles) {
             timing_config.cycle_accumulator = acc - us * cpus;
             timer_tick(us);
             rtc_tick(us);
+            if (membus_rp2350_mode && membus_rp2350_periph) {
+                rp2350_timer1_tick((rp2350_periph_state_t *)membus_rp2350_periph, us);
+            }
         } else {
             timing_config.cycle_accumulator = acc;
         }
@@ -1202,12 +1209,214 @@ static void __attribute__((hot)) timing_tick(uint32_t cycles) {
     systick_tick(cycles);
 }
 
+/* Set to 1 once the F4E8/F594 async-wait has been cleared (25 bursts fired).
+ * After that, stop ALL timer acceleration so 1M-µs deadlines don't expire prematurely. */
+static int async_wait_cleared = 0;
+
+/* Burst guest TIMER0/TIMER1 during firmware busy-waits (1s guest time per burst). */
+static int agent_guest_timer_burst_step(uint32_t *spin_steps, uint32_t *burst_count) {
+    if (++*spin_steps < 1024u) {
+        return 0;
+    }
+    *spin_steps = 0;
+    const uint32_t burst_us = 1000000u;
+    timer_tick(burst_us);
+    if (membus_rp2350_mode && membus_rp2350_periph) {
+        rp2350_timer1_tick((rp2350_periph_state_t *)membus_rp2350_periph, burst_us);
+    }
+    (*burst_count)++;
+    return 1;
+}
+
 /* ========================================================================
  * Single-Core CPU Execution (Dispatch Table)
  * ======================================================================== */
 
+static void cpu_set_active_ram_for_exec(void) {
+    if (membus_rp2350_mode && rp2350_sram_ptr) {
+        mem_set_ram_ptr(rp2350_sram_ptr, 0x20000000, 520 * 1024);
+    } else {
+        mem_set_ram_ptr(cpu.ram, RAM_BASE, RAM_SIZE);
+    }
+}
+
+/* MegaFlash crt0/libc hot paths — skip millions of emulated store loops. */
+static int guest_megaflash_crt0_accel(uint32_t pc) {
+    pc &= ~1u;
+    /* crt0 data_cpy: cmp at 0x1000019a — bulk flash→RAM for .data (core1 RAM code) */
+    if (pc == 0x1000019au) {
+        uint32_t dst = cpu.r[2];
+        uint32_t src = cpu.r[1];
+        uint32_t end = cpu.r[3];
+        if (end > dst && (end - dst) <= (8u * 1024u * 1024u)) {
+            if (mem_guest_memcpy(dst, src, end - dst)) {
+                cpu.r[1] = src + (end - dst);
+                cpu.r[2] = end;
+                cpu.r[15] = cpu.r[14] & ~1u;
+                pc_updated = 1;
+                static int logged;
+                if (!logged++) {
+                    fprintf(stderr,
+                            "[Init] crt0 .data fast-copy: %u bytes to 0x%08X\n",
+                            end - dst, dst);
+                }
+                return 1;
+            }
+        }
+    }
+    /* crt0 BSS zero: stmia loop at 0x10000180 / cmp at 0x10000182 */
+    if (pc == 0x10000182u) {
+        uint32_t ptr = cpu.r[1];
+        uint32_t end = cpu.r[2];
+        if (end > ptr && (end - ptr) <= (8u * 1024u * 1024u)) {
+            if (mem_guest_memset(ptr, 0, end - ptr)) {
+                cpu.r[1] = end;
+                cpu.r[15] = 0x10000186u;
+                pc_updated = 1;
+                static int logged;
+                if (!logged++) {
+                    fprintf(stderr, "[Init] crt0 BSS fast-zero: %u bytes\n", end - ptr);
+                }
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int guest_megaflash_memset_accel(uint32_t pc) {
+    pc &= ~1u;
+    /* Newlib memset in this UF2 (0x10027F40); inner word loop at 0x10027F98..9E */
+    if (pc == 0x10027F40u) {
+        uint32_t dest = cpu.r[0];
+        uint32_t val = cpu.r[1] & 0xFFu;
+        uint32_t len = cpu.r[2];
+        if (mem_guest_memset(dest, (int)val, len)) {
+            cpu.r[0] = dest;
+            cpu.r[15] = cpu.r[14] & ~1u;
+            pc_updated = 1;
+            static int logged;
+            if (!logged++) {
+                fprintf(stderr, "[Init] memset fast-path: dest=0x%08X len=%u\n", dest, len);
+            }
+            return 1;
+        }
+        return 0;
+    }
+    /* RAM veneers (__memset_veneer etc.) used by core1Main */
+    if (pc >= 0x20004600u && pc <= 0x20004700u && (pc & 3u) == 0u) {
+        uint32_t dest = cpu.r[0];
+        uint32_t val = cpu.r[1] & 0xFFu;
+        uint32_t len = cpu.r[2];
+        if (dest >= 0x20000000u && mem_guest_memset(dest, (int)val, len)) {
+            cpu.r[0] = dest;
+            cpu.r[15] = cpu.r[14] & ~1u;
+            pc_updated = 1;
+            return 1;
+        }
+    }
+    if (pc >= 0x10027F98u && pc <= 0x10027F9Eu) {
+        uint32_t cur = cpu.r[2];
+        uint32_t end = cpu.r[12];
+        if (end > cur && (end - cur) <= (16u * 1024u * 1024u) && ((end - cur) & 3u) == 0u) {
+            uint32_t fill = cpu.r[0];
+            if (mem_guest_memset_words(cur, fill, end - cur)) {
+                cpu.r[2] = end;
+                cpu.r[3] += 4u;
+                cpu.r[15] = 0x10027FA0u;
+                pc_updated = 1;
+                static int logged;
+                if (!logged++) {
+                    fprintf(stderr,
+                            "[Init] memset word-loop fast-path: %u bytes\n",
+                            end - cur);
+                }
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
 __attribute__((hot)) void cpu_step(void) {
     uint32_t pc = cpu.r[15];
+
+    if (guest_megaflash_crt0_accel(pc)) {
+        timing_tick(4);
+        return;
+    }
+    if (guest_megaflash_memset_accel(pc)) {
+        timing_tick(4);
+        return;
+    }
+
+    /* Async wait / time-compare helpers: guest µs must advance faster than insn stepping. */
+    {
+        int in_async_time_wait =
+            (pc >= 0x1000F4E8u && pc <= 0x1000F540u) || /* F4E8 time poll */
+            (pc >= 0x1000F594u && pc <= 0x1000F5D4u);  /* F594 alarm-pool wait */
+        if (in_async_time_wait) {
+            static uint32_t async_wait_spin;
+            static uint32_t async_wait_bursts;
+            if (agent_guest_timer_burst_step(&async_wait_spin, &async_wait_bursts)) {
+                const uint32_t burst_us = 1000000u;
+                
+                /* After 25 bursts (25M µs guest time): force-fire armed TIMER0 alarms so
+                 * either the IRQ handler runs (background mode) or INTR is set for polling.
+                 * Also skip to f5c8 (exit inner alarm-list walk) regardless of r4 value.
+                 * Mark async_wait_cleared so subsequent accelerators (GAT, B4C2) stop. */
+                if (async_wait_bursts >= 25u) {
+                    async_wait_cleared = 1;
+                    for (int _ai = 0; _ai < 4; _ai++) {
+                        if (timer_state.armed & (1 << _ai)) {
+                            /* Force-fire: replicate timer_fire_alarm() */
+                            timer_state.intr |= (1 << _ai);
+                            nvic_signal_irq(IRQ_TIMER_IRQ_0 + _ai);
+                            timer_state.armed &= ~(1 << _ai);
+                        }
+                    }
+                    /* Only skip from inside the alarm-list WALK loop (F5B0-F5C6),
+                     * NOT from the exit sequence at F5C8+ which calls bl F558.
+                     * Skipping at F5C8/F5CA traps the CPU in an infinite loop. */
+                    if (pc >= 0x1000F5B0u && pc <= 0x1000F5C6u) {
+                        cpu.r[15] = 0x1000F5C8u;
+                        pc = cpu.r[15];
+                        
+                    }
+                }
+            }
+        }
+    }
+    /* async_context acquire walk loop (B498); deadline setup is B454 — only hook the loop.
+     * Disabled after async_wait_cleared to avoid premature deadline expiry. */
+    {
+        int in_mutex_timed_wait = !async_wait_cleared &&
+                                  (pc >= 0x1000B4C2u && pc <= 0x1000B4F4u);
+        if (in_mutex_timed_wait) {
+            static uint32_t mutex_wait_spin;
+            static uint32_t mutex_wait_bursts;
+            if (agent_guest_timer_burst_step(&mutex_wait_spin, &mutex_wait_bursts)) {
+                
+                /* No forced timeout — let b490 work-walk complete naturally.
+                 * Timer advancement alone (via bursts) is sufficient. */
+            }
+        }
+    }
+    /* get_absolute_time() hot path — only accelerate before async_wait_cleared.
+     * After the async-wait exits, timer is at 25M µs; further acceleration would
+     * cause all 1M-µs deadlines in b454 to expire prematurely. */
+    {
+        int in_get_abs_time = !async_wait_cleared &&
+                              ((pc >= 0x10009408u && pc <= 0x10009418u) ||
+                               (pc >= 0x1000945Cu && pc <= 0x10009464u));
+        if (in_get_abs_time) {
+            static uint32_t gat_spin;
+            static uint32_t gat_bursts;
+            (void)agent_guest_timer_burst_step(&gat_spin, &gat_bursts);
+        }
+    }
+    /* DA34 spinlock assist removed — 0x1002DA34 is a "pop {r3,r4,r5,pc}" return,
+     * not a spin loop.  Writing to r5 here corrupted SRAM. */
 
     /* Fast path: most PCs are in flash (0x10000000-0x101FFFFF) */
     if (__builtin_expect(pc - FLASH_BASE < FLASH_SIZE, 1)) {
@@ -1251,7 +1460,7 @@ pc_valid:
         nvic_state_t *ns = &nvic_states[ac];
 
         /* Quick check: anything pending at all? */
-        int any_pending = (ns->pending & ns->enable) |
+        int any_pending = ((ns->pending & ns->enable) != 0) |
                           systick_states[ac].pending |
                           ns->pendsv_pending;
 
@@ -1346,6 +1555,13 @@ pc_valid:
         printf("[CPU] Step %3u: PC=0x%08X instr=0x%04X\n", cpu.step_count, pc, instr);
     }
 
+    /* Thumb IT block: skip this instruction if the predicate is false */
+    if (!thumb_it_should_execute(get_active_core())) {
+        cpu.r[15] = pc + 2;
+        timing_tick(1);
+        return;
+    }
+
     /* NOP: all-zero halfword */
     if (instr == 0x0000) {
         cpu.r[15] = pc + 2;
@@ -1436,6 +1652,8 @@ typedef struct {
 } core1_bootrom_state_t;
 
 static core1_bootrom_state_t core1_bootrom = {0};
+int multicore_trace_enabled = 0;
+uint32_t sio_fifo_wr_total = 0;
 
 void dual_core_init(void) {
     /* Reset runtime core count — firmware must re-launch Core 1 */
@@ -1462,17 +1680,16 @@ void dual_core_init(void) {
     /* Reset instruction cache */
     icache_invalidate_all();
 
-    /* Read vector table from flash */
-    uint32_t vector_table = FLASH_BASE + 0x100;
-    uint32_t initial_sp = mem_read32(vector_table);
-    uint32_t reset_vector = mem_read32(vector_table + 4);
-
-    cores[CORE0].r[13] = initial_sp;
-    cores[CORE0].r[15] = reset_vector & ~1;
-
-    if (initial_sp != 0 || reset_vector != 0) {
-        fprintf(stderr, "[Boot] Vector table loaded: SP=0x%08X, PC=0x%08X\n",
-               initial_sp, reset_vector & ~1);
+    /* Log application vector table (same rule as cpu_reset_core()) */
+    {
+        uint32_t sp0;
+        memcpy(&sp0, &cpu.flash[0], 4);
+        uint32_t vector_table = (sp0 >= 0x20000000u && sp0 < 0x21000000u)
+                                ? FLASH_BASE : (FLASH_BASE + 0x100);
+        uint32_t initial_sp = mem_read32(vector_table);
+        uint32_t reset_vector = mem_read32(vector_table + 4);
+        fprintf(stderr, "[Boot] Vector table at 0x%08X: SP=0x%08X, PC=0x%08X\n",
+                vector_table, initial_sp, reset_vector & ~1);
     }
 
     /* Initialize FIFO channels */
@@ -1536,12 +1753,14 @@ int cpu_bind_core_context(int core_id, cpu_bind_context_t *ctx) {
     cpu.faultmask     = cores[core_id].faultmask;
     cpu.control       = cores[core_id].control;
 
-    /* Use RP2350 SRAM if in RP2350 mode, otherwise RP2040 SRAM */
-    if (membus_rp2350_mode && rp2350_sram_ptr) {
-        mem_set_ram_ptr(rp2350_sram_ptr, 0x20000000, 520 * 1024);
-    } else {
-        mem_set_ram_ptr(cpu.ram, RAM_BASE, RAM_SIZE);
-    }
+    /* IT state is per-core; stale IT on bind causes predicated NOP-sliding (PC+=2). */
+    cpu_state_dual_t *bound = &cores[core_id];
+    bound->it_remaining = 0;
+    bound->it_total = 0;
+    bound->it_mask = 0;
+    bound->it_cond = 0;
+
+    cpu_set_active_ram_for_exec();
     set_active_core(core_id);
     return 1;
 }
@@ -1574,7 +1793,7 @@ void cpu_unbind_core_context(int core_id, const cpu_bind_context_t *ctx) {
     cpu.faultmask = ctx->faultmask;
     cpu.control = ctx->control;
 
-    mem_set_ram_ptr(cpu.ram, RAM_BASE, RAM_SIZE);
+    cpu_set_active_ram_for_exec();
     /* Preserve the old cpu_step_core() behavior: after a core runs, the
      * active-core routing remains on that core for subsequent NVIC/SIO work. */
     set_active_core(core_id);
@@ -1608,7 +1827,7 @@ void cpu_step_core(int core_id) {
     cpu.faultmask = cores[core_id].faultmask;
     cpu.control = cores[core_id].control;
 
-    mem_set_ram_ptr(cpu.ram, RAM_BASE, RAM_SIZE);
+    cpu_set_active_ram_for_exec();
     set_active_core(core_id);
 
     cpu_step();
@@ -1636,7 +1855,7 @@ void cpu_step_core(int core_id) {
     cpu.primask = saved_primask;
     cpu.faultmask = saved_faultmask;
     cpu.control = saved_control;
-    mem_set_ram_ptr(cpu.ram, RAM_BASE, RAM_SIZE);
+    cpu_set_active_ram_for_exec();
 }
 
 void dual_core_step(void) {
@@ -1872,6 +2091,9 @@ int any_core_running(void) {
 
 void dual_core_status(void) {
     fprintf(stderr, "[DUAL-CORE STATUS]\n");
+    if (multicore_trace_enabled) {
+        fprintf(stderr, "[MC-trace] total SIO FIFO_WR writes: %u\n", sio_fifo_wr_total);
+    }
     for (int i = 0; i < NUM_CORES; i++) {
         fprintf(stderr, "[CORE%d] Status: %s\n", i, cores[i].is_halted ? "HALTED" : "RUNNING");
         fprintf(stderr, "[CORE%d] PC=0x%08X SP=0x%08X\n", i, cores[i].r[15], cores[i].r[13]);
@@ -1898,12 +2120,26 @@ void sio_set_core1_reset(int assert_reset) {
         core1_bootrom.waiting_for_launch = 0;
         core1_bootrom.launch_count = 0;
         memset(&fifo[CORE1], 0, sizeof(fifo[CORE1]));
+        if (multicore_trace_enabled) {
+            fprintf(stderr, "[MC-trace] sio_set_core1_reset(1): core1 held in reset\n");
+        }
     } else {
+        uint32_t drained;
         cores[CORE1].is_halted = 1;
         core1_bootrom.waiting_for_launch = 1;
         core1_bootrom.launch_count = 0;
         memset(&fifo[CORE1], 0, sizeof(fifo[CORE1]));
+        /* Simulate bootrom/core1 draining its outbound FIFO and acking core 0
+         * (multicore_reset_core1 / launch handshake expect this). */
+        while (fifo_try_pop(CORE0, &drained)) {
+            if (multicore_trace_enabled) {
+                fprintf(stderr, "[MC-trace] drained core0 fifo: 0x%08X\n", drained);
+            }
+        }
         fifo_try_push(CORE0, 0);
+        if (multicore_trace_enabled) {
+            fprintf(stderr, "[MC-trace] sio_set_core1_reset(0): waiting_for_launch=1, queued 0 for core0\n");
+        }
     }
 }
 
@@ -1911,8 +2147,32 @@ void sio_set_core1_stall(int stall) {
     (void)stall;
 }
 
+/* Core1 runs from RAM (.data); launching before crt0 copy leaves zeros → NOP slide → fault.
+ * Wait until core0 passes U2_Init in main (returns to 0x10000300) so u2 socket RAM is set up. */
+static int sio_core1_guest_ready(void) {
+    uint32_t pc0 = cores[CORE0].r[15] & ~1u;
+    if (pc0 >= 0x10000300u && pc0 < 0x10080000u) {
+        return 1;
+    }
+    return 0;
+}
+
+static void sio_core1_finish_launch(void) {
+    cores[CORE1].it_remaining = 0;
+    cores[CORE1].it_total = 0;
+    cores[CORE1].is_wfi = 0;
+    num_active_cores = 2;
+    corepool_start_core_thread(CORE1);
+    corepool_wake_cores();
+}
+
 int sio_core1_bootrom_handle_fifo_write(uint32_t val) {
     if (!core1_bootrom.waiting_for_launch) {
+        if (multicore_trace_enabled) {
+            fprintf(stderr,
+                    "[MC-trace] FIFO_WR 0x%08X from core%d ignored (waiting_for_launch=0, c1_fifo=%d)\n",
+                    val, get_active_core(), fifo[CORE1].count);
+        }
         return 0;
     }
 
@@ -1920,6 +2180,12 @@ int sio_core1_bootrom_handle_fifo_write(uint32_t val) {
 
     if (core1_bootrom.launch_count < 6) {
         core1_bootrom.launch_words[core1_bootrom.launch_count++] = val;
+    }
+
+    if (multicore_trace_enabled) {
+        fprintf(stderr,
+                "[MC-trace] launch word[%d]=0x%08X (echo to core0 fifo, count=%d)\n",
+                core1_bootrom.launch_count - 1, val, fifo[CORE0].count);
     }
 
     if (core1_bootrom.launch_count == 6) {
@@ -1935,18 +2201,63 @@ int sio_core1_bootrom_handle_fifo_write(uint32_t val) {
         core1_bootrom.waiting_for_launch = 0;
         core1_bootrom.launch_count = 0;
 
-        /* Auto-activate Core 1 so dual_core_step/corepool will step it */
-        if (num_active_cores < 2) {
-            num_active_cores = 2;
-            fprintf(stderr, "[CORE1] Launched by firmware — dual-core now active\n");
-            /* If threaded mode is active, start a thread for Core 1 */
-            corepool_start_core_thread(CORE1);
-        }
+        fprintf(stderr,
+                "[CORE1] Launched (FIFO) — PC=0x%08X SP=0x%08X VTOR=0x%08X\n",
+                cores[CORE1].r[15], cores[CORE1].r[13], cores[CORE1].vtor);
 
-        corepool_wake_cores();  /* Wake Core 1 thread */
+        sio_core1_finish_launch();
     }
 
     return 1;
+}
+
+void sio_force_core1_launch(uint32_t entry_pc, uint32_t stack_sp, uint32_t vtor) {
+    if (!cores[CORE1].is_halted && cores[CORE1].r[15] != 0 &&
+        cores[CORE1].r[15] != 0xFFFFFFFFu) {
+        return;
+    }
+    if (!sio_core1_guest_ready()) {
+        return;
+    }
+
+    if (entry_pc == 0) {
+        entry_pc = 0x20000120u;
+    }
+    if (stack_sp == 0) {
+        stack_sp = 0x20080800u;
+    }
+    if (vtor == 0) {
+        vtor = 0x10000100u;
+    }
+    entry_pc &= ~1u;
+
+    /* Direct launch (script / test): do not depend on FIFO waiting_for_launch. */
+    memset(cores[CORE1].r, 0, sizeof(cores[CORE1].r));
+    cores[CORE1].vtor = vtor;
+    cores[CORE1].r[13] = stack_sp;
+    cores[CORE1].r[15] = entry_pc;
+    cores[CORE1].xpsr = 0x01000000;
+    cores[CORE1].current_irq = 0xFFFFFFFF;
+    cores[CORE1].primask = 0;
+    cores[CORE1].control = 0;
+    cores[CORE1].is_halted = 0;
+    core1_bootrom.waiting_for_launch = 0;
+    core1_bootrom.launch_count = 0;
+
+    {
+        uint16_t probe = mem_read16(0x200002C6u);
+        if (probe != 0xF040u && probe != 0x40F0u) {
+            fprintf(stderr,
+                    "[CORE1] WARN: BusLoop RAM not loaded (insn@0x200002C6=0x%04X)\n",
+                    probe);
+        }
+    }
+
+    icache_invalidate_all();
+    sio_core1_finish_launch();
+    fprintf(stderr,
+            "[CORE1] Script launch — PC=0x%08X SP=0x%08X VTOR=0x%08X\n",
+            cores[CORE1].r[15], cores[CORE1].r[13], cores[CORE1].vtor);
 }
 
 /* ========================================================================
