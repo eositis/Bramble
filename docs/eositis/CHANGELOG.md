@@ -5,7 +5,7 @@ Scope: local commits on `main` after clone.
 
 ---
 
-## 2026-06-02 — MegaFlash M33 bring-up (see git log for hash)
+## 2026-06-02 — `096f2b3` — MegaFlash M33 bring-up
 
 MegaFlash / RP2350 M33 bring-up. ~+1896 / −243 lines across 21 tracked files + new `a2bus` and `scripts/`. Removed temporary agent debug logging to `~/Documents/junk/` before commit.
 
