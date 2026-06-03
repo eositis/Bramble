@@ -115,6 +115,18 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 
 ---
 
+## 2026-06-02 — Session: MegaFlash USB CDC console in Bramble
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Enable USB serial console / diagnostic module at boot in emulator |
+| **Finding** | USB host enum + DTR already in `usb.c`; MegaFlash uses `stdio_usb_connected()` → `tud_cdc_n_connected()` |
+| **Actions** | `-usb-console` TCP bridge, `-usb-stdio` stdin priority, `USB-CONSOLE.md`, stub env `USB_CONSOLE_PORT` |
+| **Outcome** | Use `-usb-console 5555 -usb-stdio` + `connect-usb-console.sh`; avoid Release+Apple stub for USB menu |
+| **Commit** | *(pending)* |
+
+---
+
 <!-- Template for future entries:
 
 ## YYYY-MM-DD — Session: <title>

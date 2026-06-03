@@ -175,4 +175,14 @@ extern int usb_cdc_stdout_enabled;
 /* Set to 1 to log USB host enumeration state transitions to stderr (-trace-usb) */
 extern int usb_enum_trace_enabled;
 
+/* Prefer USB CDC over UART0 for -stdin when both are active (-usb-stdio) */
+extern int usb_stdio_prefer_usb;
+
+/* TCP bridge for USB CDC (-usb-console <port>), bidirectional like -uart-console */
+int  usb_console_tcp_init(void);
+void usb_console_tcp_cleanup(void);
+void usb_console_tcp_poll(void);
+int  usb_console_tcp_active(void);
+void usb_console_tcp_set_port(int port);
+
 #endif /* USB_H */

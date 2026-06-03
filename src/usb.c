@@ -15,6 +15,14 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <poll.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <arpa/inet.h>
 #include "usb.h"
 #include "nvic.h"
 #include "devtools.h"
@@ -22,6 +30,147 @@
 usb_state_t usb_state;
 int usb_cdc_stdout_enabled = 0;
 int usb_enum_trace_enabled = 0;
+int usb_stdio_prefer_usb = 0;
+
+/* ========================================================================
+ * USB CDC ↔ TCP console (-usb-console)
+ * ======================================================================== */
+
+typedef struct {
+    int listen_fd;
+    int client_fd;
+    int port;
+} usb_tcp_bridge_t;
+
+static usb_tcp_bridge_t usb_tcp;
+static int usb_tcp_logged_ready;
+
+static void usb_tcp_set_nonblock(int fd) {
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags != -1) {
+        fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    }
+}
+
+static void usb_tcp_set_nodelay(int fd) {
+    int flag = 1;
+    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
+}
+
+void usb_console_tcp_set_port(int port) {
+    usb_tcp.port = port;
+}
+
+int usb_console_tcp_active(void) {
+    return usb_tcp.port > 0;
+}
+
+int usb_console_tcp_init(void) {
+    usb_tcp.listen_fd = -1;
+    usb_tcp.client_fd = -1;
+    if (usb_tcp.port <= 0) {
+        return 0;
+    }
+
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) {
+        fprintf(stderr, "[USB] TCP console: socket failed: %s\n", strerror(errno));
+        return -1;
+    }
+
+    int opt = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons((uint16_t)usb_tcp.port);
+
+    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0 ||
+        listen(fd, 1) < 0) {
+        fprintf(stderr, "[USB] TCP console: listen on %d failed: %s\n",
+                usb_tcp.port, strerror(errno));
+        close(fd);
+        return -1;
+    }
+
+    usb_tcp_set_nonblock(fd);
+    usb_tcp.listen_fd = fd;
+    fprintf(stderr, "[USB] CDC console listening on TCP port %d (nc localhost %d)\n",
+            usb_tcp.port, usb_tcp.port);
+    return 0;
+}
+
+void usb_console_tcp_cleanup(void) {
+    if (usb_tcp.client_fd >= 0) {
+        close(usb_tcp.client_fd);
+        usb_tcp.client_fd = -1;
+    }
+    if (usb_tcp.listen_fd >= 0) {
+        close(usb_tcp.listen_fd);
+        usb_tcp.listen_fd = -1;
+    }
+}
+
+void usb_console_tcp_poll(void) {
+    if (usb_tcp.port <= 0) {
+        return;
+    }
+
+    if (usb_tcp.listen_fd >= 0 && usb_tcp.client_fd < 0) {
+        struct sockaddr_in client_addr;
+        socklen_t addr_len = sizeof(client_addr);
+        int cfd = accept(usb_tcp.listen_fd, (struct sockaddr *)&client_addr, &addr_len);
+        if (cfd >= 0) {
+            usb_tcp_set_nonblock(cfd);
+            usb_tcp_set_nodelay(cfd);
+            usb_tcp.client_fd = cfd;
+            fprintf(stderr, "[USB] CDC console client connected from %s:%d\n",
+                    inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+        }
+    }
+
+    if (usb_tcp.client_fd < 0) {
+        return;
+    }
+
+    struct pollfd pfd = { .fd = usb_tcp.client_fd, .events = POLLIN };
+    if (poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN)) {
+        uint8_t buf[64];
+        ssize_t n = read(usb_tcp.client_fd, buf, sizeof(buf));
+        if (n > 0) {
+            for (ssize_t j = 0; j < n; j++) {
+                (void)usb_cdc_rx_push(buf[j]);
+            }
+        } else if (n == 0) {
+            fprintf(stderr, "[USB] CDC console client disconnected\n");
+            close(usb_tcp.client_fd);
+            usb_tcp.client_fd = -1;
+        }
+    }
+}
+
+static void usb_console_tcp_tx(const uint8_t *data, int len) {
+    if (usb_tcp.client_fd < 0 || len <= 0) {
+        return;
+    }
+    ssize_t off = 0;
+    while (off < len) {
+        ssize_t n = write(usb_tcp.client_fd, data + off, (size_t)(len - off));
+        if (n > 0) {
+            off += n;
+            continue;
+        }
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            break;
+        }
+        fprintf(stderr, "[USB] CDC console write error, disconnecting\n");
+        close(usb_tcp.client_fd);
+        usb_tcp.client_fd = -1;
+        break;
+    }
+}
 
 static const char *usb_enum_state_name(usb_enum_state_t state) {
     switch (state) {
@@ -458,14 +607,16 @@ static void usb_handle_cdc(void) {
         buf_addr = ep_ctrl & 0xFFC0;  /* bits [15:6] */
 
         if (buf_addr > 0 && buf_addr + len <= USBCTRL_DPRAM_SIZE) {
-            /* Output CDC data to stdout only when USB CDC stdio is primary
-             * (i.e. -stdin mode). When UART stdio is also active, UART
-             * already handles stdout and we must not duplicate the data. */
+            const uint8_t *payload = &usb_state.dpram[buf_addr];
+            if (usb_tcp.client_fd >= 0) {
+                usb_console_tcp_tx(payload, len);
+            }
             if (usb_cdc_stdout_enabled) {
-                fwrite(&usb_state.dpram[buf_addr], 1, len, stdout);
+                fwrite(payload, 1, (size_t)len, stdout);
                 fflush(stdout);
-                if (__builtin_expect(expect_enabled, 0))
-                    expect_append((const char *)&usb_state.dpram[buf_addr], len);
+                if (__builtin_expect(expect_enabled, 0)) {
+                    expect_append((const char *)payload, len);
+                }
             }
         }
 
@@ -579,6 +730,12 @@ void usb_step(void) {
         trace_last_ctrl = usb_state.ctrl_state;
         if (usb_state.enum_state == USB_ENUM_ACTIVE) {
             usb_trace_status("enumeration complete");
+            if (!usb_tcp_logged_ready && usb_tcp.port > 0) {
+                usb_tcp_logged_ready = 1;
+                fprintf(stderr,
+                        "[USB] CDC active — host may call stdio_usb_connected() "
+                        "(DTR asserted)\n");
+            }
         }
     }
 
@@ -587,6 +744,8 @@ void usb_step(void) {
         usb_handle_cdc();
         usb_cdc_rx_drain();
     }
+
+    usb_console_tcp_poll();
 }
 
 /* ========================================================================

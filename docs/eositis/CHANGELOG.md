@@ -102,4 +102,10 @@ No local changes in this section. Upstream includes through v0.45.0: virtual net
 
 ## Unreleased
 
-*(none)*
+### USB CDC console (`-usb-console`, `-usb-stdio`)
+
+| Change | Reason |
+|--------|--------|
+| TCP bridge for USB CDC bulk IN/OUT | MegaFlash `UserTerminal()` over USB like physical serial |
+| `-usb-stdio` prefers CDC for stdin | Firmware DEBUG output on UART0 was stealing `-stdin` routing |
+| `docs/eositis/USB-CONSOLE.md`, `connect-usb-console.sh` | Document boot detection, Release vs Apple gate |

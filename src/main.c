@@ -190,15 +190,20 @@ static void uart_stdin_cleanup(void) {
  * stdio. That keeps littleOS interactive while still allowing USB-only
  * shells such as MicroPython to consume stdin through CDC. */
 static stdin_target_t stdin_select_target(void) {
-    int usb_ready = usb_cdc_stdout_enabled && usb_cdc_stdio_active();
+    int usb_ready = usb_cdc_stdio_active();
     int uart_ready = stdin_uart0_rx_ready();
     int uart_console_ready = stdin_uart0_console_active();
+
+    /* MegaFlash: DEBUG prints on UART first; -usb-stdio forces USB for UserTerminal */
+    if (usb_stdio_prefer_usb && usb_ready) {
+        return STDIN_TARGET_USB_CDC;
+    }
 
     if (uart_console_ready) {
         return STDIN_TARGET_UART0;
     }
 
-    if (usb_ready) {
+    if (usb_ready && (usb_cdc_stdout_enabled || usb_console_tcp_active())) {
         return STDIN_TARGET_USB_CDC;
     }
 
@@ -335,7 +340,9 @@ int main(int argc, char **argv) {
         fprintf(stderr, "  -debug1    Enable debug output for Core 1 (dual-core only)\n");
         fprintf(stderr, "  -asm       Show assembly instruction tracing\n");
         fprintf(stderr, "  -status    Print periodic status updates\n");
-        fprintf(stderr, "  -stdin     Enable stdin polling for guest console input\n");
+        fprintf(stderr, "  -stdin     Bridge host stdin/stdout to guest console (UART or USB)\n");
+        fprintf(stderr, "  -usb-stdio Prefer USB CDC for -stdin (MegaFlash UserTerminal)\n");
+        fprintf(stderr, "  -usb-console <port>  Bidirectional USB CDC over TCP (nc localhost <port>)\n");
         fprintf(stderr, "  -gdb [port] Start GDB server (default port: %d)\n", GDB_DEFAULT_PORT);
         fprintf(stderr, "  -clock <MHz> Set CPU clock frequency (default: 1, real: 125)\n");
         fprintf(stderr, "  -cores <N|auto> Active cores per instance (1, 2, or auto; default: 1)\n");
@@ -463,6 +470,14 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[i], "-stdin") == 0) {
             stdin_enabled = 1;
             usb_cdc_stdout_enabled = 1;
+        } else if (strcmp(argv[i], "-usb-stdio") == 0) {
+            stdin_enabled = 1;
+            usb_cdc_stdout_enabled = 1;
+            usb_stdio_prefer_usb = 1;
+        } else if (strcmp(argv[i], "-usb-console") == 0) {
+            if (i + 1 < argc) {
+                usb_console_tcp_set_port(atoi(argv[++i]));
+            }
         } else if (strcmp(argv[i], "-gdb") == 0) {
             gdb_enabled = 1;
             if (i + 1 < argc && argv[i + 1][0] != '-') {
@@ -964,12 +979,18 @@ skip_fuse:
 
     if (stdin_enabled) {
         uart_stdin_init();
-        fprintf(stderr,"[Init] Stdin polling enabled for UART0 Rx\n");
+        fprintf(stderr, "[Init] Stdin polling enabled (target: %s)\n",
+                usb_stdio_prefer_usb ? "USB CDC preferred" : "UART0 or USB CDC");
     }
 
     /* Network bridge initialization */
     if (net_bridge_init() < 0) {
         fprintf(stderr, "[Error] Failed to initialize network bridge\n");
+        return EXIT_FAILURE;
+    }
+
+    if (usb_console_tcp_init() < 0) {
+        fprintf(stderr, "[Error] Failed to initialize USB CDC TCP console\n");
         return EXIT_FAILURE;
     }
 
@@ -1257,6 +1278,7 @@ skip_fuse:
                 uart_stdin_poll();
             if ((step_count & 0x3FF) == 0) {
                 net_bridge_poll();
+                usb_console_tcp_poll();
                 wire_poll();
                 if (vnet_enabled) vnet_poll();
                 if (w5500_live) w5500_poll(&w5500_dev);
@@ -1321,6 +1343,7 @@ skip_fuse:
             /* Poll network, wire, vnet, and WiFi TAP */
             corepool_lock();
             net_bridge_poll();
+            usb_console_tcp_poll();
             wire_poll();
             cyw43_tap_poll();
             if (vnet_enabled) vnet_poll();
@@ -1429,6 +1452,7 @@ skip_fuse:
             /* Poll network bridges, wire links, and WiFi TAP every 1024 steps */
             if ((step_count & 0x3FF) == 0) {
                 net_bridge_poll();
+                usb_console_tcp_poll();
                 wire_poll();
                 cyw43_tap_poll();
                 if (vnet_enabled) vnet_poll();
@@ -1499,6 +1523,7 @@ skip_fuse:
     }
 
     net_bridge_cleanup();
+    usb_console_tcp_cleanup();
     wire_cleanup();
     cyw43_tap_close();
     if (vnet_enabled) vnet_cleanup();

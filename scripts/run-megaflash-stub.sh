@@ -20,6 +20,9 @@ EXTRA=()
 if [[ -n "${UART_CONSOLE_PORT:-}" ]]; then
   EXTRA+=(-uart-console "$UART_CONSOLE_PORT")
 fi
+if [[ -n "${USB_CONSOLE_PORT:-}" ]]; then
+  EXTRA+=(-usb-console "$USB_CONSOLE_PORT" -usb-stdio)
+fi
 
 exec "$BRAMBLE" "$UF2" \
   -arch m33 \
