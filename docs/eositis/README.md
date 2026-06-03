@@ -7,5 +7,6 @@ Personal working notes and process rules for the **Bramble** fork used to run **
 | [SESSION-LOG.md](SESSION-LOG.md) | Chronological record of agent/user sessions and outcomes |
 | [CHANGELOG.md](CHANGELOG.md) | Code changes since clone from `origin/main`, with rationale |
 | [PROJECT-RULES.md](PROJECT-RULES.md) | Mandatory workflow rules (logging, changelog, commits) |
+| [UART-CONSOLE.md](UART-CONSOLE.md) | Bidirectional UART debug via TCP (`-uart-console`) |
 
 Cursor agents should follow `.cursor/rules/eositis-project.mdc` on every task in this repo.

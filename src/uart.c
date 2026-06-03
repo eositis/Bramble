@@ -189,6 +189,10 @@ void uart_write32(int uart_num, uint32_t offset, uint32_t val) {
             }
             if (net_bridge_uart_active(uart_num)) {
                 net_bridge_uart_tx(uart_num, ch);
+                if (net_bridge_mirror_stdio) {
+                    fputc((int)ch, stderr);
+                    fflush(stderr);
+                }
             } else if (wire_uart_active(uart_num)) {
                 wire_send_uart(uart_num, ch);
             } else if (!usb_cdc_stdout_enabled) {

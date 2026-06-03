@@ -20,6 +20,7 @@
 #include "uart.h"
 
 net_bridge_t net_bridge;
+int net_bridge_mirror_stdio = 0;
 
 /* Set a file descriptor to non-blocking mode */
 static void set_nonblock(int fd) {
@@ -198,4 +199,8 @@ void net_bridge_uart_tx(int uart_num, uint8_t byte) {
 int net_bridge_uart_active(int uart_num) {
     if (uart_num < 0 || uart_num >= NET_BRIDGE_MAX_UART) return 0;
     return net_bridge.uart[uart_num].mode != NET_MODE_NONE;
+}
+
+int net_bridge_any_active(void) {
+    return net_bridge_uart_active(0) || net_bridge_uart_active(1);
 }

@@ -91,4 +91,11 @@ No local changes in this section. Upstream includes through v0.45.0: virtual net
 
 ## Unreleased
 
-*(none)*
+### UART console (`-uart-console`, docs)
+
+| Change | Reason |
+|--------|--------|
+| `-uart-console` / `-uart-console1` CLI aliases | Same as `-net-uart0`; easier to find for debugging |
+| `-uart-console-mirror` | Optional guest TX copy to host stderr |
+| `docs/eositis/UART-CONSOLE.md`, `scripts/connect-uart-console.sh` | Usage for nc/socat; Windows via WSL/PuTTY |
+| `UART_CONSOLE_PORT` in `run-megaflash-stub.sh` | Optional TCP console when running MegaFlash stub |

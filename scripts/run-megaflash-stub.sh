@@ -16,6 +16,11 @@ if [[ ! -f "$UF2" ]]; then
   exit 1
 fi
 
+EXTRA=()
+if [[ -n "${UART_CONSOLE_PORT:-}" ]]; then
+  EXTRA+=(-uart-console "$UART_CONSOLE_PORT")
+fi
+
 exec "$BRAMBLE" "$UF2" \
   -arch m33 \
   -clock 150 \
@@ -23,5 +28,6 @@ exec "$BRAMBLE" "$UF2" \
   -trace-mc \
   -script "$STUB" \
   -timeout "${TIMEOUT:-15}" \
+  "${EXTRA[@]}" \
   "$@"
 

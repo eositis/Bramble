@@ -353,11 +353,14 @@ int main(int argc, char **argv) {
         fprintf(stderr, "  -emmc <path>                Attach eMMC image to SPI0\n");
         fprintf(stderr, "  -emmc-spi <0|1>             SPI bus for eMMC (default: 0)\n");
         fprintf(stderr, "  -emmc-size <MB>             eMMC size in MB (default: 128)\n");
-        fprintf(stderr, "\nNetworking:\n");
-        fprintf(stderr, "  -net-uart0 <port>           Bridge UART0 to TCP server on port\n");
-        fprintf(stderr, "  -net-uart1 <port>           Bridge UART1 to TCP server on port\n");
-        fprintf(stderr, "  -net-uart0-connect <h:p>    Connect UART0 to remote host:port\n");
-        fprintf(stderr, "  -net-uart1-connect <h:p>    Connect UART1 to remote host:port\n");
+        fprintf(stderr, "\nUART console (TCP, bidirectional):\n");
+        fprintf(stderr, "  -uart-console <port>        Alias: UART0 TCP server (use: nc localhost <port>)\n");
+        fprintf(stderr, "  -uart-console1 <port>       UART1 TCP server\n");
+        fprintf(stderr, "  -uart-console-mirror        Also print guest UART TX on host stderr\n");
+        fprintf(stderr, "  -net-uart0 <port>           Same as -uart-console (UART0 listen)\n");
+        fprintf(stderr, "  -net-uart1 <port>           UART1 TCP server\n");
+        fprintf(stderr, "  -net-uart0-connect <h:p>    UART0 TCP client to host:port\n");
+        fprintf(stderr, "  -net-uart1-connect <h:p>    UART1 TCP client to host:port\n");
         fprintf(stderr, "\nMulti-Device Wiring:\n");
         fprintf(stderr, "  -wire-uart0 <path>          Wire UART0 to peer via Unix socket\n");
         fprintf(stderr, "  -wire-uart1 <path>          Wire UART1 to peer via Unix socket\n");
@@ -534,12 +537,16 @@ int main(int argc, char **argv) {
             if (i + 1 < argc) {
                 emmc_size = (size_t)atoi(argv[++i]) * 1024 * 1024;
             }
-        } else if (strcmp(argv[i], "-net-uart0") == 0) {
+        } else if (strcmp(argv[i], "-uart-console-mirror") == 0) {
+            net_bridge_mirror_stdio = 1;
+        } else if (strcmp(argv[i], "-uart-console") == 0 ||
+                   strcmp(argv[i], "-net-uart0") == 0) {
             if (i + 1 < argc) {
                 net_bridge.uart[0].mode = NET_MODE_LISTEN;
                 net_bridge.uart[0].port = atoi(argv[++i]);
             }
-        } else if (strcmp(argv[i], "-net-uart1") == 0) {
+        } else if (strcmp(argv[i], "-uart-console1") == 0 ||
+                   strcmp(argv[i], "-net-uart1") == 0) {
             if (i + 1 < argc) {
                 net_bridge.uart[1].mode = NET_MODE_LISTEN;
                 net_bridge.uart[1].port = atoi(argv[++i]);
