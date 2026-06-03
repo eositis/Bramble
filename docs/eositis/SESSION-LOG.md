@@ -88,6 +88,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Request** | Create `docs/eositis/`: session log, changelog, commit-on-task rule |
 | **Actions** | Added SESSION-LOG, CHANGELOG, PROJECT-RULES, README; `.cursor/rules/eositis-project.mdc` |
 | **Outcome** | Process docs committed; agents must append log and commit per task |
+| **Commit** | `61a4e5c` — docs(eositis): session log, changelog, task workflow rules |
 
 ---
 
