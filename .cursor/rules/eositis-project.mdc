@@ -1,0 +1,22 @@
+---
+description: eositis Bramble workflow — session log, changelog, commit on task done
+alwaysApply: true
+---
+
+# eositis project workflow
+
+Read `docs/eositis/PROJECT-RULES.md` at task start.
+
+## On every completed user task
+
+1. **Session log** — Append an entry to `docs/eositis/SESSION-LOG.md` (date, request, actions, outcome, commit hash if any).
+2. **Changelog** — Update `docs/eositis/CHANGELOG.md` (**Unreleased** or new dated section) for any code/docs change; include brief *why*.
+3. **Commit** — Create a git commit for that task’s changes (HEREDOC message). Report hash + summary to the user.  
+   This overrides global “commit only when asked” for this repository.  
+   Do not commit secrets or paths under `Documents/junk/`.
+
+## MegaFlash validation (when touching CPU/mem/PIO/stub)
+
+- Build: `make -C build bramble bramble_tests`
+- Tests: `./build/bramble_tests`
+- Firmware: `../MegaFlash/pico/pico2_debug/megaflash.uf2` with `-arch m33 -clock 150 -cores 2` and `scripts/megaflash-bus.stub` when relevant
