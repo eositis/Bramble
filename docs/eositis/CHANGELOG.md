@@ -100,7 +100,7 @@ No local changes in this section. Upstream includes through v0.45.0: virtual net
 
 ---
 
-## Unreleased
+## 2026-06-02 — `0c410ae` — USB CDC TCP console
 
 ### USB CDC console (`-usb-console`, `-usb-stdio`)
 
