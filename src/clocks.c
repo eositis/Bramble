@@ -2,6 +2,7 @@
 #include <string.h>
 #include "clocks.h"
 #include "emulator.h"
+#include "rp2350_rv/rp2350_memmap.h"
 
 /* Global clock-domain peripheral state */
 clocks_state_t clocks_state;
@@ -469,6 +470,19 @@ static void rosc_write(uint32_t addr, uint32_t val, uint32_t alias) {
  * Top-level dispatch (called from membus.c)
  * ======================================================================== */
 
+int clocks_bus_match(uint32_t addr) {
+    uint32_t base = addr & ~0x3FFFu;
+    if (membus_rp2350_mode) {
+        return (base == RP2350_RESETS_BASE || base == RP2350_CLOCKS_BASE ||
+                base == RP2350_PSM_BASE || base == RP2350_XOSC_BASE ||
+                base == RP2350_PLL_SYS_BASE || base == RP2350_PLL_USB_BASE ||
+                base == RP2350_WATCHDOG_BASE || base == RP2350_ROSC_BASE);
+    }
+    return (base == RESETS_BASE || base == CLOCKS_BASE || base == XOSC_BASE ||
+            base == PLL_SYS_BASE || base == PLL_USB_BASE ||
+            base == WATCHDOG_BASE || base == PSM_BASE || base == ROSC_BASE);
+}
+
 uint32_t clocks_read32(uint32_t addr) {
     /* Reads always return the canonical register value regardless of alias */
     uint32_t base_aligned = addr & ~0x3FFF;
@@ -477,6 +491,26 @@ uint32_t clocks_read32(uint32_t addr) {
 
     /* Map to canonical address for reading */
     uint32_t canonical = base_aligned | (addr & 0xFFF);
+
+    if (membus_rp2350_mode) {
+        if (base_aligned == RP2350_RESETS_BASE)
+            return resets_read(canonical);
+        if (base_aligned == RP2350_CLOCKS_BASE)
+            return clocks_domain_read(canonical);
+        if (base_aligned == RP2350_XOSC_BASE)
+            return xosc_read(canonical);
+        if (base_aligned == RP2350_PLL_SYS_BASE)
+            return pll_read(&clocks_state.pll_sys, canonical & 0xFFF);
+        if (base_aligned == RP2350_PLL_USB_BASE)
+            return pll_read(&clocks_state.pll_usb, canonical & 0xFFF);
+        if (base_aligned == RP2350_WATCHDOG_BASE)
+            return watchdog_read(canonical);
+        if (base_aligned == RP2350_PSM_BASE)
+            return psm_read(canonical);
+        if (base_aligned == RP2350_ROSC_BASE)
+            return rosc_read(canonical);
+        return 0;
+    }
 
     if (base_aligned == RESETS_BASE)
         return resets_read(canonical);
@@ -502,6 +536,26 @@ void clocks_write32(uint32_t addr, uint32_t val) {
     uint32_t base_aligned = addr & ~0x3FFF;
     uint32_t alias = (addr >> 12) & 0x3;
     uint32_t canonical = base_aligned | (addr & 0xFFF);
+
+    if (membus_rp2350_mode) {
+        if (base_aligned == RP2350_RESETS_BASE)
+            resets_write(canonical, val, alias);
+        else if (base_aligned == RP2350_CLOCKS_BASE)
+            clocks_domain_write(canonical, val, alias);
+        else if (base_aligned == RP2350_XOSC_BASE)
+            xosc_write(canonical, val, alias);
+        else if (base_aligned == RP2350_PLL_SYS_BASE)
+            pll_write(&clocks_state.pll_sys, canonical & 0xFFF, val, alias);
+        else if (base_aligned == RP2350_PLL_USB_BASE)
+            pll_write(&clocks_state.pll_usb, canonical & 0xFFF, val, alias);
+        else if (base_aligned == RP2350_WATCHDOG_BASE)
+            watchdog_write(canonical, val, alias);
+        else if (base_aligned == RP2350_PSM_BASE)
+            psm_write(canonical, val, alias);
+        else if (base_aligned == RP2350_ROSC_BASE)
+            rosc_write(canonical, val, alias);
+        return;
+    }
 
     if (base_aligned == RESETS_BASE)
         resets_write(canonical, val, alias);

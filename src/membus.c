@@ -212,7 +212,13 @@ static void io_qspi_write(uint32_t offset, uint32_t val) {
 static uint32_t pads_qspi_regs[8];  /* VOLTAGE_SELECT + 6 pads + spare */
 
 static int pads_qspi_match(uint32_t addr) {
-    uint32_t base = addr & ~0x3000;
+    uint32_t base;
+    if (membus_rp2350_mode) {
+        /* RP2350: RESETS moved to 0x40020000; PADS_QSPI is at 0x40040000 */
+        base = addr & ~0x3FFFu;
+        return (base >= 0x40040000u && base < 0x40040000u + PADS_QSPI_BLOCK_SIZE);
+    }
+    base = addr & ~0x3000u;
     return (base >= PADS_QSPI_BASE && base < PADS_QSPI_BASE + PADS_QSPI_BLOCK_SIZE);
 }
 
@@ -644,11 +650,7 @@ void membus_alarm_pool_wake_pending(void) {
  * ======================================================================== */
 
 static int is_clocks_addr(uint32_t addr) {
-    uint32_t base = addr & ~0x3FFF; /* 16KB-aligned base */
-    return (base == RESETS_BASE  || base == CLOCKS_BASE ||
-            base == XOSC_BASE   || base == PLL_SYS_BASE ||
-            base == PLL_USB_BASE || base == WATCHDOG_BASE ||
-            base == PSM_BASE    || base == ROSC_BASE);
+    return clocks_bus_match(addr);
 }
 
 static int is_adc_addr(uint32_t addr) {

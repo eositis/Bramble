@@ -142,6 +142,19 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 
 ---
 
+## 2026-06-03 — Session: vfprintf / flash init / panic skip (USB console)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Continue proposed stdio path after IRQ fix — reach `UserTerminal`, TCP menu |
+| **Actions** | Fixed stdio hook order in `cpu_step`; RP2350 `RESETS` memmap; Pico `gpioc` Thumb-32 decode; RP2350 SPI bases; guest hooks (`_vfprintf_r`, `__ascii_mbtowc`, `check_alloc`, `tsReadJEDECID`, SPI/mutex veneers, `panic` return); HardFault prev-PC log |
+| **Tests** | `make -C build bramble bramble_tests`; `./build/bramble_tests` → 322/322 |
+| **Run** | `./scripts/run-megaflash-usb-console.sh` (90s): **168M steps**, `PC≈0x1000A9D6` (`hw_claim`), no `*** PANIC ***` after skip; was ~108M @ `spi_unreset`, then ~7k @ flash fault |
+| **Outcome** | **Partial.** Past IRQ, `spi_unreset`, flash JEDEC, and `panic`→`_exit` BKPT; still spinning in `hw_claim`. TCP menu not confirmed this run |
+| **Transcript** | [vfprintf session](c4c672a1-a61d-45a7-8c50-b3eefb78c27b) |
+
+---
+
 ## 2026-06-03 — Session: IRQ spin (`irq_add_shared_handler`)
 
 | Field | Detail |

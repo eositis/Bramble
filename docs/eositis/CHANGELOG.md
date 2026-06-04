@@ -7,6 +7,19 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+### MegaFlash USB console — stdio hooks + RP2350 bring-up (2026-06-03)
+
+| Change | Reason |
+|--------|--------|
+| `cpu_step`: run `usb_console_guest_stdio_hook()` before reading `pc` | Hooks that set `cpu.r[15]` were ignored; guest kept executing stubbed insns |
+| `clocks_bus_match` / RP2350 `RESETS` @ `0x40020000`; `pads_qspi` @ `0x40040000` | `spi_unreset` polled wrong peripheral (PADS stub); infinite spin @ `0x1001192A` |
+| `thumb32_pico_gpioc`: decode `EE40`/`EE60` `.inst` GPIO helpers | Mis-decoded as ALU → corrupt PC (`0xDF00325C`) in flash init |
+| `spi_match` RP2350 bases `0x40080000` / `0x40088000` | Flash driver uses relocated SPI0 |
+| Guest hooks: `_vfprintf_r`, `__ascii_mbtowc`, `check_alloc`, flash/SPI veneers, `panic` skip | Past locale spin, JEDEC read, and `BKPT` `_exit` after `hw_claim` panic |
+| One-shot HardFault OOB log (`prev` PC + step) | Diagnose flash path faults |
+
+**Known blocker:** Guest still high-step count (~169M/90s) in `hw_claim` @ ~`0x1000A9D6` after skipped `panic`; **TCP menu bytes not yet verified**.
+
 ### IRQ / Thumb-2 (2026-06-03)
 
 | Change | Reason |
@@ -15,8 +28,6 @@ Scope: local commits on `main` after clone.
 | `cpu_step`: `pc = cpu.r[15] & ~1` before fetch | Misaligned PC left guest in IRQ path executing 16-bit halves of 32-bit insns @ `0x1000ADE5` |
 | `t32_bl`: branch target `& ~1` | Consistent even-PC convention |
 | `test_m33_thumb2_ldmdb` | Regression for `E912 0007` |
-
-**Known blocker:** `_vfprintf_r` locale loop @ ~`0x1002F312` after IRQ fix; early `*** PANIC ***` still on stderr.
 
 ### USB stdio / RP2350 bootrom (2026-06-03 session)
 

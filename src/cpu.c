@@ -1339,12 +1339,14 @@ static int guest_megaflash_memset_accel(uint32_t pc) {
     return 0;
 }
 
-__attribute__((hot)) void cpu_step(void) {
-    uint32_t pc = cpu.r[15] & ~1u;
+static uint32_t cpu_step_prev_pc;
 
+__attribute__((hot)) void cpu_step(void) {
     if (get_active_core() == CORE0) {
         usb_console_guest_stdio_hook();
     }
+
+    uint32_t pc = cpu.r[15] & ~1u;
 
     if (guest_megaflash_crt0_accel(pc)) {
         timing_tick(4);
@@ -1444,20 +1446,26 @@ __attribute__((hot)) void cpu_step(void) {
     {
         uint32_t handler = mem_read32(cpu.vtor + EXC_HARDFAULT * 4);
         if (handler && handler != 0xFFFFFFFF) {
-            if (cpu.debug_enabled) {
-                printf("[CPU] HardFault: PC out of bounds (0x%08X) -> handler 0x%08X\n",
-                       pc, handler);
+            static int oob_hf_logged;
+            if (!oob_hf_logged++) {
+                fprintf(stderr,
+                        "[CPU] HardFault: PC out of bounds (0x%08X) prev=0x%08X step=%u -> handler 0x%08X\n",
+                        pc, cpu_step_prev_pc, cpu.step_count, handler);
             }
             cpu_exception_entry(EXC_HARDFAULT);
             return;
         }
-        if (cpu.debug_enabled)
-            printf("[CPU] ERROR: PC out of bounds (0x%08X), no HardFault handler\n", pc);
+        static int oob_halt_logged;
+        if (!oob_halt_logged++) {
+            fprintf(stderr, "[CPU] ERROR: PC out of bounds (0x%08X), no HardFault handler\n",
+                    pc);
+        }
         cpu.r[15] = 0xFFFFFFFF;
         return;
     }
 
 pc_valid:
+    cpu_step_prev_pc = pc;
     /* Check for pending interrupts (only if PRIMASK allows) */
     /* FAULTMASK blocks everything except NMI; PRIMASK blocks configurable exceptions */
     if (!cpu.primask && !cpu.faultmask) {

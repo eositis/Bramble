@@ -302,6 +302,23 @@ static void usb_log_cdc_active_once(void) {
 #define USB_GUEST_PRINT_BANNER      0x10005af0u
 #define USB_GUEST_GET_DEVICE_INFO   0x10005058u /* GetDeviceInfoString */
 #define USB_GUEST_ASSERT_FUNC       0x1000da68u /* __assert_func */
+#define USB_GUEST_CHECK_ALLOC       0x1000d924u /* check_alloc — skip heap bounds under emu */
+#define USB_GUEST_ENABLE_SPI0       0x10002910u /* enable_spi0 — clamp deviceNum for emu */
+#define USB_GUEST_SPI_WR_RD_VENEER  0x100347d0u /* __spi_write_read_blocking_veneer */
+#define USB_GUEST_MUTEX_ENTER_V     0x10034858u /* __recursive_mutex_enter_blocking_veneer */
+#define USB_GUEST_MUTEX_EXIT_V      0x10034848u /* __recursive_mutex_exit_veneer */
+#define USB_GUEST_TS_READ_JEDECID   0x10003088u /* tsReadJEDECID — stub JEDEC for emu flash */
+#define USB_GUEST_EXIT              0x1000d9c0u /* _exit → BKPT loop */
+#define USB_GUEST_PANIC             0x1000a8b8u /* panic — skip BKPT _exit under emu */
+#define USB_GUEST_WRAP_VPRINTF      0x1000dd08u /* __wrap_vprintf */
+#define USB_GUEST_VFPRINTF_R         0x1002f258u /* _vfprintf_r — skip locale/wchar body */
+#define USB_GUEST_LOCALE_MB_CUR_MAX 0x10032278u /* __locale_mb_cur_max — vfprintf locale spin */
+#define USB_GUEST_VFPRINTF_LOOP_BACK  0x1002f338u /* b.n 1002f30c — cap locale scan iterations */
+#define USB_GUEST_VFPRINTF_LOOP_EXIT  0x1002f49cu
+#define USB_GUEST_ASCII_MBTOWC      0x10033cc0u /* __ascii_mbtowc */
+#define USB_GUEST_ASCII_MBTOWC_LOOP 0x10033ce8u /* internal b.n 10033cd4 */
+#define USB_GUEST_VFPRINTF_LO       0x1002f200u
+#define USB_GUEST_VFPRINTF_HI       0x10031300u
 #define USB_GUEST_USB_CONN_CMP      0x1000046cu /* cmp r0,#0 after stdio_usb_connected (Pico path) */
 #define USB_GUEST_USB_CONN_CMP_DBG  0x100003e6u /* same, debug main loop */
 
@@ -337,29 +354,17 @@ static void usb_console_guest_tx_cstr(uint32_t addr) {
 
 static int usb_guest_lr_skip_printf(uint32_t lr) {
     /* newlib _vfprintf_r locale path hangs under partial VFP */
-    if (lr >= 0x10000300u && lr <= 0x10000392u) {
-        return 1; /* main() boot banners */
+    if (lr >= 0x10000300u && lr <= 0x10007fffu) {
+        return 1; /* guest .text — format IO via hooks/TCP only */
     }
-    if (lr >= 0x10006828u && lr <= 0x10006850u) {
-        return 1; /* U2_Init (runs before main banners) */
-    }
-    if (lr >= 0x100058b4u && lr <= 0x100058d4u) {
-        return 1; /* DeviceInfo */
-    }
-    if (lr >= 0x10005720u && lr <= 0x10005780u) {
-        return 1; /* PrintVolInfoList */
-    }
-    if (lr >= 0x10005ad0u && lr <= 0x10005f00u) {
-        return 1; /* UserTerminal menu (integer/%f printfs hang too) */
-    }
-    if (lr >= 0x1000da68u && lr <= 0x1000da90u) {
-        return 1; /* __assert_func message printf */
+    if (lr >= USB_GUEST_VFPRINTF_LO && lr <= USB_GUEST_VFPRINTF_HI) {
+        return 1;
     }
     return 0;
 }
 
-static void usb_guest_skip_printf(void) {
-    cpu.r[0] = 0;
+static void usb_guest_return_to_lr(uint32_t ret) {
+    cpu.r[0] = ret;
     cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
 }
 
@@ -400,22 +405,87 @@ void usb_console_guest_stdio_hook(void) {
 
     uint32_t pc = cpu.r[15] & ~1u;
     uint32_t lr = cpu.r[14] & ~1u;
+    static uint32_t vf_locale_iters;
 
     if (pc == USB_GUEST_GET_DEVICE_INFO) {
         usb_guest_skip_get_device_info_string();
+        return;
+    }
+    if (pc == USB_GUEST_ENABLE_SPI0) {
+        if (cpu.r[0] > 1u) {
+            cpu.r[0] = (cpu.r[0] == 0x40080000u) ? 0u : 1u;
+        }
+        return;
+    }
+    if (pc == USB_GUEST_PANIC) {
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return;
+    }
+    if (pc == USB_GUEST_TS_READ_JEDECID) {
+        cpu.r[0] = 0xEF4017u;
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return;
+    }
+    if (pc == USB_GUEST_MUTEX_ENTER_V || pc == USB_GUEST_MUTEX_EXIT_V) {
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return;
+    }
+    if (pc == USB_GUEST_SPI_WR_RD_VENEER) {
+        uint32_t rx = cpu.r[2];
+        if (rx >= 0x20000000u && rx < 0x20082000u) {
+            mem_write8(rx + 0, 0x17);
+            mem_write8(rx + 1, 0x40);
+            mem_write8(rx + 2, 0xEF);
+            mem_write8(rx + 3, 0x00);
+        }
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
         return;
     }
     if (pc == USB_GUEST_ASSERT_FUNC) {
         fprintf(stderr,
                 "[USB] guest assert file=0x%08X line=%u func=0x%08X expr=0x%08X\n",
                 cpu.r[0], (unsigned)cpu.r[1], cpu.r[2], cpu.r[3]);
-        usb_console_guest_tx_cstr(cpu.r[0]);
-        usb_console_guest_tx_cstr(cpu.r[2]);
-        usb_console_guest_tx_cstr(cpu.r[3]);
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
         return;
     }
-    if (pc == USB_GUEST_WRAP_PRINTF && usb_guest_lr_skip_printf(lr)) {
-        usb_guest_skip_printf();
+    if (pc == USB_GUEST_CHECK_ALLOC) {
+        usb_guest_return_to_lr(cpu.r[0]);
+        return;
+    }
+    if (pc == USB_GUEST_VFPRINTF_R) {
+        usb_guest_return_to_lr(0);
+        return;
+    }
+    if (pc == USB_GUEST_LOCALE_MB_CUR_MAX) {
+        usb_guest_return_to_lr(1);
+        return;
+    }
+    if (pc == USB_GUEST_VFPRINTF_LOOP_BACK) {
+        if (++vf_locale_iters > 512u) {
+            vf_locale_iters = 0;
+            cpu.r[15] = USB_GUEST_VFPRINTF_LOOP_EXIT;
+            return;
+        }
+    } else if (pc < USB_GUEST_VFPRINTF_LO || pc > USB_GUEST_VFPRINTF_HI) {
+        vf_locale_iters = 0;
+    }
+    if (pc == USB_GUEST_ASCII_MBTOWC) {
+        int ret = 0;
+        if (cpu.r[1] != 0 && cpu.r[2] != 0) {
+            uint8_t ch = mem_read8(cpu.r[2]);
+            mem_write32(cpu.r[1], (uint32_t)ch);
+            ret = 1;
+        }
+        usb_guest_return_to_lr((uint32_t)ret);
+        return;
+    }
+    if (pc == USB_GUEST_ASCII_MBTOWC_LOOP) {
+        usb_guest_return_to_lr(1);
+        return;
+    }
+    if ((pc == USB_GUEST_WRAP_PRINTF || pc == USB_GUEST_WRAP_VPRINTF) &&
+        usb_guest_lr_skip_printf(lr)) {
+        usb_guest_return_to_lr(0);
         return;
     }
     if (pc == USB_GUEST_USER_TERMINAL_DEVINFO) {

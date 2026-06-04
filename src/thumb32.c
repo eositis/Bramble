@@ -19,6 +19,7 @@
 #include "nvic.h"
 #include "thumb32.h"
 #include "devtools.h"
+#include "gpio.h"
 
 /* External globals from cpu.c */
 extern int pc_updated;
@@ -307,6 +308,33 @@ static float vfp_read_s(int sn) {
 
 static void vfp_write_s(int sn, float f) {
     memcpy(&vfp_s[sn], &f, sizeof(f));
+}
+
+/* Pico SDK gpioc_lo_out/oe set/clr via .inst (EE40/EE60 + lower 0xR010/0xR014). */
+static int thumb32_pico_gpioc(uint16_t upper, uint16_t lower) {
+    if ((upper & 0xFFF0u) != 0xEE40u && (upper & 0xFFF0u) != 0xEE60u) {
+        return 0;
+    }
+    uint32_t lo = lower & 0xF00Fu;
+    if (lo != 0x0010u && lo != 0x0014u) {
+        return 0;
+    }
+    unsigned rn = (unsigned)((lower >> 12) & 0xFu);
+    uint32_t mask = cpu.r[rn];
+    if (lo == 0x0014u) {
+        if ((upper & 0xFFF0u) == 0xEE60u) {
+            gpio_state.gpio_oe &= ~mask;
+        } else {
+            gpio_state.gpio_oe |= mask;
+        }
+        return 1;
+    }
+    if ((upper & 0xFFF0u) == 0xEE60u) {
+        gpio_state.gpio_out &= ~mask;
+    } else {
+        gpio_state.gpio_out |= mask;
+    }
+    return 1;
 }
 
 static int thumb32_vfp_exec(uint32_t pc, uint16_t upper, uint16_t lower) {
@@ -1134,6 +1162,9 @@ int thumb32_step(uint32_t pc, uint16_t upper, uint16_t lower) {
         }
         /* VLDR/VSTR Dn (0xED9x / 0xED8x) — not generic 0xED00 data-processing */
         if ((upper & 0xFFF0) == 0xED90 || (upper & 0xFFF0) == 0xED80) {
+            return 1;
+        }
+        if (thumb32_pico_gpioc(upper, lower)) {
             return 1;
         }
         t32_dp_shifted_reg(pc, upper, lower);

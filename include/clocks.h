@@ -167,6 +167,7 @@ typedef struct {
 /* Functions */
 void clocks_init(void);
 void clocks_reset(void);
+int clocks_bus_match(uint32_t addr);
 uint32_t clocks_read32(uint32_t addr);
 void clocks_write32(uint32_t addr, uint32_t val);
 
