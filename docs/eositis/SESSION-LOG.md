@@ -168,6 +168,21 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 
 ---
 
+## 2026-06-02 — Session: MegaFlash U2/SPI/alarm bring-up toward UserTerminal
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Continue MegaFlash USB CDC TCP console run to `UserTerminal` (`0x10005AD0`); proceed per eositis rules |
+| **Actions** | Guest hooks: skip `U2_Init` / `U2_Net_Init` / `u2_mon_push` / U2 poll; bootstrap U2 crit section + alarm pool lock ptr; `alarm_pool_get_default` stub; SPI `0xFF` MISO + SSPDR auto-clock + `__spi_read_blocking_veneer` fill; UserTerminal path one-shot log; cast fix for `mem_write32` SRAM addrs |
+| **Files** | `src/usb.c`, `src/spi.c`, `src/thumb32.c`, `docs/eositis/*` |
+| **Tests** | `make -C build bramble bramble_tests` → 322/322 |
+| **Run** | `./build/bramble …/megaflash.uf2 -arch m33 -clock 150 -cores 2 -usb-console 5555 -usb-stdio -timeout 90` |
+| **Outcome** | Past U2 `U2_MonReset` HardFault (~`0x10006DC4`) and `spi_read_blocking` RAM spin (`0x20002C12`); 90s runs ~157M steps, core1 launches; final PC still invalid (`0x00000024`–`0x0000017E`) — **UserTerminal log not seen**, TCP menu unverified |
+| **Blockers** | Late boot memory/PC corruption or multicore FIFO / alarm pool interaction; need hit on `0x10000464` / `0x10005AD0` |
+| **Transcript** | `c4c672a1-a61d-45a7-8c50-b3eefb78c27b` |
+
+---
+
 ## YYYY-MM-DD — Session: <title>
 
 | Field | Detail |

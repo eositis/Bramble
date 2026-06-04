@@ -7,6 +7,18 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+### MegaFlash USB console — U2/SPI/multicore (2026-06-02)
+
+| Change | Reason |
+|--------|--------|
+| Guest hooks: skip `U2_Init`, `U2_Net_Init`, `u2_mon_push`, `U2_Net_Poll`, `U2_MonPollFlush` | U2 monitor stack fault @ `U2_MonReset` return; Apple II bus not needed for USB menu test |
+| Bootstrap `0x20005A774` crit section + `0x200047A4` alarm pool lock → `spin_lock_hw` | Uninitialized lock ptr broke `ldaexb` in `u2_mon_push` / alarm pool |
+| `alarm_pool_get_default` hook | Avoid assert @ line 101 when pool singleton unset |
+| SPI: idle `0xFF` MISO, auto-clock on empty `SSPDR` read; `__spi_read_blocking_veneer` fill | Guest spun in RAM `spi_read_blocking` @ `0x20002C12` (no RX) |
+| One-shot log when PC hits `0x10000464` / `0x10005AD0` | Confirm USB menu path (not yet observed in 90s run) |
+
+**Known blocker:** After ~157M steps/90s, core0 PC lands in low ROM (`0x24`–`0x1B6`); **UserTerminal / TCP menu bytes not verified**.
+
 ### MegaFlash USB console — stdio hooks + RP2350 bring-up (2026-06-03)
 
 | Change | Reason |

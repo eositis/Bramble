@@ -305,11 +305,29 @@ static void usb_log_cdc_active_once(void) {
 #define USB_GUEST_CHECK_ALLOC       0x1000d924u /* check_alloc — skip heap bounds under emu */
 #define USB_GUEST_ENABLE_SPI0       0x10002910u /* enable_spi0 — clamp deviceNum for emu */
 #define USB_GUEST_SPI_WR_RD_VENEER  0x100347d0u /* __spi_write_read_blocking_veneer */
+#define USB_GUEST_SPI_READ_BLOCKING_V 0x10034868u /* __spi_read_blocking_veneer */
+#define USB_GUEST_ALARM_POOL_DEFAULT  0x1000b638u /* alarm_pool_get_default */
+#define USB_GUEST_MAIN_USB_LOOP       0x10000464u /* bl UserTerminal (PicoW USB path) */
+#define USB_GUEST_USER_TERMINAL       0x10005ad0u
+#define USB_GUEST_ALARM_POOL_RAM      0x200047a4u /* Pico SDK default alarm pool */
 #define USB_GUEST_MUTEX_ENTER_V     0x10034858u /* __recursive_mutex_enter_blocking_veneer */
 #define USB_GUEST_MUTEX_EXIT_V      0x10034848u /* __recursive_mutex_exit_veneer */
 #define USB_GUEST_TS_READ_JEDECID   0x10003088u /* tsReadJEDECID — stub JEDEC for emu flash */
 #define USB_GUEST_EXIT              0x1000d9c0u /* _exit → BKPT loop */
 #define USB_GUEST_PANIC             0x1000a8b8u /* panic — skip BKPT _exit under emu */
+#define USB_GUEST_HW_CLAIM_LOCK       0x1000a8e8u /* hw_claim_lock */
+#define USB_GUEST_HW_CLAIM_OR_ASSERT  0x1000a920u /* hw_claim_or_assert */
+#define USB_GUEST_HW_CLAIM_UNUSED     0x1000a952u /* hw_claim_unused_from_range */
+#define USB_GUEST_HW_CLAIM_CLEAR_FAIL 0x1000a9c6u /* hw_claim_clear: bit not claimed */
+#define USB_GUEST_HW_CLAIM_LOCK_BYTE  0x20005e3fu /* Pico SDK hw_claim mutex byte */
+#define USB_GUEST_HW_CLAIM_BITMAP     0x20006580u /* spin_lock / hw claim bits */
+#define USB_GUEST_SPIN_LOCK_HW        0x20005e34u /* Pico SDK spin_lock_hw[32] */
+#define USB_GUEST_U2_CRIT_SECTION     0x20005a774u /* U2_MonInit critical_section */
+#define USB_GUEST_U2_INIT             0x10006828u /* U2_Init — skip Apple II U2 bus under emu */
+#define USB_GUEST_U2_MON_PUSH         0x1000686cu /* u2_mon_push — avoid ring/lock corruption */
+#define USB_GUEST_U2_NET_INIT         0x10007540u /* U2_Net_Init */
+#define USB_GUEST_U2_NET_POLL         0x10007ae8u /* U2_Net_Poll */
+#define USB_GUEST_U2_MON_POLL_FLUSH   0x10006cb8u /* U2_MonPollFlush */
 #define USB_GUEST_WRAP_VPRINTF      0x1000dd08u /* __wrap_vprintf */
 #define USB_GUEST_VFPRINTF_R         0x1002f258u /* _vfprintf_r — skip locale/wchar body */
 #define USB_GUEST_LOCALE_MB_CUR_MAX 0x10032278u /* __locale_mb_cur_max — vfprintf locale spin */
@@ -388,6 +406,25 @@ static void usb_console_guest_tx_buf(uint32_t buf, uint32_t len) {
     }
 }
 
+static void usb_guest_hw_claim_bootstrap(void) {
+    mem_write8(USB_GUEST_HW_CLAIM_LOCK_BYTE, 0);
+    for (uint32_t off = 0; off < 64u; off++) {
+        mem_write8(USB_GUEST_HW_CLAIM_BITMAP + off, 0);
+    }
+    for (uint32_t off = 0; off < 32u; off++) {
+        mem_write8(USB_GUEST_SPIN_LOCK_HW + off, 0);
+    }
+    /* U2 monitor critical_section — uninitialized lock ptr breaks ldaexb in u2_mon_push */
+    mem_write32((uint32_t)USB_GUEST_U2_CRIT_SECTION,
+                (uint32_t)(USB_GUEST_SPIN_LOCK_HW + 1u));
+    mem_write32((uint32_t)(USB_GUEST_U2_CRIT_SECTION + 4u), 0u);
+    mem_write32(0x2005bbe4u, 0u);
+    mem_write32(0x2005a780u, 0u);
+    mem_write32(0x2005a77cu, 0u);
+    mem_write32((uint32_t)(USB_GUEST_ALARM_POOL_RAM + 16u),
+                (uint32_t)(USB_GUEST_SPIN_LOCK_HW + 2u));
+}
+
 static void usb_guest_skip_get_device_info_string(void) {
     uint32_t buf = cpu.r[0];
     static const char k_msg[] = "MegaFlash (Bramble USB console)\r\n";
@@ -403,7 +440,18 @@ void usb_console_guest_stdio_hook(void) {
         return;
     }
 
+    static int hw_claim_bootstrapped;
+    static int user_terminal_logged;
+    if (!hw_claim_bootstrapped++) {
+        usb_guest_hw_claim_bootstrap();
+    }
+
     uint32_t pc = cpu.r[15] & ~1u;
+    if (!user_terminal_logged &&
+        (pc == USB_GUEST_MAIN_USB_LOOP || pc == USB_GUEST_USER_TERMINAL)) {
+        user_terminal_logged = 1;
+        fprintf(stderr, "[USB] guest reached UserTerminal path @ 0x%08X\n", pc);
+    }
     uint32_t lr = cpu.r[14] & ~1u;
     static uint32_t vf_locale_iters;
 
@@ -419,6 +467,47 @@ void usb_console_guest_stdio_hook(void) {
     }
     if (pc == USB_GUEST_PANIC) {
         cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return;
+    }
+    if (pc == USB_GUEST_U2_INIT || pc == USB_GUEST_U2_NET_INIT ||
+        pc == USB_GUEST_U2_MON_PUSH || pc == USB_GUEST_U2_NET_POLL ||
+        pc == USB_GUEST_U2_MON_POLL_FLUSH) {
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return;
+    }
+    if (pc == USB_GUEST_HW_CLAIM_LOCK) {
+        mem_write8(USB_GUEST_HW_CLAIM_LOCK_BYTE, 0);
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return;
+    }
+    if (pc == USB_GUEST_HW_CLAIM_OR_ASSERT) {
+        uint32_t base = cpu.r[0];
+        uint32_t bit = cpu.r[1];
+        uint32_t byte = bit >> 3;
+        uint8_t mask = (uint8_t)(1u << (bit & 7u));
+        uint8_t v = mem_read8(base + byte);
+        mem_write8(base + byte, v | mask);
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return;
+    }
+    if (pc == USB_GUEST_HW_CLAIM_UNUSED) {
+        uint32_t base = cpu.r[0];
+        uint32_t start = cpu.r[2];
+        uint32_t end = cpu.r[3];
+        if (start <= end) {
+            uint32_t byte = start >> 3;
+            uint8_t mask = (uint8_t)(1u << (start & 7u));
+            uint8_t v = mem_read8(base + byte);
+            mem_write8(base + byte, v | mask);
+            cpu.r[0] = start;
+        } else {
+            cpu.r[0] = 0xffffffffu;
+        }
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return;
+    }
+    if (pc == USB_GUEST_HW_CLAIM_CLEAR_FAIL) {
+        cpu.r[15] = 0x1000a9c4u | 1u; /* pop return — clear on unclaimed bit is OK in emu */
         return;
     }
     if (pc == USB_GUEST_TS_READ_JEDECID) {
@@ -438,6 +527,23 @@ void usb_console_guest_stdio_hook(void) {
             mem_write8(rx + 2, 0xEF);
             mem_write8(rx + 3, 0x00);
         }
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return;
+    }
+    if (pc == USB_GUEST_SPI_READ_BLOCKING_V) {
+        uint32_t rx = cpu.r[2];
+        uint32_t len = cpu.r[3];
+        for (uint32_t i = 0; i < len && rx != 0; i++) {
+            mem_write8(rx + i, 0xFF);
+        }
+        cpu.r[0] = len;
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return;
+    }
+    if (pc == USB_GUEST_ALARM_POOL_DEFAULT) {
+        mem_write32((uint32_t)(USB_GUEST_ALARM_POOL_RAM + 16u),
+                    (uint32_t)(USB_GUEST_SPIN_LOCK_HW + 2u));
+        cpu.r[0] = USB_GUEST_ALARM_POOL_RAM;
         cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
         return;
     }
@@ -598,6 +704,7 @@ static void usb_guest_bridge_activate(void) {
     }
 
     nvic_clear_pending(5);
+    usb_guest_hw_claim_bootstrap();
     usb_guest_init_cdc_fifos();
     usb_sync_guest_cdc_connected();
     usb_guest_cdc_synced = 1;
