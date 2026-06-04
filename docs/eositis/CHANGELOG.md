@@ -5,6 +5,23 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## Unreleased
+
+### USB stdio / RP2350 bootrom (2026-06-03 session)
+
+| Change | Reason |
+|--------|--------|
+| `rom_get_sys_info` + RP2350 ROM header (`rom_apply_rp2350_header`) + lookup intercept @ `0x0200` | Pre-main `unique_id.c` assert (`rc == 4`) blocked all boot before USB menu |
+| Guest stdio hooks: skip `__wrap_printf` by LR, bypass `__wrap_puts` to TCP, force `stdio_usb_connected` when CDC synced | newlib `_vfprintf_r` locale loop hangs under partial VFP |
+| RP2350 ADC @ `0x400A0000`; ADC ch0–3 → not Pico W when USB console active | Wrong Pico W detect path |
+| Minimal VFP in `thumb32.c` | Float formats in `GetDeviceInfoString` / printf |
+| `a2bus`: no-op `a2phi` while USB console TCP active | Stub must not fake Apple online during USB menu test |
+| `scripts/run-megaflash-usb-console.sh`, `USB-CONSOLE.md` updates | Document no-stub path for USB menu |
+
+**Known blocker:** guest stuck in `irq_add_shared_handler` @ `0x1000ADE5` after ROM fix — menu not reached.
+
+---
+
 ## 2026-06-02 — `096f2b3` — MegaFlash M33 bring-up
 
 MegaFlash / RP2350 M33 bring-up. ~+1896 / −243 lines across 21 tracked files + new `a2bus` and `scripts/`. Removed temporary agent debug logging to `~/Documents/junk/` before commit.

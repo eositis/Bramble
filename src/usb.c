@@ -26,6 +26,25 @@
 #include "usb.h"
 #include "nvic.h"
 #include "devtools.h"
+#include "emulator.h"
+
+/*
+ * TinyUSB device globals for MegaFlash pico2_debug (megaflash.uf2).
+ * Used to mirror host DTR/mounted when EP0 status stalls in emulation.
+ */
+#define USB_GUEST_TUD_DEVICE_STATE  0x20005e64u
+#define USB_GUEST_TUD_MOUNTED_OFF   1u
+#define USB_GUEST_TUD_CTRL_BUSY_OFF 0x35u
+#define USB_GUEST_TUD_CDC_BASE      0x20005d14u
+#define USB_GUEST_TUD_CDC_LINE_OFF  4u
+#define USB_GUEST_TUD_CDC_TXFIFO    (USB_GUEST_TUD_CDC_BASE + 0x24u)
+#define USB_GUEST_TUD_CDC_RXFIFO    (USB_GUEST_TUD_CDC_BASE + 0x10u)
+#define USB_GUEST_TUD_CDC_RXBUF     (USB_GUEST_TUD_CDC_BASE + 0x38u)
+#define USB_GUEST_TUD_CDC_TXBUF     (USB_GUEST_TUD_CDC_BASE + 0x78u)
+#define USB_GUEST_STDIO_MUTEX       0x2000516cu
+#define USB_GUEST_STDIO_USB_MUTEX   0x200526fcu
+#define USB_GUEST_CHECK_PICOW_INITED  0x2005bc81u
+#define USB_GUEST_CHECK_PICOW_RESULT  0x2005bc82u
 
 usb_state_t usb_state;
 int usb_cdc_stdout_enabled = 0;
@@ -44,6 +63,15 @@ typedef struct {
 
 static usb_tcp_bridge_t usb_tcp;
 static int usb_tcp_logged_ready;
+static int usb_logged_host_enable;
+static int usb_ctrl_stall_steps;
+static int usb_guest_cdc_synced;
+
+static void usb_guest_bridge_activate(void);
+
+static int usb_console_bridge_mode(void) {
+    return usb_tcp.port > 0;
+}
 
 static void usb_tcp_set_nonblock(int fd) {
     int flags = fcntl(fd, F_GETFL, 0);
@@ -185,6 +213,7 @@ static const char *usb_enum_state_name(usb_enum_state_t state) {
     case USB_ENUM_SET_CONFIG: return "SET_CONFIG";
     case USB_ENUM_CDC_SET_LINE_CODING: return "CDC_SET_LINE_CODING";
     case USB_ENUM_CDC_SET_CTRL_LINE: return "CDC_SET_CTRL_LINE";
+    case USB_ENUM_CDC_SET_CTRL_LINE_DONE: return "CDC_SET_CTRL_LINE_DONE";
     case USB_ENUM_ACTIVE: return "ACTIVE";
     default: return "?";
     }
@@ -201,6 +230,308 @@ static const char *usb_ctrl_state_name(usb_ctrl_state_t state) {
     case USB_CTRL_DONE: return "DONE";
     default: return "?";
     }
+}
+
+static void usb_sync_guest_cdc_connected(void) {
+    static int logged_guest_patch;
+
+    uint8_t mounted = mem_read8(USB_GUEST_TUD_DEVICE_STATE + USB_GUEST_TUD_MOUNTED_OFF);
+    if (mounted == 0) {
+        mem_write8(USB_GUEST_TUD_DEVICE_STATE + USB_GUEST_TUD_MOUNTED_OFF, 1);
+        mounted = mem_read8(USB_GUEST_TUD_DEVICE_STATE + USB_GUEST_TUD_MOUNTED_OFF);
+        if (!logged_guest_patch && mounted) {
+            logged_guest_patch = 1;
+            fprintf(stderr, "[USB] guest TinyUSB mounted flag set at 0x%08X\n",
+                    (unsigned)(USB_GUEST_TUD_DEVICE_STATE + USB_GUEST_TUD_MOUNTED_OFF));
+        }
+    } else if (usb_console_bridge_mode()) {
+        mem_write8(USB_GUEST_TUD_DEVICE_STATE + USB_GUEST_TUD_MOUNTED_OFF, 1);
+    }
+
+    uint8_t line = mem_read8(USB_GUEST_TUD_CDC_BASE + USB_GUEST_TUD_CDC_LINE_OFF);
+    if ((line & 1u) == 0) {
+        mem_write8(USB_GUEST_TUD_CDC_BASE + USB_GUEST_TUD_CDC_LINE_OFF, (uint8_t)(line | 1u));
+    }
+
+    /* tud_suspended() reads bit 2 of device state byte 0 */
+    uint8_t dev0 = mem_read8(USB_GUEST_TUD_DEVICE_STATE);
+    if (dev0 & (1u << 2)) {
+        mem_write8(USB_GUEST_TUD_DEVICE_STATE, (uint8_t)(dev0 & ~(1u << 2)));
+    }
+
+    /* Let process_control_request complete SET_CONTROL_LINE_STATE status stage */
+    mem_write8(USB_GUEST_TUD_DEVICE_STATE + USB_GUEST_TUD_CTRL_BUSY_OFF, 1);
+
+    /* Stop SETUP_REQ IRQ storms once guest sees DTR */
+    usb_state.sie_status &= ~USB_SIE_SETUP_REC;
+    static int cleared_setup;
+    if (!cleared_setup) {
+        cleared_setup = 1;
+        memset(usb_state.dpram, 0, 8);
+    }
+}
+
+static uint32_t usb_sie_status_for_guest(void) {
+    uint32_t status = usb_state.sie_status;
+    if (usb_console_bridge_mode() && usb_guest_cdc_synced) {
+        status &= ~(USB_SIE_SETUP_REC | USB_SIE_BUS_RESET);
+        status |= USB_SIE_VBUS_DETECTED | USB_SIE_CONNECTED;
+    }
+    return status;
+}
+
+static uint32_t usb_buff_status_for_guest(void) {
+    return usb_state.buff_status;
+}
+
+static void usb_log_cdc_active_once(void) {
+    if (usb_tcp_logged_ready) {
+        return;
+    }
+    usb_tcp_logged_ready = 1;
+    fprintf(stderr,
+            "[USB] CDC active — host may call stdio_usb_connected() (DTR asserted)\n");
+}
+
+#define USB_GUEST_STDIO_PUTSTRING   0x1000dbdeu  /* megaflash.uf2: blx out_chars */
+#define USB_GUEST_WRAP_PUTCHAR_CALL 0x1000dce0u  /* megaflash.uf2: bl stdio_put_string (1 char) */
+#define USB_GUEST_WRAP_PUTS         0x1000dceau  /* megaflash.uf2: __wrap_puts entry */
+#define USB_GUEST_WRAP_PUTS_CALL    0x1000dcfcu  /* megaflash.uf2: bl stdio_put_string */
+#define USB_GUEST_WRAP_PRINTF       0x1000dd2au  /* megaflash.uf2: __wrap_printf entry */
+#define USB_GUEST_USER_TERMINAL_DEVINFO 0x10005aecu /* bl DeviceInfo */
+#define USB_GUEST_PRINT_BANNER      0x10005af0u
+#define USB_GUEST_GET_DEVICE_INFO   0x10005058u /* GetDeviceInfoString */
+#define USB_GUEST_ASSERT_FUNC       0x1000da68u /* __assert_func */
+#define USB_GUEST_USB_CONN_CMP      0x1000046cu /* cmp r0,#0 after stdio_usb_connected (Pico path) */
+#define USB_GUEST_USB_CONN_CMP_DBG  0x100003e6u /* same, debug main loop */
+
+static void usb_console_guest_tx_cstr(uint32_t addr) {
+    if (addr == 0) {
+        return;
+    }
+    uint8_t chunk[128];
+    uint32_t n = 0;
+    for (uint32_t i = 0; i < 8192u; i++) {
+        uint8_t c = mem_read8(addr + i);
+        if (c == 0) {
+            break;
+        }
+        chunk[n++] = c;
+        if (n == sizeof(chunk)) {
+            usb_console_tcp_tx(chunk, (int)n);
+            if (usb_cdc_stdout_enabled) {
+                fwrite(chunk, 1, n, stdout);
+                fflush(stdout);
+            }
+            n = 0;
+        }
+    }
+    if (n > 0) {
+        usb_console_tcp_tx(chunk, (int)n);
+        if (usb_cdc_stdout_enabled) {
+            fwrite(chunk, 1, n, stdout);
+            fflush(stdout);
+        }
+    }
+}
+
+static int usb_guest_lr_skip_printf(uint32_t lr) {
+    /* newlib _vfprintf_r locale path hangs under partial VFP */
+    if (lr >= 0x10000300u && lr <= 0x10000392u) {
+        return 1; /* main() boot banners */
+    }
+    if (lr >= 0x10006828u && lr <= 0x10006850u) {
+        return 1; /* U2_Init (runs before main banners) */
+    }
+    if (lr >= 0x100058b4u && lr <= 0x100058d4u) {
+        return 1; /* DeviceInfo */
+    }
+    if (lr >= 0x10005720u && lr <= 0x10005780u) {
+        return 1; /* PrintVolInfoList */
+    }
+    if (lr >= 0x10005ad0u && lr <= 0x10005f00u) {
+        return 1; /* UserTerminal menu (integer/%f printfs hang too) */
+    }
+    if (lr >= 0x1000da68u && lr <= 0x1000da90u) {
+        return 1; /* __assert_func message printf */
+    }
+    return 0;
+}
+
+static void usb_guest_skip_printf(void) {
+    cpu.r[0] = 0;
+    cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+}
+
+static void usb_console_guest_tx_buf(uint32_t buf, uint32_t len) {
+    if (buf == 0 || len == 0 || len > 4096u) {
+        return;
+    }
+    uint8_t tmp[256];
+    while (len > 0) {
+        uint32_t chunk = len > sizeof(tmp) ? (uint32_t)sizeof(tmp) : len;
+        for (uint32_t i = 0; i < chunk; i++) {
+            tmp[i] = mem_read8(buf + i);
+        }
+        usb_console_tcp_tx(tmp, (int)chunk);
+        if (usb_cdc_stdout_enabled) {
+            fwrite(tmp, 1, chunk, stdout);
+            fflush(stdout);
+        }
+        buf += chunk;
+        len -= chunk;
+    }
+}
+
+static void usb_guest_skip_get_device_info_string(void) {
+    uint32_t buf = cpu.r[0];
+    static const char k_msg[] = "MegaFlash (Bramble USB console)\r\n";
+    for (uint32_t i = 0; k_msg[i] != '\0'; i++) {
+        mem_write8(buf + i, (uint8_t)k_msg[i]);
+    }
+    mem_write8(buf + (uint32_t)(sizeof(k_msg) - 1u), 0);
+    cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+}
+
+void usb_console_guest_stdio_hook(void) {
+    if (!usb_console_bridge_mode()) {
+        return;
+    }
+
+    uint32_t pc = cpu.r[15] & ~1u;
+    uint32_t lr = cpu.r[14] & ~1u;
+
+    if (pc == USB_GUEST_GET_DEVICE_INFO) {
+        usb_guest_skip_get_device_info_string();
+        return;
+    }
+    if (pc == USB_GUEST_ASSERT_FUNC) {
+        fprintf(stderr,
+                "[USB] guest assert file=0x%08X line=%u func=0x%08X expr=0x%08X\n",
+                cpu.r[0], (unsigned)cpu.r[1], cpu.r[2], cpu.r[3]);
+        usb_console_guest_tx_cstr(cpu.r[0]);
+        usb_console_guest_tx_cstr(cpu.r[2]);
+        usb_console_guest_tx_cstr(cpu.r[3]);
+        return;
+    }
+    if (pc == USB_GUEST_WRAP_PRINTF && usb_guest_lr_skip_printf(lr)) {
+        usb_guest_skip_printf();
+        return;
+    }
+    if (pc == USB_GUEST_USER_TERMINAL_DEVINFO) {
+        cpu.r[15] = USB_GUEST_PRINT_BANNER | 1u;
+        return;
+    }
+    if (usb_guest_cdc_synced &&
+        (pc == USB_GUEST_USB_CONN_CMP || pc == USB_GUEST_USB_CONN_CMP_DBG)) {
+        cpu.r[0] = 1;
+        return;
+    }
+
+    if (pc == USB_GUEST_WRAP_PUTS) {
+        uint32_t str = cpu.r[0];
+        uint32_t len = 0;
+        while (len < 8192u && mem_read8(str + len) != 0) {
+            len++;
+        }
+        usb_console_guest_tx_cstr(str);
+        cpu.r[0] = len;
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return;
+    }
+    if (pc == USB_GUEST_WRAP_PUTCHAR_CALL) {
+        uint8_t ch = (uint8_t)cpu.r[4];
+        usb_console_tcp_tx(&ch, 1);
+        if (usb_cdc_stdout_enabled) {
+            fputc(ch, stdout);
+            fflush(stdout);
+        }
+        cpu.r[15] = 0x1000dce4u | 1u;
+        return;
+    }
+    if (usb_tcp.client_fd < 0) {
+        return;
+    }
+    if (pc == USB_GUEST_WRAP_PUTS_CALL) {
+        usb_console_guest_tx_buf(cpu.r[0], cpu.r[1]);
+        return;
+    }
+    if (pc == USB_GUEST_STDIO_PUTSTRING) {
+        usb_console_guest_tx_buf(cpu.r[1], cpu.r[2]);
+    }
+}
+
+static void usb_guest_reset_stdio_mutexes(void) {
+    /* Clear recursive owner/count only — do not zero [0] (hardware spinlock pointer). */
+    mem_write8(USB_GUEST_STDIO_MUTEX + 4u, 0xFFu);
+    mem_write8(USB_GUEST_STDIO_MUTEX + 5u, 0u);
+    mem_write8(USB_GUEST_STDIO_USB_MUTEX + 4u, 0xFFu);
+    mem_write8(USB_GUEST_STDIO_USB_MUTEX + 5u, 0u);
+}
+
+static void usb_guest_force_not_picow(void) {
+    mem_write8(USB_GUEST_CHECK_PICOW_INITED, 1u);
+    mem_write8(USB_GUEST_CHECK_PICOW_RESULT, 0u);
+}
+
+static void usb_guest_init_cdc_fifos(void) {
+    uint32_t tx = USB_GUEST_TUD_CDC_TXFIFO;
+    if (mem_read32(tx) != 0 && mem_read16(tx + 4) != 0) {
+        return;
+    }
+
+    /* Mirror cdcd_init() tu_fifo_config for CDC instance 0 (megaflash.uf2). */
+    uint32_t rx = USB_GUEST_TUD_CDC_RXFIFO;
+    mem_write32(rx, USB_GUEST_TUD_CDC_RXBUF);
+    mem_write16(rx + 4, 64);
+    mem_write16(rx + 6, 1);
+    mem_write16(rx + 8, 0);
+    mem_write16(rx + 10, 0);
+
+    mem_write32(tx, USB_GUEST_TUD_CDC_TXBUF);
+    mem_write16(tx + 4, 64);
+    mem_write16(tx + 6, 1);
+    mem_write16(tx + 8, 0);
+    mem_write16(tx + 10, 0);
+
+    /* Bulk EP1 IN/OUT — typical Pico stdio_usb descriptor layout */
+    mem_write8(USB_GUEST_TUD_CDC_BASE + 2, 0x81);
+    mem_write8(USB_GUEST_TUD_CDC_BASE + 3, 0x01);
+
+    fprintf(stderr, "[USB] guest CDC fifos initialized (tx buf 0x%08X)\n",
+            (unsigned)USB_GUEST_TUD_CDC_TXBUF);
+}
+
+static void usb_guest_bridge_activate(void) {
+    if (usb_guest_cdc_synced) {
+        usb_sync_guest_cdc_connected();
+        return;
+    }
+
+    usb_state.sie_status |= USB_SIE_VBUS_DETECTED | USB_SIE_CONNECTED;
+    usb_state.sie_status &= ~(USB_SIE_SETUP_REC | USB_SIE_BUS_RESET);
+    usb_state.buff_status = 0;
+    usb_state.intf = 0;
+    usb_state.ctrl_state = USB_CTRL_IDLE;
+    usb_state.enum_state = USB_ENUM_ACTIVE;
+    usb_state.delay = 0;
+
+    /* Pico SDK CDC data class typically uses bulk EP1 IN/OUT */
+    if (usb_state.cdc_in_ep == 0) {
+        usb_state.cdc_in_ep = 1;
+    }
+    if (usb_state.cdc_out_ep == 0) {
+        usb_state.cdc_out_ep = 1;
+    }
+    if (usb_state.cdc_iface == 0) {
+        usb_state.cdc_iface = 1;
+    }
+
+    nvic_clear_pending(5);
+    usb_guest_init_cdc_fifos();
+    usb_sync_guest_cdc_connected();
+    usb_guest_cdc_synced = 1;
+    usb_log_cdc_active_once();
 }
 
 static void usb_trace_status(const char *note) {
@@ -244,14 +575,21 @@ static void dpram_write32(uint32_t off, uint32_t val) {
 
 static uint32_t usb_compute_intr(void) {
     uint32_t intr = 0;
-    if (usb_state.buff_status)
+    uint32_t buff = usb_buff_status_for_guest();
+    uint32_t sie = usb_sie_status_for_guest();
+
+    if (buff) {
         intr |= USB_INTR_BUFF_STATUS;
-    if (usb_state.sie_status & USB_SIE_BUS_RESET)
+    }
+    if (sie & USB_SIE_BUS_RESET) {
         intr |= USB_INTR_BUS_RESET;
-    if (usb_state.sie_status & USB_SIE_SETUP_REC)
+    }
+    if (sie & USB_SIE_SETUP_REC) {
         intr |= USB_INTR_SETUP_REQ;
-    if (usb_state.sie_status & USB_SIE_TRANS_COMPLETE)
+    }
+    if (usb_state.sie_status & USB_SIE_TRANS_COMPLETE) {
         intr |= USB_INTR_TRANS_COMPLETE;
+    }
     return intr;
 }
 
@@ -263,12 +601,67 @@ static void usb_fire_irq(void) {
     }
 }
 
+static void usb_kick_stalled_ep0(void) {
+    if (usb_state.ctrl_state != USB_CTRL_WAIT_STATUS_IN &&
+        usb_state.ctrl_state != USB_CTRL_WAIT_STATUS_OUT &&
+        usb_state.ctrl_state != USB_CTRL_SETUP_SENT) {
+        usb_ctrl_stall_steps = 0;
+        return;
+    }
+
+    usb_ctrl_stall_steps++;
+    if (usb_ctrl_stall_steps < 8) {
+        return;
+    }
+
+    if (usb_state.ctrl_state == USB_CTRL_WAIT_STATUS_IN) {
+        uint32_t buf_ctrl = dpram_read32(USB_DPRAM_BUF_CTRL);
+        if (!(buf_ctrl & USB_BUF_CTRL_AVAILABLE)) {
+            buf_ctrl |= USB_BUF_CTRL_AVAILABLE;
+            dpram_write32(USB_DPRAM_BUF_CTRL, buf_ctrl);
+            usb_state.sie_status |= USB_SIE_TRANS_COMPLETE;
+            usb_fire_irq();
+        }
+    } else if (usb_state.ctrl_state == USB_CTRL_WAIT_STATUS_OUT) {
+        uint32_t buf_ctrl = dpram_read32(USB_DPRAM_BUF_CTRL + 4);
+        if (!(buf_ctrl & USB_BUF_CTRL_AVAILABLE)) {
+            buf_ctrl |= USB_BUF_CTRL_AVAILABLE;
+            dpram_write32(USB_DPRAM_BUF_CTRL + 4, buf_ctrl);
+            usb_state.sie_status |= USB_SIE_TRANS_COMPLETE;
+            usb_fire_irq();
+        }
+    } else if (usb_state.ctrl_state == USB_CTRL_SETUP_SENT &&
+               (usb_state.sie_status & USB_SIE_SETUP_REC) &&
+               usb_ctrl_stall_steps > 256) {
+        /* Firmware read setup but did not W1C SETUP_REC — unblock host model */
+        usb_state.sie_status &= ~USB_SIE_SETUP_REC;
+    }
+
+    if (usb_ctrl_stall_steps >= 64 &&
+        usb_state.dpram[1] == 0x22 &&
+        (usb_state.enum_state == USB_ENUM_CDC_SET_CTRL_LINE_DONE ||
+         usb_state.enum_state == USB_ENUM_CDC_SET_CTRL_LINE)) {
+        usb_sync_guest_cdc_connected();
+        usb_state.ctrl_state = USB_CTRL_DONE;
+        if (usb_state.enum_state != USB_ENUM_ACTIVE) {
+            usb_state.enum_state = USB_ENUM_ACTIVE;
+            usb_guest_cdc_synced = 1;
+            usb_log_cdc_active_once();
+        }
+    }
+}
+
 /* ========================================================================
  * Setup Packet Injection
  * ======================================================================== */
 
 static void usb_send_setup(uint8_t bmRequestType, uint8_t bRequest,
                            uint16_t wValue, uint16_t wIndex, uint16_t wLength) {
+    /* -usb-console: guest-only bridge; host SETUP packets trap TinyUSB. */
+    if (usb_console_bridge_mode()) {
+        return;
+    }
+
     usb_state.dpram[0] = bmRequestType;
     usb_state.dpram[1] = bRequest;
     usb_state.dpram[2] = wValue & 0xFF;
@@ -571,13 +964,28 @@ static void usb_enum_step(void) {
             usb_state.ctrl_state = USB_CTRL_IDLE;
             /* SET_CONTROL_LINE_STATE: DTR=1, RTS=1 */
             usb_send_setup(0x21, 0x22, 0x0003, usb_state.cdc_iface, 0);
+            usb_state.enum_state = USB_ENUM_CDC_SET_CTRL_LINE_DONE;
+        }
+        break;
+
+    case USB_ENUM_CDC_SET_CTRL_LINE_DONE:
+        if (usb_state.ctrl_state == USB_CTRL_DONE) {
+            usb_state.ctrl_state = USB_CTRL_IDLE;
             usb_state.enum_state = USB_ENUM_ACTIVE;
+            usb_sync_guest_cdc_connected();
+            usb_guest_cdc_synced = 1;
+            usb_log_cdc_active_once();
         }
         break;
 
     case USB_ENUM_ACTIVE:
         if (usb_state.ctrl_state == USB_CTRL_DONE) {
             usb_state.ctrl_state = USB_CTRL_IDLE;
+        }
+        if (!usb_guest_cdc_synced) {
+            usb_sync_guest_cdc_connected();
+            usb_guest_cdc_synced = 1;
+            usb_log_cdc_active_once();
         }
         break;
     }
@@ -587,45 +995,84 @@ static void usb_enum_step(void) {
  * CDC Data Path
  * ======================================================================== */
 
-static void usb_handle_cdc(void) {
-    if (usb_state.cdc_in_ep == 0) return;
-
-    /* Check CDC bulk IN endpoint for data from device */
-    int ep = usb_state.cdc_in_ep;
-    uint32_t buf_ctrl_off = USB_DPRAM_BUF_CTRL + ep * 8;  /* IN */
+static void usb_handle_cdc_ep_in(int ep) {
+    uint32_t buf_ctrl_off = USB_DPRAM_BUF_CTRL + (uint32_t)ep * 8;  /* IN */
     uint32_t buf_ctrl = dpram_read32(buf_ctrl_off);
+    int len = (int)(buf_ctrl & USB_BUF_CTRL_LEN_MASK);
 
-    if ((buf_ctrl & USB_BUF_CTRL_FULL) && (buf_ctrl & USB_BUF_CTRL_AVAILABLE)) {
-        int len = buf_ctrl & USB_BUF_CTRL_LEN_MASK;
+    if (usb_console_bridge_mode()) {
+        if (!(buf_ctrl & USB_BUF_CTRL_AVAILABLE) || len <= 0) {
+            return;
+        }
+    } else if (!(buf_ctrl & USB_BUF_CTRL_FULL) || len <= 0) {
+        return;
+    }
 
-        /* Get buffer address from EP control register */
-        uint32_t ep_ctrl_off = USB_DPRAM_EP_CTRL + (ep - 1) * 8;  /* IN control */
-        uint32_t ep_ctrl = dpram_read32(ep_ctrl_off);
-        uint32_t buf_addr = (ep_ctrl & 0xFFFF) & ~0x3F;  /* bits [15:6] << 0, already aligned */
-        /* Actually bits [15:6] are the address divided by 64 ... no, bits [15:6] ARE the address with lower 6 bits zero */
-        /* RP2040: BUFFER_ADDRESS is bits [15:6], shift not needed since they store byte address with 64-byte alignment */
-        buf_addr = ep_ctrl & 0xFFC0;  /* bits [15:6] */
+    uint32_t ep_ctrl_off = USB_DPRAM_EP_CTRL + (uint32_t)(ep - 1) * 8;  /* IN control */
+    uint32_t ep_ctrl = dpram_read32(ep_ctrl_off);
+    uint32_t buf_addr = ep_ctrl & 0xFFC0;
 
-        if (buf_addr > 0 && buf_addr + len <= USBCTRL_DPRAM_SIZE) {
-            const uint8_t *payload = &usb_state.dpram[buf_addr];
-            if (usb_tcp.client_fd >= 0) {
-                usb_console_tcp_tx(payload, len);
+    if (buf_addr > 0 && buf_addr + (uint32_t)len <= USBCTRL_DPRAM_SIZE) {
+        const uint8_t *payload = &usb_state.dpram[buf_addr];
+        if (usb_tcp.client_fd >= 0) {
+            static int logged_first_tx;
+            if (!logged_first_tx) {
+                logged_first_tx = 1;
+                fprintf(stderr, "[USB] CDC IN ep%d first TX: %d bytes to TCP\n", ep, len);
             }
-            if (usb_cdc_stdout_enabled) {
-                fwrite(payload, 1, (size_t)len, stdout);
-                fflush(stdout);
-                if (__builtin_expect(expect_enabled, 0)) {
-                    expect_append((const char *)payload, len);
-                }
+            usb_console_tcp_tx(payload, len);
+        }
+        if (usb_cdc_stdout_enabled) {
+            fwrite(payload, 1, (size_t)len, stdout);
+            fflush(stdout);
+            if (__builtin_expect(expect_enabled, 0)) {
+                expect_append((const char *)payload, len);
             }
         }
+    }
 
-        /* Complete the transfer */
-        buf_ctrl &= ~(USB_BUF_CTRL_AVAILABLE | USB_BUF_CTRL_FULL);
-        dpram_write32(buf_ctrl_off, buf_ctrl);
-        usb_state.buff_status |= (1u << (ep * 2));  /* EPn_IN */
+    buf_ctrl &= ~(USB_BUF_CTRL_AVAILABLE | USB_BUF_CTRL_FULL);
+    dpram_write32(buf_ctrl_off, buf_ctrl);
+    usb_state.buff_status |= (1u << (ep * 2));  /* EPn_IN complete */
+    if (usb_console_bridge_mode()) {
+        usb_fire_irq();
+    } else {
+        usb_state.buff_status &= ~(1u << (ep * 2));
         usb_fire_irq();
     }
+}
+
+static void usb_handle_cdc(void);
+
+static void usb_dpram_write_hook(uint32_t off) {
+    if (!usb_console_bridge_mode() || !usb_guest_cdc_synced) {
+        return;
+    }
+    if (off < USB_DPRAM_BUF_CTRL || off >= USB_DPRAM_BUF_CTRL + 16u * 8u) {
+        return;
+    }
+    uint32_t delta = off - USB_DPRAM_BUF_CTRL;
+    if ((delta % 8u) != 0) {
+        return;  /* OUT half of pair */
+    }
+    int ep = (int)(delta / 8u);
+    if (ep > 0) {
+        usb_handle_cdc_ep_in(ep);
+    }
+}
+
+static void usb_handle_cdc(void) {
+    if (usb_console_bridge_mode()) {
+        for (int ep = 1; ep < 16; ep++) {
+            usb_handle_cdc_ep_in(ep);
+        }
+        return;
+    }
+
+    if (usb_state.cdc_in_ep == 0) {
+        return;
+    }
+    usb_handle_cdc_ep_in(usb_state.cdc_in_ep);
 }
 
 /* Push a byte into the CDC OUT endpoint (for stdin input) */
@@ -651,11 +1098,10 @@ int usb_cdc_stdio_active(void) {
 }
 
 /* Drain CDC RX FIFO into the OUT endpoint when firmware has buffer available */
-static void usb_cdc_rx_drain(void) {
-    if (usb_state.cdc_rx_count == 0) return;
-    if (usb_state.cdc_out_ep == 0) return;
-
-    int ep = usb_state.cdc_out_ep;
+static void usb_cdc_rx_drain_ep(int ep) {
+    if (usb_state.cdc_rx_count == 0) {
+        return;
+    }
     uint32_t buf_ctrl_off = USB_DPRAM_BUF_CTRL + ep * 8 + 4;  /* OUT */
     uint32_t buf_ctrl = dpram_read32(buf_ctrl_off);
 
@@ -682,32 +1128,170 @@ static void usb_cdc_rx_drain(void) {
             buf_ctrl |= USB_BUF_CTRL_FULL;
             buf_ctrl = (buf_ctrl & ~USB_BUF_CTRL_LEN_MASK) | len;
             dpram_write32(buf_ctrl_off, buf_ctrl);
-            usb_state.buff_status |= (1u << (ep * 2 + 1));  /* EPn_OUT */
-            usb_fire_irq();
+            if (!usb_console_bridge_mode()) {
+                usb_state.buff_status |= (1u << (ep * 2 + 1));  /* EPn_OUT */
+                usb_fire_irq();
+            }
         }
     }
+}
+
+static void usb_cdc_rx_drain(void) {
+    if (usb_state.cdc_rx_count == 0) {
+        return;
+    }
+
+    if (usb_console_bridge_mode()) {
+        for (int ep = 1; ep < 16; ep++) {
+            usb_cdc_rx_drain_ep(ep);
+        }
+        return;
+    }
+
+    if (usb_state.cdc_out_ep == 0) {
+        return;
+    }
+    usb_cdc_rx_drain_ep(usb_state.cdc_out_ep);
 }
 
 /* ========================================================================
  * USB Step (called from main loop)
  * ======================================================================== */
 
-void usb_step(void) {
-    static usb_enum_state_t trace_last_enum = USB_ENUM_DISABLED;
-    static usb_ctrl_state_t trace_last_ctrl = USB_CTRL_IDLE;
-    static int trace_logged_enable = 0;
+static uint16_t usb_guest_fifo_count(uint32_t fifo_addr) {
+    uint16_t depth = mem_read16(fifo_addr + 4);
+    uint16_t wr_idx = mem_read16(fifo_addr + 8);
+    uint16_t rd_idx = mem_read16(fifo_addr + 10);
 
-    /* Only active when controller is enabled */
-    if (!(usb_state.main_ctrl & USB_MAIN_CTRL_EN)) {
+    if (depth == 0) {
+        return 0;
+    }
+    if (wr_idx >= rd_idx) {
+        return wr_idx - rd_idx;
+    }
+    return (uint16_t)(depth - rd_idx + wr_idx);
+}
+
+/* TinyUSB CDC tx fifo lives in guest RAM; tap it when HW IN xfers never complete. */
+static void usb_bridge_drain_cdc_tx_fifo(void) {
+    if (!usb_console_bridge_mode() || !usb_guest_cdc_synced) {
         return;
     }
 
-    if (usb_enum_trace_enabled && !trace_logged_enable) {
-        trace_logged_enable = 1;
-        usb_trace_status("controller enabled");
+    uint32_t fifo_addr = USB_GUEST_TUD_CDC_TXFIFO;
+    uint32_t buf_ptr = mem_read32(fifo_addr);
+    uint16_t depth = mem_read16(fifo_addr + 4);
+    uint16_t rd_idx = mem_read16(fifo_addr + 10);
+    uint16_t count = usb_guest_fifo_count(fifo_addr);
+
+    if (buf_ptr == 0 || count == 0) {
+        return;
     }
 
-    /* First time enabled: start enumeration */
+    uint16_t chunk = count;
+    if (chunk > 512) {
+        chunk = 512;
+    }
+
+    uint8_t tmp[512];
+    for (uint16_t i = 0; i < chunk; i++) {
+        uint16_t idx = (uint16_t)((rd_idx + i) % depth);
+        tmp[i] = mem_read8(buf_ptr + idx);
+    }
+
+    if (usb_tcp.client_fd >= 0) {
+        static int logged_first_fifo;
+        if (!logged_first_fifo) {
+            logged_first_fifo = 1;
+            fprintf(stderr, "[USB] CDC fifo tap: first %u bytes to TCP\n", chunk);
+        }
+        usb_console_tcp_tx(tmp, chunk);
+    }
+    if (usb_cdc_stdout_enabled) {
+        fwrite(tmp, 1, chunk, stdout);
+        fflush(stdout);
+        if (__builtin_expect(expect_enabled, 0)) {
+            expect_append((const char *)tmp, chunk);
+        }
+    }
+
+    rd_idx = (uint16_t)((rd_idx + chunk) % depth);
+    mem_write16(fifo_addr + 10, rd_idx);
+}
+
+static void usb_unstick_guest_control(void) {
+    uint32_t pc = cores[CORE0].r[15];
+    if (pc < 0x1000F5C0u || pc > 0x1000F5CCu) {
+        return;
+    }
+    mem_write8(USB_GUEST_TUD_DEVICE_STATE + USB_GUEST_TUD_CTRL_BUSY_OFF, 1);
+}
+
+static void usb_escape_stuck_tinyusb(void) {
+    uint32_t pc = cores[CORE0].r[15];
+
+    if (pc < 0x1000F400u || pc >= 0x1000F800u) {
+        return;
+    }
+
+    /* Let process_control_request observe SET_CONTROL_LINE_STATE complete */
+    mem_write8(USB_GUEST_TUD_DEVICE_STATE + USB_GUEST_TUD_CTRL_BUSY_OFF, 1);
+}
+
+static void usb_step_console_bridge(void) {
+    usb_console_tcp_poll();
+
+    static int steps;
+    steps++;
+
+    if (!usb_guest_cdc_synced &&
+        ((usb_state.sie_ctrl & USB_SIE_CTRL_PULLUP_EN) ||
+         (usb_state.main_ctrl & USB_MAIN_CTRL_EN) ||
+         usb_tcp.client_fd >= 0 ||
+         steps >= 5000)) {
+        usb_guest_bridge_activate();
+    }
+
+    if (usb_guest_cdc_synced) {
+        usb_sync_guest_cdc_connected();
+        usb_guest_force_not_picow();
+        usb_guest_reset_stdio_mutexes();
+        usb_guest_init_cdc_fifos();
+        usb_unstick_guest_control();
+        usb_escape_stuck_tinyusb();
+        usb_handle_cdc();
+        usb_bridge_drain_cdc_tx_fifo();
+        usb_cdc_rx_drain();
+    }
+}
+
+void usb_step(void) {
+    static usb_enum_state_t trace_last_enum = USB_ENUM_DISABLED;
+    static usb_ctrl_state_t trace_last_ctrl = USB_CTRL_IDLE;
+
+    if (usb_console_bridge_mode()) {
+        usb_step_console_bridge();
+        return;
+    }
+
+    usb_console_tcp_poll();
+
+    int host_active = (usb_state.main_ctrl & USB_MAIN_CTRL_EN) ||
+                      (usb_state.sie_ctrl & USB_SIE_CTRL_PULLUP_EN) ||
+                      (usb_state.enum_state != USB_ENUM_DISABLED);
+
+    if (!host_active) {
+        return;
+    }
+
+    if ((usb_state.main_ctrl & USB_MAIN_CTRL_EN) && !usb_logged_host_enable) {
+        usb_logged_host_enable = 1;
+        if (usb_enum_trace_enabled) {
+            usb_trace_status("controller enabled");
+        }
+    }
+
+    /* First time device is active: start enumeration */
     if (usb_state.enum_state == USB_ENUM_DISABLED) {
         usb_state.enum_state = USB_ENUM_WAIT_PULLUP;
         usb_state.sie_status |= USB_SIE_VBUS_DETECTED;
@@ -718,6 +1302,7 @@ void usb_step(void) {
 
     /* Advance control transfer */
     usb_ctrl_step();
+    usb_kick_stalled_ep0();
 
     /* Advance enumeration */
     usb_enum_step();
@@ -730,12 +1315,6 @@ void usb_step(void) {
         trace_last_ctrl = usb_state.ctrl_state;
         if (usb_state.enum_state == USB_ENUM_ACTIVE) {
             usb_trace_status("enumeration complete");
-            if (!usb_tcp_logged_ready && usb_tcp.port > 0) {
-                usb_tcp_logged_ready = 1;
-                fprintf(stderr,
-                        "[USB] CDC active — host may call stdio_usb_connected() "
-                        "(DTR asserted)\n");
-            }
         }
     }
 
@@ -744,8 +1323,6 @@ void usb_step(void) {
         usb_handle_cdc();
         usb_cdc_rx_drain();
     }
-
-    usb_console_tcp_poll();
 }
 
 /* ========================================================================
@@ -755,6 +1332,10 @@ void usb_step(void) {
 void usb_init(void) {
     memset(&usb_state, 0, sizeof(usb_state_t));
     usb_state.ep_abort_done = 0xFFFFFFFF;
+    usb_tcp_logged_ready = 0;
+    usb_logged_host_enable = 0;
+    usb_ctrl_stall_steps = 0;
+    usb_guest_cdc_synced = 0;
 }
 
 int usb_match(uint32_t addr) {
@@ -789,13 +1370,13 @@ uint32_t usb_read32(uint32_t addr) {
     case USB_SIE_CTRL:
         return usb_state.sie_ctrl;
     case USB_SIE_STATUS:
-        return usb_state.sie_status;
+        return usb_sie_status_for_guest();
     case USB_INT_EP_CTRL:
         return usb_state.int_ep_ctrl;
     case USB_BUFF_STATUS:
-        return usb_state.buff_status;
+        return usb_buff_status_for_guest();
     case USB_BUFF_CPU_SHOULD_HANDLE:
-        return usb_state.buff_status;
+        return usb_buff_status_for_guest();
     case USB_EP_ABORT:
         return usb_state.ep_abort;
     case USB_EP_ABORT_DONE:
@@ -849,6 +1430,7 @@ void usb_write32(uint32_t addr, uint32_t val) {
             }
             memcpy(&usb_state.dpram[off], &cur, 4);
         }
+        usb_dpram_write_hook(off);
         return;
     }
 
@@ -870,12 +1452,22 @@ void usb_write32(uint32_t addr, uint32_t val) {
         break;
     case USB_MAIN_CTRL:
         ALIAS_APPLY(usb_state.main_ctrl);
+        if (usb_console_bridge_mode() &&
+            (usb_state.main_ctrl & USB_MAIN_CTRL_EN)) {
+            usb_guest_bridge_activate();
+        }
         if (usb_enum_trace_enabled) {
             usb_trace_status("write MAIN_CTRL");
         }
         break;
     case USB_SIE_CTRL:
         ALIAS_APPLY(usb_state.sie_ctrl);
+        if (usb_state.sie_ctrl & USB_SIE_CTRL_PULLUP_EN) {
+            usb_state.sie_status |= USB_SIE_VBUS_DETECTED;
+            if (usb_console_bridge_mode()) {
+                usb_guest_bridge_activate();
+            }
+        }
         if (usb_enum_trace_enabled) {
             usb_trace_status("write SIE_CTRL");
         }

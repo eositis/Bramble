@@ -652,7 +652,15 @@ static int is_clocks_addr(uint32_t addr) {
 }
 
 static int is_adc_addr(uint32_t addr) {
-    return (addr & ~0x3FFF) == ADC_BASE;
+    uint32_t base = addr & ~0x3FFFu;
+    if (base == ADC_BASE) {
+        return 1;
+    }
+    /* RP2350 moves ADC to 0x400A0000; MegaFlash CheckPicoW() uses this block. */
+    if (membus_rp2350_mode && base == 0x400A0000u) {
+        return 1;
+    }
+    return 0;
 }
 
 /* ========================================================================

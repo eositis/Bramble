@@ -23,6 +23,7 @@
 #include "corepool.h"
 #include "pio.h"
 #include "devtools.h"
+#include "usb.h"
 #include "rp2350_rv/rp2350_periph.h"
 #include "rp2350_rv/rp2350_memmap.h"
 
@@ -1339,6 +1340,10 @@ static int guest_megaflash_memset_accel(uint32_t pc) {
 }
 
 __attribute__((hot)) void cpu_step(void) {
+    if (get_active_core() == CORE0) {
+        usb_console_guest_stdio_hook();
+    }
+
     uint32_t pc = cpu.r[15];
 
     if (guest_megaflash_crt0_accel(pc)) {
@@ -1513,7 +1518,7 @@ pc_valid:
 
     /* JIT block execution: if no interrupts are pending, try executing a
      * pre-compiled basic block before doing any normal fetch/decode work. */
-    if (jit_enabled && !cpu.debug_enabled) {
+    if (jit_enabled && !cpu.debug_enabled && !usb_console_tcp_active()) {
         uint32_t jit_idx = (pc >> 1) & JIT_CACHE_BMASK;
         jit_block_t *block = &jit_cache[jit_idx];
         if (block->start_pc == pc && block->length > 1) {

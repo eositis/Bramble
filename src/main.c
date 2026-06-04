@@ -1136,6 +1136,7 @@ skip_fuse:
         m33_init_overlay();
         /* Enable RP2350 mode in shared membus */
         membus_rp2350_mode = 1;
+        rom_apply_rp2350_header();
         /* Set up 520KB SRAM: allocate static buffer and redirect ARM membus */
         static uint8_t m33_sram[520 * 1024];
         memset(m33_sram, 0, sizeof(m33_sram));

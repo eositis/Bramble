@@ -12,10 +12,15 @@ Bramble implements (1)–(2) in `src/usb.c` whenever the guest enables the USB c
 
 Same pattern as [UART-CONSOLE.md](UART-CONSOLE.md), but traffic goes to **USB CDC**, not UART0.
 
-**Terminal 1 — emulator:**
+**Do not use `megaflash-bus.stub` or `run-megaflash-stub.sh` for USB menu testing.** The stub’s `a2phi` event makes `IsAppleConnected()` return true. Firmware then enters **`core0Loop()`** (Apple bus / network) and **does not** run **`UserTerminal()`** (USB diagnostic menu). Bramble also ignores `a2phi` while `-usb-console` is active, but the no-stub runner is the supported path.
+
+**Terminal 1 — emulator (no Apple stub):**
 
 ```bash
-./build/bramble megaflash.uf2 -arch m33 -clock 150 -cores 2 \
+./scripts/run-megaflash-usb-console.sh
+# or:
+./build/bramble ../MegaFlash/pico/pico2_debug/megaflash.uf2 \
+  -arch m33 -clock 150 -cores 2 \
   -usb-console 5555 -usb-stdio -timeout 120
 ```
 
@@ -25,6 +30,8 @@ Wait for:
 [USB] CDC console listening on TCP port 5555
 [USB] CDC active — host may call stdio_usb_connected() (DTR asserted)
 ```
+
+The `CDC active` line appears automatically once the guest USB stack is up (no `-trace-usb` required). Connect `nc` early so DTR is mirrored into guest RAM.
 
 **Terminal 2 — menu / diagnostics:**
 
@@ -45,15 +52,15 @@ You should see the MegaFlash ASCII banner and `UserTerminal()` menu (TFTP, flash
 
 **Do not** combine `-stdin` on Bramble with a second `nc` feeding the same port — use **either** interactive Bramble stdin **or** TCP `nc`, not both.
 
-### MegaFlash stub helper
+### Apple bus stub (slot I/O only — not USB menu)
+
+Use when exercising **`core0Loop`**, `a2read` / `a2write`, and core1 — **not** when you want the USB terminal:
 
 ```bash
-USB_CONSOLE_PORT=5555 ./scripts/run-megaflash-stub.sh -usb-stdio -timeout 120
-# other terminal:
-./scripts/connect-usb-console.sh 5555
+./scripts/run-megaflash-stub.sh -timeout 120
 ```
 
-(`run-megaflash-stub.sh` adds `-usb-console` when `USB_CONSOLE_PORT` is set.)
+If you set `USB_CONSOLE_PORT` on the stub runner, it exits with a hint to use `run-megaflash-usb-console.sh` instead.
 
 ## How firmware chooses USB vs Apple bus
 
@@ -86,9 +93,10 @@ RP2350 USB registers: `0x50100000` (DPRAM) / `0x50110000` (controller) — alrea
 
 | Symptom | Check |
 |---------|--------|
-| No `[USB] CDC active` | `-trace-usb`; guest may not have called `stdio_usb_init()` yet |
-| TCP connects but no menu | Missing **`-usb-stdio`** while firmware uses UART for early prints |
-| Never enters `UserTerminal` | Release + Apple connected; use Debug UF2 or adjust stub |
+| No `[USB] CDC active` | Rebuild `bramble` after pulling USB fixes; guest may not have reached `stdio_usb_init()` yet |
+| TCP connects but no menu | Missing **`-usb-stdio`**; or core0 still in TinyUSB init (see PC ~`0x1000F5C0`) — connect `nc` early, wait for `CDC active` |
+| PC stuck ~`0x1000F5C6` | USB control-transfer stall in `stdio_usb_init`; ensure fresh build and `-usb-console` |
+| Never enters `UserTerminal` | **Apple connected** (`IsAppleConnected()` after stub `a2phi`) — use `run-megaflash-usb-console.sh` **without** `-script`; Release also requires `!IsAppleConnected()` |
 | Garbled text | Wrong port or duplicate input (`-stdin` + `nc` both feeding RX) |
 
 ## UART vs USB (MegaFlash)

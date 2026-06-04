@@ -127,6 +127,21 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 
 ---
 
+## 2026-06-03 — Session: MegaFlash USB stdio (no Apple stub)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Investigate USB/TCP console stdio — run without Apple emulation |
+| **Actions** | Traced guest hang: `__assert_func` → `_vfprintf_r` from `unique_id.c` (`rc == 4`); fixed RP2350 ARM bootrom (`rom_get_sys_info`, header layout at `0x16`/`0x18`, lookup intercept); guest stdio hooks in `usb.c` (skip `printf` by LR, bypass `puts` to TCP); RP2350 ADC map, VFP stubs, `a2bus` PHI guard during USB console; `run-megaflash-usb-console.sh` |
+| **Tests** | `make -C build bramble bramble_tests`; `./build/bramble_tests` → 321/321 |
+| **Run** | `./scripts/run-megaflash-usb-console.sh` + `nc localhost 5555` (no `-script megaflash-bus.stub`) |
+| **Outcome** | **Partial / blocked.** Past unique-id assert; guest now spins in `irq_add_shared_handler` @ `PC=0x1000ADE5` — never reaches `UserTerminal()`. TCP still 0 bytes. |
+| **Blockers** | IRQ vector / exclusive-monitor emulation; incomplete VFP for any non-skipped `printf` |
+| **Transcript** | [USB stdio session](c4c672a1-a61d-45a7-8c50-b3eefb78c27b) |
+| **Commit** | (this session) |
+
+---
+
 <!-- Template for future entries:
 
 ## YYYY-MM-DD — Session: <title>

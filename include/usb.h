@@ -94,6 +94,7 @@ typedef enum {
     USB_ENUM_SET_CONFIG,
     USB_ENUM_CDC_SET_LINE_CODING,
     USB_ENUM_CDC_SET_CTRL_LINE,
+    USB_ENUM_CDC_SET_CTRL_LINE_DONE,
     USB_ENUM_ACTIVE,
 } usb_enum_state_t;
 
@@ -184,5 +185,8 @@ void usb_console_tcp_cleanup(void);
 void usb_console_tcp_poll(void);
 int  usb_console_tcp_active(void);
 void usb_console_tcp_set_port(int port);
+
+/* MegaFlash: capture stdio_put_string before guest mutex/driver path (-usb-console) */
+void usb_console_guest_stdio_hook(void);
 
 #endif /* USB_H */

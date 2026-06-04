@@ -1,6 +1,7 @@
 #include "a2bus.h"
 #include "gpio.h"
 #include "pio.h"
+#include "usb.h"
 #include <stdio.h>
 
 static void a2bus_set_bus_pins(uint32_t busdata)
@@ -27,6 +28,11 @@ static void a2bus_notify_listener(uint32_t busdata)
 void a2bus_phi0_pulse_for_detect(void)
 {
     /* IsAppleConnected() samples PHI0 for an edge in a tight loop. */
+    if (usb_console_tcp_active()) {
+        /* USB UserTerminal needs Apple offline (Release: stdio_usb && !IsAppleConnected). */
+        gpio_set_input_pin(A2BUS_GPIO_PHI0, 0);
+        return;
+    }
     gpio_set_input_pin(A2BUS_GPIO_PHI0, 0);
     a2bus_pio_burst(4);
     gpio_set_input_pin(A2BUS_GPIO_PHI0, 1);

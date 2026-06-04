@@ -3,6 +3,7 @@
 #include "adc.h"
 #include "emulator.h"
 #include "nvic.h"
+#include "usb.h"
 
 /* Global ADC state */
 adc_state_t adc_state;
@@ -131,6 +132,12 @@ uint32_t adc_read32(uint32_t addr) {
             uint32_t ainsel = (adc_state.cs & ADC_CS_AINSEL_MASK)
                                >> ADC_CS_AINSEL_SHIFT;
             if (ainsel < ADC_NUM_CHANNELS) {
+                /* MegaFlash CheckPicoW(): GPIO29 ADC < 204 => Pico W. With -usb-console,
+                 * report a high reading on GPIO ADC channels so core0 skips cyw43/float
+                 * GetDeviceInfoString and reaches the USB UserTerminal menu. */
+                if (ainsel <= 3 && usb_console_tcp_active()) {
+                    return 0x0FFF;
+                }
                 return adc_state.channel_values[ainsel];
             }
             return 0;

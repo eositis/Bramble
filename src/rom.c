@@ -159,6 +159,7 @@ static void rom_place_flash_stubs(void) {
     for (uint32_t addr = 0x03B0; addr <= 0x03C4; addr += 4) {
         rom_write16(addr, 0x4770);  /* bx lr */
     }
+    rom_write16(ROM_GET_SYS_INFO_ADDR, 0x4770);  /* get_sys_info: bx lr (intercepted) */
 }
 
 /* ========================================================================
@@ -214,6 +215,7 @@ static void rom_build_func_table(void) {
     rom_write16(off, ROM_FUNC_FLASH_RANGE_PROGRAM);    rom_write16(off + 2, 0x03BD); off += 4;
     rom_write16(off, ROM_FUNC_FLASH_FLUSH_CACHE);      rom_write16(off + 2, 0x03C1); off += 4;
     rom_write16(off, ROM_FUNC_FLASH_ENTER_CMD_XIP);    rom_write16(off + 2, 0x03C5); off += 4;
+    rom_write16(off, ROM_FUNC_GET_SYS_INFO);           rom_write16(off + 2, 0x03C9); off += 4;
     /* End marker */
     rom_write16(off, 0x0000);             rom_write16(off + 2, 0x0000);
 }
@@ -259,7 +261,66 @@ void rom_init(void) {
     rom_place_flash_stubs();
     rom_place_float_double_tables();
 
-    fprintf(stderr, "[ROM] Initialized function table with 14 entries + float/double tables\n");
+    fprintf(stderr, "[ROM] Initialized function table with 15 entries + float/double tables\n");
+}
+
+void rom_apply_rp2350_header(void) {
+    rom_write16(0x14, 0x0100);
+    rom_write16(0x16, 0x0201);  /* rom_func_lookup reads lookup fn from [ROM+0x16] */
+    rom_write16(0x18, 0x0180);  /* data table */
+}
+
+static int rom_intercept_lookup(void) {
+    uint32_t arg0 = cpu.r[0];
+    uint32_t arg1 = cpu.r[1];
+    uint32_t code;
+    uint32_t off = 0x0100;
+
+    if (arg0 == 0x0100u) {
+        code = arg1;
+    } else {
+        code = arg0;
+        (void)arg1;
+    }
+
+    while (off < 0x0200) {
+        uint16_t entry_code = rom_read16(off);
+        if (entry_code == 0) {
+            cpu.r[0] = 0;
+            return 1;
+        }
+        if (entry_code == (code & 0xFFFFu)) {
+            cpu.r[0] = rom_read16(off + 2);
+            return 1;
+        }
+        off += 4;
+    }
+    cpu.r[0] = 0;
+    return 1;
+}
+
+static int rom_intercept_get_sys_info(void) {
+    uint32_t out = cpu.r[0];
+    uint32_t out_words = cpu.r[1];
+    uint32_t flags = cpu.r[2];
+    uint32_t included = flags & ROM_SYS_INFO_CHIP_INFO;
+    uint32_t count = included ? 4u : 1u;
+
+    if (!included) {
+        cpu.r[0] = 0;
+        return 1;
+    }
+    if (out_words < count) {
+        cpu.r[0] = (uint32_t)-1;
+        return 1;
+    }
+
+    mem_write32(out + 0u, included);
+    mem_write32(out + 4u, 0u);              /* package_id */
+    mem_write32(out + 8u, 0x4D415242u);     /* device_id_lo: "BRA" + 'M' */
+    mem_write32(out + 12u, 0x01454C42u);     /* device_id_hi: "BLE" + 0x01 */
+    cpu.r[0] = count;
+    return 1;
 }
 
 /* ========================================================================
@@ -467,6 +528,21 @@ static int rom_intercept_flash(uint32_t pc) {
 }
 
 int rom_intercept(uint32_t pc) {
+    if (pc == ROM_LOOKUP_FN_ADDR) {
+        if (rom_intercept_lookup()) {
+            cpu.r[15] = cpu.r[14] & ~1u;
+            cpu.step_count++;
+            return 1;
+        }
+    }
+    if (pc == ROM_GET_SYS_INFO_ADDR) {
+        if (rom_intercept_get_sys_info()) {
+            cpu.r[15] = cpu.r[14] & ~1u;
+            cpu.step_count++;
+            return 1;
+        }
+    }
+
     /* Float function interception */
     if (pc >= ROM_FLOAT_FUNC_BASE &&
         pc < ROM_FLOAT_FUNC_BASE + ROM_FLOAT_FUNC_COUNT * 2) {

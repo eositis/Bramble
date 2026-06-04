@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include <math.h>
 #include "emulator.h"
 #include "instructions.h"
 #include "nvic.h"
@@ -246,6 +247,126 @@ static void t32_ldst_multiple(uint32_t pc, uint16_t upper, uint16_t lower) {
         /* Writeback: IA → updated addr, DB → original - count*4 */
         cpu.r[Rn] = is_db ? (cpu.r[Rn] - (uint32_t)(cnt * 4)) : base_end;
     }
+}
+
+/* ========================================================================
+ * Minimal VFP (M33): MegaFlash GetDeviceInfoString uses vmov/vcvt/vdiv/vldr
+ * for MHz float sprintf. Previous stubs left FP regs stale and _dtoa_r spun.
+ * ======================================================================== */
+
+static uint32_t vfp_s[32];
+static uint64_t vfp_d[16];
+
+static int vfp_sn_from_insn(uint32_t insn) {
+    return (int)(((insn >> 16) & 0xFu) * 2u + ((insn >> 6) & 1u));
+}
+
+static int vfp_sm_from_insn(uint32_t insn) {
+    return (int)(((insn >> 12) & 0xFu) * 2u + ((insn >> 18) & 1u));
+}
+
+static int vfp_st_from_insn(uint32_t insn) {
+    return (int)(((insn >> 12) & 0xFu) * 2u + ((insn >> 6) & 1u));
+}
+
+static float vfp_read_s(int sn) {
+    float f;
+    memcpy(&f, &vfp_s[sn], sizeof(f));
+    return f;
+}
+
+static void vfp_write_s(int sn, float f) {
+    memcpy(&vfp_s[sn], &f, sizeof(f));
+}
+
+static int thumb32_vfp_exec(uint32_t pc, uint16_t upper, uint16_t lower) {
+    uint32_t insn = ((uint32_t)upper << 16) | lower;
+
+    /* VMOV between ARM core register and single-precision VFP register */
+    if ((insn & 0xFFF00FF0u) == 0xEE000A90u) {
+        int rt = (int)((insn >> 12) & 0xFu);
+        int sn = vfp_sn_from_insn(insn);
+        if (((insn >> 16) & 0xFFu) >= 0x17u) {
+            cpu.r[rt] = vfp_s[sn];
+        } else {
+            vfp_s[sn] = cpu.r[rt];
+        }
+        return 1;
+    }
+
+    /* VCVT.F32.U32 Sd, Sm (including Sd==Sm) */
+    if (((insn >> 8) & 0xFFu) == 0x7Au && (insn & 0xFF00FF00u) == 0xEE000000u) {
+        int sd = vfp_sn_from_insn(insn);
+        uint32_t raw = vfp_s[sd];
+        vfp_write_s(sd, (float)raw);
+        return 1;
+    }
+
+    /* VDIV.F32 — MegaFlash GetDeviceInfoString and block formatters */
+    if ((insn & 0xFFFFFF00u) == 0xEEC77A00u) {
+        vfp_write_s(15, vfp_read_s(15) / vfp_read_s(16));
+        return 1;
+    }
+    if ((insn & 0xFFFFFF00u) == 0xEEC66A00u) {
+        vfp_write_s(13, vfp_read_s(14) / vfp_read_s(15));
+        return 1;
+    }
+
+    /* VLDR Dd, [PC, #imm*4] */
+    if ((insn & 0xFF700000u) == 0xED900000u) {
+        int dn = (int)((insn >> 12) & 0xFu);
+        uint32_t imm8 = insn & 0xFFu;
+        uint32_t addr = ((pc + 4u) & ~3u) + (imm8 * 4u);
+        vfp_d[dn] = (uint64_t)mem_read32(addr) |
+                      ((uint64_t)mem_read32(addr + 4u) << 32);
+        return 1;
+    }
+
+    /* VSTR Dd, [SP, #imm*4] */
+    if ((insn & 0xFF700000u) == 0xED800000u) {
+        int dn = (int)((insn >> 12) & 0xFu);
+        uint32_t imm8 = insn & 0xFFu;
+        uint32_t addr = cpu.r[13] + imm8 * 4u;
+        uint64_t v = vfp_d[dn];
+        mem_write32(addr, (uint32_t)v);
+        mem_write32(addr + 4u, (uint32_t)(v >> 32));
+        return 1;
+    }
+
+    /* VLDR Sd, [PC, #imm*4] */
+    if ((insn & 0xFF700000u) == 0xED500000u) {
+        int sn = vfp_st_from_insn(insn);
+        uint32_t imm8 = insn & 0xFFu;
+        uint32_t addr = ((pc + 4u) & ~3u) + (imm8 * 4u);
+        vfp_s[sn] = mem_read32(addr);
+        return 1;
+    }
+
+    /* VLDR Sd, [SP, #imm*4] */
+    if ((insn & 0xFF700F00u) == 0xED500A00u) {
+        int sn = vfp_st_from_insn(insn);
+        uint32_t imm8 = insn & 0xFFu;
+        vfp_s[sn] = mem_read32(cpu.r[13] + imm8 * 4u);
+        return 1;
+    }
+
+    /* VSTR Sd, [SP, #imm*4] */
+    if ((insn & 0xFF700F00u) == 0xED400A00u) {
+        int sn = vfp_st_from_insn(insn);
+        uint32_t imm8 = insn & 0xFFu;
+        mem_write32(cpu.r[13] + imm8 * 4u, vfp_s[sn]);
+        return 1;
+    }
+
+    /* VCVT.U32.F32 Sd, Sm — used by block-format helpers */
+    if (((insn >> 8) & 0xFFu) == 0x7Eu && (insn & 0xFF00FF00u) == 0xEE000000u) {
+        int sd = vfp_sn_from_insn(insn);
+        float f = vfp_read_s(sd);
+        vfp_s[sd] = (uint32_t)f;
+        return 1;
+    }
+
+    return 0;
 }
 
 /* ========================================================================
@@ -993,9 +1114,14 @@ int thumb32_step(uint32_t pc, uint16_t upper, uint16_t lower) {
     if (top5 == 0x1E) {
         /* Check for VFP/NEON instructions (M33 FPU) */
         if ((upper & 0xEF00) == 0xEE00 || (upper & 0xEF00) == 0xED00) {
-            /* VFP/NEON stubs: skip and return 1 to avoid HardFault */
-            if (cpu.debug_enabled)
-                fprintf(stderr, "[T32] FPU instruction stub PC=0x%08X upper=0x%04X lower=0x%04X\n", pc, upper, lower);
+            if (thumb32_vfp_exec(pc, upper, lower)) {
+                return 1;
+            }
+            if (cpu.debug_enabled) {
+                fprintf(stderr,
+                        "[T32] FPU instruction stub PC=0x%08X upper=0x%04X lower=0x%04X\n",
+                        pc, upper, lower);
+            }
             return 1;
         }
 

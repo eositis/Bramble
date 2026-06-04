@@ -33,6 +33,12 @@
 #define ROM_FUNC_FLASH_RANGE_PROGRAM    ROM_TABLE_CODE('R', 'P')
 #define ROM_FUNC_FLASH_FLUSH_CACHE      ROM_TABLE_CODE('F', 'C')
 #define ROM_FUNC_FLASH_ENTER_CMD_XIP    ROM_TABLE_CODE('C', 'X')
+#define ROM_FUNC_GET_SYS_INFO           ROM_TABLE_CODE('G', 'S')
+
+/* ROM get_sys_info stub address (Thumb, intercepted by rom_intercept) */
+#define ROM_GET_SYS_INFO_ADDR           0x03C8
+#define ROM_LOOKUP_FN_ADDR              0x0200
+#define ROM_SYS_INFO_CHIP_INFO          1u
 
 /* ROM data table codes */
 #define ROM_DATA_SOFT_FLOAT  ROM_TABLE_CODE('S', 'F')
@@ -78,6 +84,9 @@ extern uint8_t rom_image[ROM_SIZE];
 
 /* Initialize ROM image with function table and Thumb code stubs */
 void rom_init(void);
+
+/* RP2350 ARM bootrom uses lookup ptr at 0x16, data table at 0x18 (not RP2040 layout) */
+void rom_apply_rp2350_header(void);
 
 /* Read from ROM (used by membus) */
 uint32_t rom_read32(uint32_t addr);
