@@ -20,6 +20,8 @@ Scope: local commits on `main` after clone.
 
 **Known blocker:** guest stuck in `irq_add_shared_handler` @ `0x1000ADE5` after ROM fix — menu not reached.
 
+**Commit:** `aaf9ee3` — fix(megaflash): RP2350 bootrom sys_info and USB guest stdio hooks
+
 ---
 
 ## 2026-06-02 — `096f2b3` — MegaFlash M33 bring-up
