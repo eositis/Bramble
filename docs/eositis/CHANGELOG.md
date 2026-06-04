@@ -7,6 +7,17 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+### IRQ / Thumb-2 (2026-06-03)
+
+| Change | Reason |
+|--------|--------|
+| `t32_ldst_multiple`: correct P/U/W/L; route `E912`/`Rt==Rt2` as LDM/STM not LDRD | `ldmdb r2,{r0,r1,r2}` in `irq_add_shared_handler` corrupted handler table |
+| `cpu_step`: `pc = cpu.r[15] & ~1` before fetch | Misaligned PC left guest in IRQ path executing 16-bit halves of 32-bit insns @ `0x1000ADE5` |
+| `t32_bl`: branch target `& ~1` | Consistent even-PC convention |
+| `test_m33_thumb2_ldmdb` | Regression for `E912 0007` |
+
+**Known blocker:** `_vfprintf_r` locale loop @ ~`0x1002F312` after IRQ fix; early `*** PANIC ***` still on stderr.
+
 ### USB stdio / RP2350 bootrom (2026-06-03 session)
 
 | Change | Reason |
@@ -17,8 +28,6 @@ Scope: local commits on `main` after clone.
 | Minimal VFP in `thumb32.c` | Float formats in `GetDeviceInfoString` / printf |
 | `a2bus`: no-op `a2phi` while USB console TCP active | Stub must not fake Apple online during USB menu test |
 | `scripts/run-megaflash-usb-console.sh`, `USB-CONSOLE.md` updates | Document no-stub path for USB menu |
-
-**Known blocker:** guest stuck in `irq_add_shared_handler` @ `0x1000ADE5` after ROM fix — menu not reached.
 
 **Commit:** `aaf9ee3` — fix(megaflash): RP2350 bootrom sys_info and USB guest stdio hooks
 

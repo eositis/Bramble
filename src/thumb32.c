@@ -203,7 +203,7 @@ static void t32_bl(uint32_t pc, uint16_t upper, uint16_t lower) {
     if (S) offset |= (int32_t)0xFF000000;  /* sign-extend from bit 24 */
     cpu.r[14] = (pc + 4) | 1u;
     uint32_t target = (uint32_t)((int32_t)(pc + 4) + offset);
-    cpu.r[15] = target;
+    cpu.r[15] = target & ~1u;
     pc_updated = 1;
     if (__builtin_expect(callgraph_enabled, 0))
         callgraph_record_call(pc, target);
@@ -215,26 +215,53 @@ static void t32_bl(uint32_t pc, uint16_t upper, uint16_t lower) {
  *        1110 1001 W L Rn(4)   (DB: bit8=1)
  * lower: 0 P M 0 reglist(12)   (bit15=P=PC, bit14=M=LR)
  * ======================================================================== */
+static int t32_is_ldm_stm_reglist(uint16_t upper, uint16_t lower) {
+    /* LDRD/STRD T1 is UNPREDICTABLE when Rt == Rt2; irq_add_shared_handler uses
+     * ldmdb r2,{r0,r1,r2} (E912 0007) which overlaps LDRD Rt=Rt2=0 encoding. */
+    (void)upper;
+    return ((lower >> 12) & 0xF) == ((lower >> 8) & 0xF);
+}
+
 static void t32_ldst_multiple(uint32_t pc, uint16_t upper, uint16_t lower) {
     (void)pc;
-    int is_db = (upper >> 8) & 1;
-    int L     = (upper >> 7) & 1;
-    int W     = (upper >> 5) & 1;
-    int Rn    = upper & 0xF;
+    /* Thumb-2 LDM/STM T2: 1110 100P UWL Rn | register list */
+    int P  = (upper >> 8) & 1;
+    int U  = (upper >> 7) & 1;
+    int W  = (upper >> 5) & 1;
+    int L  = (upper >> 4) & 1;
+    int Rn = upper & 0xF;
 
-    uint32_t reglist = lower;   /* bit15=PC, bit14=LR, bits[13:0] = R13..R0 */
-    int      cnt     = __builtin_popcount(reglist & 0xFFFF);
+    uint32_t reglist = lower & 0xFFFFu;
+    int      cnt     = __builtin_popcount(reglist);
     uint32_t addr    = cpu.r[Rn];
+    uint32_t rn_orig = addr;
 
-    if (is_db) addr -= (uint32_t)(cnt * 4);
-    uint32_t base_end = addr + (uint32_t)(cnt * 4);
+    if (cnt == 0) {
+        return;
+    }
+
+    if (P && !U) {
+        /* LDMDB / STMDB — decrement before */
+        addr -= (uint32_t)(cnt * 4);
+    } else if (!P && !U) {
+        /* LDMDA / STMDA — decrement after */
+        addr -= (uint32_t)((cnt - 1) * 4);
+    } else if (P && U) {
+        /* LDMIB / STMIB — increment before */
+        addr += 4u;
+    }
+    /* !P && U: LDMIA / STMIA — increment after (addr = Rn) */
 
     for (int i = 0; i <= 15; i++) {
         if (reglist & (1u << i)) {
             if (L) {
                 uint32_t val = mem_read32(addr);
-                if (i == 15) { cpu.r[15] = val & ~1u; pc_updated = 1; }
-                else          { cpu.r[i] = val; }
+                if (i == 15) {
+                    cpu.r[15] = val & ~1u;
+                    pc_updated = 1;
+                } else {
+                    cpu.r[i] = val;
+                }
             } else {
                 uint32_t val = (i == 15) ? (pc + 4) : cpu.r[i];
                 mem_write32(addr, val);
@@ -244,8 +271,11 @@ static void t32_ldst_multiple(uint32_t pc, uint16_t upper, uint16_t lower) {
     }
 
     if (W && !(L && (reglist & (1u << Rn)))) {
-        /* Writeback: IA → updated addr, DB → original - count*4 */
-        cpu.r[Rn] = is_db ? (cpu.r[Rn] - (uint32_t)(cnt * 4)) : base_end;
+        if (U) {
+            cpu.r[Rn] = rn_orig + (uint32_t)(cnt * 4);
+        } else {
+            cpu.r[Rn] = rn_orig - (uint32_t)(cnt * 4);
+        }
     }
 }
 
@@ -1051,7 +1081,7 @@ unhandled_ldst:
  * ======================================================================== */
 int thumb32_step(uint32_t pc, uint16_t upper, uint16_t lower) {
     /* Update PC to skip this 32-bit instruction (caller may override) */
-    cpu.r[15] = pc + 4;
+    cpu.r[15] = (pc + 4) & ~1u;
     pc_updated = 1;
 
     uint8_t top5 = upper >> 11;  /* bits[15:11] of upper */
@@ -1073,6 +1103,8 @@ int thumb32_step(uint32_t pc, uint16_t upper, uint16_t lower) {
                     t32_exclusive_ldst(pc, upper, lower);
                 } else if (t32_is_halfword_acqrel(upper, lower)) {
                     t32_halfword_acqrel(pc, upper, lower);
+                } else if (t32_is_ldm_stm_reglist(upper, lower)) {
+                    t32_ldst_multiple(pc, upper, lower);
                 } else {
                     /* LDRD/STRD: upper[6]=1 */
                     t32_ldrd_strd(pc, upper, lower);

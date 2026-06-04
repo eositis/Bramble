@@ -4399,6 +4399,21 @@ TEST(test_m33_thumb2_addw_ldah) {
     PASS();
 }
 
+TEST(test_m33_thumb2_ldmdb) {
+    reset_cpu();
+    /* ldmdb r2, {r0, r1, r2} @ irq_add_shared_handler (E912 0007) */
+    cpu.r[2] = RAM_BASE + 0x40u;
+    mem_write32(RAM_BASE + 0x34u, 0x11111111u);
+    mem_write32(RAM_BASE + 0x38u, 0x22222222u);
+    mem_write32(RAM_BASE + 0x3Cu, 0x33333333u);
+    cpu.r[0] = cpu.r[1] = 0;
+    thumb32_step(0x1000ACFA, 0xE912, 0x0007);
+    ASSERT_EQ(0x11111111u, cpu.r[0], "ldmdb r0");
+    ASSERT_EQ(0x22222222u, cpu.r[1], "ldmdb r1");
+    ASSERT_EQ(0x33333333u, cpu.r[2], "ldmdb r2");
+    PASS();
+}
+
 /* ========================================================================
  * RISC-V Hazard3 Tests
  * ======================================================================== */
@@ -5230,6 +5245,7 @@ int main(void) {
     RUN_TEST(test_m33_thumb2_sdiv);
     RUN_TEST(test_m33_thumb2_movw_movt);
     RUN_TEST(test_m33_thumb2_addw_ldah);
+    RUN_TEST(test_m33_thumb2_ldmdb);
     END_CATEGORY("Cortex-M33");
 
     BEGIN_CATEGORY("RISC-V CPU");
