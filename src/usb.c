@@ -24,6 +24,7 @@
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include "usb.h"
+#include "netbridge.h"
 #include "nvic.h"
 #include "devtools.h"
 #include "emulator.h"
@@ -71,6 +72,10 @@ static void usb_guest_bridge_activate(void);
 
 static int usb_console_bridge_mode(void) {
     return usb_tcp.port > 0;
+}
+
+static int guest_megaflash_hook_active(void) {
+    return usb_console_bridge_mode() || net_bridge_any_active();
 }
 
 static void usb_tcp_set_nonblock(int fd) {
@@ -295,7 +300,7 @@ static void usb_log_cdc_active_once(void) {
 
 #define USB_GUEST_STDIO_PUTSTRING   0x1000dbdeu  /* megaflash.uf2: blx out_chars */
 #define USB_GUEST_WRAP_PUTCHAR_CALL 0x1000dce0u  /* megaflash.uf2: bl stdio_put_string (1 char) */
-#define USB_GUEST_WRAP_PUTS         0x1000dceau  /* megaflash.uf2: __wrap_puts entry */
+#define USB_GUEST_WRAP_PUTS         0x1000dceau  /* megaflash.uf2: __wrap_puts @ 0x1000DCEA */
 #define USB_GUEST_WRAP_PUTS_CALL    0x1000dcfcu  /* megaflash.uf2: bl stdio_put_string */
 #define USB_GUEST_WRAP_PRINTF       0x1000dd2au  /* megaflash.uf2: __wrap_printf entry */
 #define USB_GUEST_USER_TERMINAL_DEVINFO 0x10005aecu /* bl DeviceInfo */
@@ -307,6 +312,8 @@ static void usb_log_cdc_active_once(void) {
 #define USB_GUEST_SPI_WR_RD_VENEER  0x100347d0u /* __spi_write_read_blocking_veneer */
 #define USB_GUEST_SPI_READ_BLOCKING_V 0x10034868u /* __spi_read_blocking_veneer */
 #define USB_GUEST_ALARM_POOL_DEFAULT  0x1000b638u /* alarm_pool_get_default */
+#define USB_GUEST_MULTICORE_LAUNCH    0x10000318u /* main: bl multicore_launch_core1 */
+#define USB_GUEST_UART_PUTC           0x1000dd48u /* uart_putc — bridge to TCP under -uart-console */
 #define USB_GUEST_MAIN_USB_LOOP       0x10000464u /* bl UserTerminal (PicoW USB path) */
 #define USB_GUEST_USER_TERMINAL       0x10005ad0u
 #define USB_GUEST_ALARM_POOL_RAM      0x200047a4u /* Pico SDK default alarm pool */
@@ -436,7 +443,8 @@ static void usb_guest_skip_get_device_info_string(void) {
 }
 
 void usb_console_guest_stdio_hook(void) {
-    if (!usb_console_bridge_mode()) {
+    int usb_mode = usb_console_bridge_mode();
+    if (!guest_megaflash_hook_active()) {
         return;
     }
 
@@ -447,7 +455,7 @@ void usb_console_guest_stdio_hook(void) {
     }
 
     uint32_t pc = cpu.r[15] & ~1u;
-    if (!user_terminal_logged &&
+    if (usb_mode && !user_terminal_logged &&
         (pc == USB_GUEST_MAIN_USB_LOOP || pc == USB_GUEST_USER_TERMINAL)) {
         user_terminal_logged = 1;
         fprintf(stderr, "[USB] guest reached UserTerminal path @ 0x%08X\n", pc);
@@ -469,9 +477,43 @@ void usb_console_guest_stdio_hook(void) {
         cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
         return;
     }
-    if (pc == USB_GUEST_U2_INIT || pc == USB_GUEST_U2_NET_INIT ||
-        pc == USB_GUEST_U2_MON_PUSH || pc == USB_GUEST_U2_NET_POLL ||
-        pc == USB_GUEST_U2_MON_POLL_FLUSH) {
+    if (pc == USB_GUEST_MULTICORE_LAUNCH) {
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return;
+    }
+    if (!usb_mode && net_bridge_uart_active(0)) {
+        if (pc == USB_GUEST_UART_PUTC) {
+            uint8_t ch = (uint8_t)cpu.r[1];
+            net_bridge_uart_tx(0, ch);
+            if (net_bridge_mirror_stdio) {
+                fputc((int)ch, stderr);
+                fflush(stderr);
+            }
+            cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+            return;
+        }
+        if (pc == USB_GUEST_WRAP_PUTS) {
+            uint32_t str = cpu.r[0];
+            for (uint32_t i = 0; i < 8192u; i++) {
+                uint8_t ch = mem_read8(str + i);
+                if (ch == 0) {
+                    break;
+                }
+                net_bridge_uart_tx(0, ch);
+                if (net_bridge_mirror_stdio) {
+                    fputc((int)ch, stderr);
+                }
+            }
+            if (net_bridge_mirror_stdio) {
+                fflush(stderr);
+            }
+            cpu.r[0] = 0;
+            cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+            return;
+        }
+    }
+    if (pc == USB_GUEST_U2_NET_INIT || pc == USB_GUEST_U2_MON_PUSH ||
+        pc == USB_GUEST_U2_NET_POLL || pc == USB_GUEST_U2_MON_POLL_FLUSH) {
         cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
         return;
     }
@@ -549,7 +591,7 @@ void usb_console_guest_stdio_hook(void) {
     }
     if (pc == USB_GUEST_ASSERT_FUNC) {
         fprintf(stderr,
-                "[USB] guest assert file=0x%08X line=%u func=0x%08X expr=0x%08X\n",
+                "[guest] assert file=0x%08X line=%u func=0x%08X expr=0x%08X\n",
                 cpu.r[0], (unsigned)cpu.r[1], cpu.r[2], cpu.r[3]);
         cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
         return;
@@ -558,7 +600,7 @@ void usb_console_guest_stdio_hook(void) {
         usb_guest_return_to_lr(cpu.r[0]);
         return;
     }
-    if (pc == USB_GUEST_VFPRINTF_R) {
+    if (usb_mode && pc == USB_GUEST_VFPRINTF_R) {
         usb_guest_return_to_lr(0);
         return;
     }
@@ -589,9 +631,13 @@ void usb_console_guest_stdio_hook(void) {
         usb_guest_return_to_lr(1);
         return;
     }
-    if ((pc == USB_GUEST_WRAP_PRINTF || pc == USB_GUEST_WRAP_VPRINTF) &&
+    if (usb_mode &&
+        (pc == USB_GUEST_WRAP_PRINTF || pc == USB_GUEST_WRAP_VPRINTF) &&
         usb_guest_lr_skip_printf(lr)) {
         usb_guest_return_to_lr(0);
+        return;
+    }
+    if (!usb_mode) {
         return;
     }
     if (pc == USB_GUEST_USER_TERMINAL_DEVINFO) {

@@ -183,6 +183,18 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 
 ---
 
+## 2026-06-02 — Session: MegaFlash UART console over TCP
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Try UART `-uart-console` path for `megaflash.uf2` debug build instead of USB CDC |
+| **Actions** | RP2350 `uart_match` @ `0x40070000`; guest bring-up hooks when `-uart-console` active; `__wrap_puts`/`uart_putc` → TCP; skip `multicore_launch` at `main` call site `0x10000318`; netbridge TX pending buffer (4096 B) until client connects; `scripts/run-megaflash-uart-console.sh` |
+| **Run** | `./scripts/run-megaflash-uart-console.sh` + `nc localhost 4444` |
+| **Outcome** | **Verified:** TCP receives `[u2] init` (9 bytes) from `U2_Init`; mirror shows same on stderr. Guest still high-step after early puts (`__wrap_printf` / `_vfprintf_r` path); full banner/menu not yet on UART |
+| **Tests** | 322/322 pass |
+
+---
+
 ## YYYY-MM-DD — Session: <title>
 
 | Field | Detail |

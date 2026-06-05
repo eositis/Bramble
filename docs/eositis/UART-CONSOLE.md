@@ -49,10 +49,24 @@ Implementation: `src/netbridge.c`, polled from the main loop as `net_bridge_poll
 
 ## MegaFlash example
 
+**UART menu path (recommended for early boot text):** firmware calls `stdio_uart_init()` and `__wrap_puts` long before the USB CDC menu.
+
+```bash
+# Terminal 1
+./scripts/run-megaflash-uart-console.sh
+# wait for: [Net] UART0 listening on port 4444
+
+# Terminal 2 (connect soon after start — TX is buffered until a client attaches)
+./scripts/connect-uart-console.sh 4444
+```
+
+You should see at least `[u2] init` from `U2_Init` early in `main`. Use `-uart-console-mirror` (enabled in the script) to copy guest TX to Bramble’s stderr as well.
+
+**Apple-bus stub path** (not for USB menu testing):
+
 ```bash
 export MEGAFLASH_UF2=../MegaFlash/pico/pico2_debug/megaflash.uf2
-UART_CONSOLE_PORT=4444 ./scripts/run-megaflash-stub.sh -uart-console "$UART_CONSOLE_PORT" -timeout 60
-# other terminal:
+UART_CONSOLE_PORT=4444 ./scripts/run-megaflash-stub.sh -timeout 60
 ./scripts/connect-uart-console.sh "$UART_CONSOLE_PORT"
 ```
 

@@ -7,6 +7,17 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+### MegaFlash UART console (2026-06-02)
+
+| Change | Reason |
+|--------|--------|
+| `uart_match`: RP2350 UART0/UART1 @ `0x40070000` / `0x40078000` | `stdio_uart_init` uses relocated PL011; guest writes never reached emulator |
+| Guest bring-up hooks active for `-uart-console` (not only `-usb-console`) | Locale/SPI/U2 stubs needed without USB CDC path |
+| UART mode: `__wrap_puts` / `uart_putc` → `net_bridge_uart_tx` | Early `U2_Init` text reaches TCP |
+| Skip `multicore_launch_core1` at `main` `0x10000318` | Core1 FIFO wait blocked boot on `-cores 1` |
+| `netbridge`: 4 KiB TX pending buffer until TCP client connects | Early guest output not lost before `nc` attaches |
+| `scripts/run-megaflash-uart-console.sh` | No Apple-bus stub; mirror + port 4444 |
+
 ### MegaFlash USB console — U2/SPI/multicore (2026-06-02)
 
 | Change | Reason |
