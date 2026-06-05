@@ -209,6 +209,19 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 
 ---
 
+## 2026-06-02 — Session: MegaFlash USB CDC console / UserTerminal
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Continue USB console bring-up; Apple II must stay disconnected for `UserTerminal` |
+| **Actions** | USB TCP pending TX buffer; host `__wrap_printf` → CDC TCP; `CheckPicoW=1` + `IsAppleConnected=0` stubs (call site + fn); skip `core0Loop` / `EnableAppleResetInterrupt`; skip `stdio_usb_init` / USB wait loops → `UserTerminal`; reuse UART init shortcuts |
+| **Run** | `./scripts/run-megaflash-usb-console.sh -cores 1` + `nc localhost 5555` (no `megaflash-bus.stub`) |
+| **Outcome** | **Verified:** 962 B TCP — boot banner + ASCII art + `Main Menu` / `Please Select:`; log `guest reached UserTerminal path @ 0x10005AD0` |
+| **Tests** | 322/322 pass; UART banner path still works |
+| **Transcript** | `c4c672a1-a61d-45a7-8c50-b3eefb78c27b` |
+
+---
+
 ## YYYY-MM-DD — Session: <title>
 
 | Field | Detail |

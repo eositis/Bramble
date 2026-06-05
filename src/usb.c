@@ -62,13 +62,18 @@ typedef struct {
     int port;
 } usb_tcp_bridge_t;
 
+#define USB_TCP_TX_PENDING_MAX 4096u
+
 static usb_tcp_bridge_t usb_tcp;
+static uint8_t usb_tcp_tx_pending[USB_TCP_TX_PENDING_MAX];
+static size_t usb_tcp_tx_pending_len;
 static int usb_tcp_logged_ready;
 static int usb_logged_host_enable;
 static int usb_ctrl_stall_steps;
 static int usb_guest_cdc_synced;
 
 static void usb_guest_bridge_activate(void);
+static void usb_console_tcp_tx(const uint8_t *data, int len);
 
 static int usb_console_bridge_mode(void) {
     return usb_tcp.port > 0;
@@ -161,6 +166,11 @@ void usb_console_tcp_poll(void) {
             usb_tcp.client_fd = cfd;
             fprintf(stderr, "[USB] CDC console client connected from %s:%d\n",
                     inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+            if (usb_tcp_tx_pending_len > 0) {
+                usb_console_tcp_tx(usb_tcp_tx_pending,
+                                   (int)usb_tcp_tx_pending_len);
+                usb_tcp_tx_pending_len = 0;
+            }
         }
     }
 
@@ -185,7 +195,15 @@ void usb_console_tcp_poll(void) {
 }
 
 static void usb_console_tcp_tx(const uint8_t *data, int len) {
-    if (usb_tcp.client_fd < 0 || len <= 0) {
+    if (len <= 0) {
+        return;
+    }
+    if (usb_tcp.client_fd < 0) {
+        for (int i = 0; i < len; i++) {
+            if (usb_tcp_tx_pending_len < USB_TCP_TX_PENDING_MAX) {
+                usb_tcp_tx_pending[usb_tcp_tx_pending_len++] = data[i];
+            }
+        }
         return;
     }
     ssize_t off = 0;
@@ -325,6 +343,17 @@ static void usb_log_cdc_active_once(void) {
 #define USB_GUEST_CHECK_PICOW_CALL    0x1000036cu /* main: bl CheckPicoW */
 #define USB_GUEST_CHECK_PICOW_CALL2   0x10000392u
 #define USB_GUEST_CHECK_PICOW_FN      0x10004dd8u
+#define USB_GUEST_IS_APPLE_CONNECTED_FN 0x10004d80u
+#define USB_GUEST_CORE0_LOOP_VENEER   0x10034730u
+#define USB_GUEST_ENABLE_APPLE_RST    0x10000294u
+#define USB_GUEST_STDIO_USB_INIT_CALL1 0x1000039au /* main: bl stdio_usb_init (PicoW) */
+#define USB_GUEST_STDIO_USB_INIT_CALL2 0x1000045au
+#define USB_GUEST_STDIO_USB_INIT_FN   0x1000e400u
+#define USB_GUEST_INIT_PICOLED_CALL1  0x1000039eu
+#define USB_GUEST_INIT_PICOLED_CALL2  0x1000045eu
+#define USB_GUEST_STDIO_USB_CONNECTED 0x1000e288u
+#define USB_GUEST_USB_WAIT_LOOP       0x100003b2u /* PicoW USB wait before UserTerminal */
+#define USB_GUEST_USB_CONN_LOOP       0x10000468u /* non-PicoW USB wait loop */
 #define USB_GUEST_CLOCK_GET_HZ        0x1000bdd8u
 #define USB_GUEST_SPI_GET_BAUDRATE    0x10011a30u
 #define USB_GUEST_UART_PUTC           0x1000dd48u /* uart_putc — bridge to TCP under -uart-console */
@@ -393,26 +422,24 @@ static void usb_console_guest_tx_cstr(uint32_t addr) {
     }
 }
 
-static int usb_guest_lr_skip_printf(uint32_t lr) {
-    /* newlib _vfprintf_r locale path hangs under partial VFP */
-    if (lr >= 0x10000300u && lr <= 0x10007fffu) {
-        return 1; /* guest .text — format IO via hooks/TCP only */
-    }
-    if (lr >= USB_GUEST_VFPRINTF_LO && lr <= USB_GUEST_VFPRINTF_HI) {
-        return 1;
-    }
-    return 0;
-}
-
 static void usb_guest_return_to_lr(uint32_t ret) {
     cpu.r[0] = ret;
     cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
 }
 
+static void (*usb_guest_vprintf_tx)(uint8_t ch);
+
 static void usb_guest_uart_tx_byte(uint8_t ch) {
     net_bridge_uart_tx(0, ch);
     if (net_bridge_mirror_stdio) {
         fputc((int)ch, stderr);
+    }
+}
+
+static void usb_guest_usb_tx_byte(uint8_t ch) {
+    usb_console_tcp_tx(&ch, 1);
+    if (usb_cdc_stdout_enabled) {
+        fputc((int)ch, stdout);
     }
 }
 
@@ -442,10 +469,14 @@ static uint32_t usb_guest_uart_make_ap(uint32_t sp) {
     return ap;
 }
 
-static int usb_guest_uart_vprintf(uint32_t fmt, uint32_t ap) {
+static int usb_guest_host_vprintf(uint32_t fmt, uint32_t ap) {
     char spec[32];
     char out[160];
     int total = 0;
+    void (*tx)(uint8_t) = usb_guest_vprintf_tx;
+    if (!tx) {
+        return 0;
+    }
 
     while (1) {
         uint8_t c = mem_read8(fmt++);
@@ -453,7 +484,7 @@ static int usb_guest_uart_vprintf(uint32_t fmt, uint32_t ap) {
             break;
         }
         if (c != '%') {
-            usb_guest_uart_tx_byte(c);
+            tx(c);
             total++;
             continue;
         }
@@ -462,7 +493,7 @@ static int usb_guest_uart_vprintf(uint32_t fmt, uint32_t ap) {
             break;
         }
         if (c == '%') {
-            usb_guest_uart_tx_byte('%');
+            tx('%');
             total++;
             continue;
         }
@@ -492,20 +523,20 @@ static int usb_guest_uart_vprintf(uint32_t fmt, uint32_t ap) {
                 if (ch == 0) {
                     break;
                 }
-                usb_guest_uart_tx_byte(ch);
+                tx(ch);
                 total++;
             }
         } else if (c == 'c') {
             uint32_t v = mem_read32(ap);
             ap += 4u;
-            usb_guest_uart_tx_byte((uint8_t)v);
+            tx((uint8_t)v);
             total++;
         } else if (c == 'p' || c == 'x' || c == 'X' || c == 'u') {
             uint32_t v = mem_read32(ap);
             ap += 4u;
             snprintf(out, sizeof(out), spec, (unsigned)v);
             for (char *p = out; *p != '\0'; p++) {
-                usb_guest_uart_tx_byte((uint8_t)*p);
+                tx((uint8_t)*p);
                 total++;
             }
         } else if (c == 'd' || c == 'i') {
@@ -513,18 +544,15 @@ static int usb_guest_uart_vprintf(uint32_t fmt, uint32_t ap) {
             ap += 4u;
             snprintf(out, sizeof(out), spec, v);
             for (char *p = out; *p != '\0'; p++) {
-                usb_guest_uart_tx_byte((uint8_t)*p);
+                tx((uint8_t)*p);
                 total++;
             }
         } else {
             for (int i = 0; spec[i] != '\0'; i++) {
-                usb_guest_uart_tx_byte((uint8_t)spec[i]);
+                tx((uint8_t)spec[i]);
                 total++;
             }
         }
-    }
-    if (net_bridge_mirror_stdio) {
-        fflush(stderr);
     }
     return total;
 }
@@ -654,19 +682,61 @@ void usb_console_guest_stdio_hook(void) {
         pc == USB_GUEST_IS_APPLE_CONNECTED_CALL2) {
         cpu.r[0] = 0;
         cpu.r[15] = (pc == USB_GUEST_IS_APPLE_CONNECTED_CALL ? 0x10000310u
-                                                              : 0x100003e0u) |
+                                                              : 0x100003e2u) |
                      1u;
         return;
     }
-    if (pc == USB_GUEST_CHECK_PICOW_CALL || pc == USB_GUEST_CHECK_PICOW_CALL2) {
+    if (pc == USB_GUEST_IS_APPLE_CONNECTED_FN) {
         cpu.r[0] = 0;
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return;
+    }
+    if (pc == USB_GUEST_CHECK_PICOW_CALL || pc == USB_GUEST_CHECK_PICOW_CALL2) {
+        cpu.r[0] = usb_mode ? 1u : 0u;
         cpu.r[15] = (pc == USB_GUEST_CHECK_PICOW_CALL ? 0x10000370u : 0x10000396u) |
                      1u;
         return;
     }
     if (pc == USB_GUEST_CHECK_PICOW_FN) {
-        cpu.r[0] = 0;
+        cpu.r[0] = usb_mode ? 1u : 0u;
         cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return;
+    }
+    if (usb_mode &&
+        (pc == USB_GUEST_CORE0_LOOP_VENEER || pc == USB_GUEST_ENABLE_APPLE_RST)) {
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return;
+    }
+    if (usb_mode && pc == USB_GUEST_STDIO_USB_INIT_CALL1) {
+        cpu.r[15] = 0x100003a2u | 1u;
+        return;
+    }
+    if (usb_mode && pc == USB_GUEST_STDIO_USB_INIT_CALL2) {
+        cpu.r[15] = 0x10000468u | 1u;
+        return;
+    }
+    if (usb_mode && pc == USB_GUEST_STDIO_USB_INIT_FN) {
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return;
+    }
+    if (usb_mode &&
+        (pc == USB_GUEST_INIT_PICOLED_CALL1 || pc == USB_GUEST_INIT_PICOLED_CALL2)) {
+        cpu.r[15] = (pc == USB_GUEST_INIT_PICOLED_CALL1 ? 0x100003a2u
+                                                         : 0x10000468u) |
+                     1u;
+        return;
+    }
+    if (usb_mode && pc == USB_GUEST_STDIO_USB_CONNECTED) {
+        cpu.r[0] = usb_guest_cdc_synced ? 1u : 0u;
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return;
+    }
+    if (usb_mode && pc == USB_GUEST_USB_WAIT_LOOP) {
+        cpu.r[15] = 0x100003e8u | 1u;
+        return;
+    }
+    if (usb_mode && pc == USB_GUEST_USB_CONN_LOOP) {
+        cpu.r[15] = 0x10000464u | 1u;
         return;
     }
     if (pc == USB_GUEST_CLOCK_GET_HZ) {
@@ -681,13 +751,21 @@ void usb_console_guest_stdio_hook(void) {
     }
     if (!usb_mode && net_bridge_uart_active(0)) {
         if (pc == USB_GUEST_WRAP_PRINTF) {
-            int n = usb_guest_uart_vprintf(cpu.r[0],
+            usb_guest_vprintf_tx = usb_guest_uart_tx_byte;
+            int n = usb_guest_host_vprintf(cpu.r[0],
                                            usb_guest_uart_make_ap(cpu.r[13]));
+            if (net_bridge_mirror_stdio) {
+                fflush(stderr);
+            }
             usb_guest_return_to_lr((uint32_t)n);
             return;
         }
         if (pc == USB_GUEST_WRAP_VPRINTF) {
-            int n = usb_guest_uart_vprintf(cpu.r[0], cpu.r[1]);
+            usb_guest_vprintf_tx = usb_guest_uart_tx_byte;
+            int n = usb_guest_host_vprintf(cpu.r[0], cpu.r[1]);
+            if (net_bridge_mirror_stdio) {
+                fflush(stderr);
+            }
             usb_guest_return_to_lr((uint32_t)n);
             return;
         }
@@ -849,13 +927,26 @@ void usb_console_guest_stdio_hook(void) {
         usb_guest_return_to_lr(1);
         return;
     }
-    if (usb_mode &&
-        (pc == USB_GUEST_WRAP_PRINTF || pc == USB_GUEST_WRAP_VPRINTF) &&
-        usb_guest_lr_skip_printf(lr)) {
-        usb_guest_return_to_lr(0);
+    if (!usb_mode) {
         return;
     }
-    if (!usb_mode) {
+    if (pc == USB_GUEST_WRAP_PRINTF) {
+        usb_guest_vprintf_tx = usb_guest_usb_tx_byte;
+        int n = usb_guest_host_vprintf(cpu.r[0],
+                                       usb_guest_uart_make_ap(cpu.r[13]));
+        if (usb_cdc_stdout_enabled) {
+            fflush(stdout);
+        }
+        usb_guest_return_to_lr((uint32_t)n);
+        return;
+    }
+    if (pc == USB_GUEST_WRAP_VPRINTF) {
+        usb_guest_vprintf_tx = usb_guest_usb_tx_byte;
+        int n = usb_guest_host_vprintf(cpu.r[0], cpu.r[1]);
+        if (usb_cdc_stdout_enabled) {
+            fflush(stdout);
+        }
+        usb_guest_return_to_lr((uint32_t)n);
         return;
     }
     if (pc == USB_GUEST_USER_TERMINAL_DEVINFO) {
@@ -868,6 +959,19 @@ void usb_console_guest_stdio_hook(void) {
         return;
     }
 
+    if (pc == USB_GUEST_STDIO_PUTSTRING_FN) {
+        uint32_t buf = cpu.r[0];
+        uint32_t len = cpu.r[1];
+        if (len == 0xffffffffu) {
+            len = 0;
+            while (len < 8192u && mem_read8(buf + len) != 0) {
+                len++;
+            }
+        }
+        usb_console_guest_tx_buf(buf, len);
+        usb_guest_return_to_lr(len);
+        return;
+    }
     if (pc == USB_GUEST_WRAP_PUTS) {
         uint32_t str = cpu.r[0];
         uint32_t len = 0;
@@ -889,9 +993,6 @@ void usb_console_guest_stdio_hook(void) {
         cpu.r[15] = 0x1000dce4u | 1u;
         return;
     }
-    if (usb_tcp.client_fd < 0) {
-        return;
-    }
     if (pc == USB_GUEST_WRAP_PUTS_CALL) {
         usb_console_guest_tx_buf(cpu.r[0], cpu.r[1]);
         return;
@@ -909,9 +1010,9 @@ static void usb_guest_reset_stdio_mutexes(void) {
     mem_write8(USB_GUEST_STDIO_USB_MUTEX + 5u, 0u);
 }
 
-static void usb_guest_force_not_picow(void) {
+static void usb_guest_seed_picow_check(void) {
     mem_write8(USB_GUEST_CHECK_PICOW_INITED, 1u);
-    mem_write8(USB_GUEST_CHECK_PICOW_RESULT, 0u);
+    mem_write8(USB_GUEST_CHECK_PICOW_RESULT, 1u);
 }
 
 static void usb_guest_init_cdc_fifos(void) {
@@ -1695,7 +1796,7 @@ static void usb_step_console_bridge(void) {
 
     if (usb_guest_cdc_synced) {
         usb_sync_guest_cdc_connected();
-        usb_guest_force_not_picow();
+        usb_guest_seed_picow_check();
         usb_guest_reset_stdio_mutexes();
         usb_guest_init_cdc_fifos();
         usb_unstick_guest_control();

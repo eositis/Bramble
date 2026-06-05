@@ -7,6 +7,16 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+### MegaFlash USB CDC console — UserTerminal (2026-06-02)
+
+| Change | Reason |
+|--------|--------|
+| USB TCP pending TX buffer (4 KiB) | Early guest CDC output lost before `nc` attaches |
+| USB mode: host `__wrap_printf` / `stdio_put_string` → CDC TCP | Same `_vfprintf_r` hang as UART; stub-only printf sent nothing |
+| `IsAppleConnected` → 0 (call sites + `0x10004D80`); skip `core0Loop` veneer | Apple II must be offline for USB diagnostic menu |
+| `CheckPicoW` → 1 in USB mode; seed `0x2005BC82` | Enter PicoW `stdio_usb_init` / USB wait path |
+| Skip `stdio_usb_init`, USB wait loops → `UserTerminal` | TinyUSB init spin/fault under partial USB emu; CDC already bridged in Bramble |
+
 ### MegaFlash UART console — full banner (2026-06-02)
 
 | Change | Reason |

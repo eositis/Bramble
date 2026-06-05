@@ -39,7 +39,9 @@ The `CDC active` line appears automatically once the guest USB stack is up (no `
 ./scripts/connect-usb-console.sh 5555
 ```
 
-You should see the MegaFlash ASCII banner and `UserTerminal()` menu (TFTP, flash tools, etc.).
+You should see the DEBUG boot banner, ASCII art, and `UserTerminal()` main menu (`Device Information`, upload/download ProDOS image, etc.).
+
+**Verified (2026-06-02):** `pico2_debug/megaflash.uf2` with `-cores 1`, no Apple-bus stub — TCP receives the full banner plus menu prompt `Please Select:`.
 
 ### Flags
 
