@@ -44,6 +44,14 @@
 #define USB_GUEST_TUD_CDC_TXBUF     (USB_GUEST_TUD_CDC_BASE + 0x78u)
 #define USB_GUEST_STDIO_MUTEX       0x2000516cu
 #define USB_GUEST_STDIO_USB_MUTEX   0x200526fcu
+#define USB_GUEST_STDIO_USB_DRIVER  0x200047d4u /* Pico SDK stdio_usb driver RAM */
+#define USB_GUEST_STDIO_ACTIVE_DRV  0x20007854u /* stdio_driver_t * chain head */
+#define USB_GUEST_STDIO_USB_OUT     0x1000e32du /* stdio_usb_out_chars */
+#define USB_GUEST_STDIO_USB_FLUSH   0x1000e0a5u /* stdio_usb_out_flush */
+#define USB_GUEST_STDIO_USB_IN      0x1000e294u /* stdio_usb_in_chars */
+#define USB_GUEST_TUD_CDC_AVAILABLE 0x1000fc0cu /* tud_cdc_n_available */
+#define USB_GUEST_TUD_CDC_READ      0x1000fc24u /* tud_cdc_n_read */
+#define USB_GUEST_STDIO_USB_AVAIL   0x1000e091u /* chars_available callback */
 #define USB_GUEST_CHECK_PICOW_INITED  0x2005bc81u
 #define USB_GUEST_CHECK_PICOW_RESULT  0x2005bc82u
 
@@ -74,6 +82,9 @@ static int usb_guest_cdc_synced;
 
 static void usb_guest_bridge_activate(void);
 static void usb_console_tcp_tx(const uint8_t *data, int len);
+static uint16_t usb_guest_fifo_count(uint32_t fifo_addr);
+static int usb_guest_cdc_rx_fifo_push(uint8_t byte);
+static int usb_guest_cdc_rx_fifo_pop(uint8_t *out);
 
 static int usb_console_bridge_mode(void) {
     return usb_tcp.port > 0;
@@ -184,7 +195,11 @@ void usb_console_tcp_poll(void) {
         ssize_t n = read(usb_tcp.client_fd, buf, sizeof(buf));
         if (n > 0) {
             for (ssize_t j = 0; j < n; j++) {
-                (void)usb_cdc_rx_push(buf[j]);
+                if (usb_guest_cdc_synced) {
+                    (void)usb_guest_cdc_rx_fifo_push(buf[j]);
+                } else {
+                    (void)usb_cdc_rx_push(buf[j]);
+                }
             }
         } else if (n == 0) {
             fprintf(stderr, "[USB] CDC console client disconnected\n");
@@ -949,6 +964,56 @@ void usb_console_guest_stdio_hook(void) {
         usb_guest_return_to_lr((uint32_t)n);
         return;
     }
+    if (pc == USB_GUEST_STDIO_USB_IN) {
+        uint32_t buf = cpu.r[0];
+        uint32_t len = cpu.r[1];
+        uint32_t nread = 0;
+        if (buf != 0 && len != 0) {
+            if (len == 0xffffffffu) {
+                len = 1;
+            }
+            for (uint32_t i = 0; i < len && i < 64u; i++) {
+                uint8_t ch;
+                if (!usb_guest_cdc_rx_fifo_pop(&ch)) {
+                    break;
+                }
+                mem_write8(buf + i, ch);
+                nread++;
+            }
+        }
+        usb_guest_return_to_lr(nread);
+        return;
+    }
+    if (pc == USB_GUEST_TUD_CDC_AVAILABLE) {
+        uint32_t fifo = USB_GUEST_TUD_CDC_BASE + cpu.r[0] * 0xc8u + 16u;
+        cpu.r[0] = usb_guest_fifo_count(fifo);
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return;
+    }
+    if (pc == USB_GUEST_TUD_CDC_READ) {
+        uint32_t itf = cpu.r[0];
+        uint32_t buf = cpu.r[1];
+        uint32_t len = cpu.r[2];
+        uint32_t fifo = USB_GUEST_TUD_CDC_BASE + itf * 0xc8u + 16u;
+        uint32_t avail = usb_guest_fifo_count(fifo);
+        if (len == 0xffffu) {
+            len = avail;
+        }
+        if (len > avail) {
+            len = avail;
+        }
+        for (uint32_t i = 0; i < len; i++) {
+            uint8_t ch;
+            if (!usb_guest_cdc_rx_fifo_pop(&ch)) {
+                len = i;
+                break;
+            }
+            mem_write8(buf + i, ch);
+        }
+        cpu.r[0] = len;
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return;
+    }
     if (pc == USB_GUEST_USER_TERMINAL_DEVINFO) {
         cpu.r[15] = USB_GUEST_PRINT_BANNER | 1u;
         return;
@@ -1015,7 +1080,57 @@ static void usb_guest_seed_picow_check(void) {
     mem_write8(USB_GUEST_CHECK_PICOW_RESULT, 1u);
 }
 
+static void usb_guest_init_stdio_usb_driver(void) {
+    static int seeded;
+    if (seeded++) {
+        return;
+    }
+    /* stdio_usb_init copies this driver template; we skip that init under emu. */
+    mem_write32(USB_GUEST_STDIO_USB_DRIVER + 0u, USB_GUEST_STDIO_USB_OUT);
+    mem_write32(USB_GUEST_STDIO_USB_DRIVER + 4u, USB_GUEST_STDIO_USB_FLUSH);
+    mem_write32(USB_GUEST_STDIO_USB_DRIVER + 8u, USB_GUEST_STDIO_USB_IN);
+    mem_write32(USB_GUEST_STDIO_USB_DRIVER + 12u, USB_GUEST_STDIO_USB_AVAIL);
+    mem_write32(USB_GUEST_STDIO_USB_DRIVER + 16u, 0u);
+    mem_write32(USB_GUEST_STDIO_USB_DRIVER + 20u, 0x100u);
+    mem_write32(USB_GUEST_STDIO_ACTIVE_DRV, USB_GUEST_STDIO_USB_DRIVER);
+}
+
+static int usb_guest_cdc_rx_fifo_pop(uint8_t *out) {
+    uint32_t fifo = USB_GUEST_TUD_CDC_RXFIFO;
+    uint32_t buf = mem_read32(fifo);
+    uint16_t depth = mem_read16(fifo + 4u);
+    uint16_t wr = mem_read16(fifo + 8u);
+    uint16_t rd = mem_read16(fifo + 10u);
+
+    if (buf == 0 || depth == 0 || wr == rd) {
+        return 0;
+    }
+    *out = mem_read8(buf + (uint32_t)(rd % depth));
+    mem_write16(fifo + 10u, (uint16_t)(rd + 1u));
+    return 1;
+}
+
+static int usb_guest_cdc_rx_fifo_push(uint8_t byte) {
+    uint32_t fifo = USB_GUEST_TUD_CDC_RXFIFO;
+    uint32_t buf = mem_read32(fifo);
+    uint16_t depth = mem_read16(fifo + 4u);
+    uint16_t wr = mem_read16(fifo + 8u);
+    uint16_t rd = mem_read16(fifo + 10u);
+
+    if (buf == 0 || depth == 0) {
+        return 0;
+    }
+    if (usb_guest_fifo_count(fifo) >= depth) {
+        return 0;
+    }
+    mem_write8(buf + (uint32_t)(wr % depth), byte);
+    mem_write16(fifo + 8u, (uint16_t)(wr + 1u));
+    return 1;
+}
+
 static void usb_guest_init_cdc_fifos(void) {
+    usb_guest_init_stdio_usb_driver();
+
     uint32_t tx = USB_GUEST_TUD_CDC_TXFIFO;
     if (mem_read32(tx) != 0 && mem_read16(tx + 4) != 0) {
         return;

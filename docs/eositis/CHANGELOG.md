@@ -7,6 +7,14 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+### MegaFlash USB CDC console — input (2026-06-02)
+
+| Change | Reason |
+|--------|--------|
+| Seed `stdio_usb` driver @ `0x200047D4` + chain @ `0x20007854` | `stdio_usb_init` skipped; `usb_getchar` called NULL `in_chars` |
+| TCP RX → guest CDC RX `tu_fifo` (not host DPRAM only) | TinyUSB stack not running; guest reads guest RAM fifo |
+| Hook `stdio_usb_in_chars`, `tud_cdc_n_available`, `tud_cdc_n_read` | Bypass mutex/`tud_task` spin; direct fifo pop |
+
 ### MegaFlash USB CDC console — UserTerminal (2026-06-02)
 
 | Change | Reason |

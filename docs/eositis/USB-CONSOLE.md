@@ -41,7 +41,9 @@ The `CDC active` line appears automatically once the guest USB stack is up (no `
 
 You should see the DEBUG boot banner, ASCII art, and `UserTerminal()` main menu (`Device Information`, upload/download ProDOS image, etc.).
 
-**Verified (2026-06-02):** `pico2_debug/megaflash.uf2` with `-cores 1`, no Apple-bus stub — TCP receives the full banner plus menu prompt `Please Select:`.
+**Verified (2026-06-02):** `pico2_debug/megaflash.uf2` with `-cores 1`, no Apple-bus stub — TCP receives the full banner plus menu prompt `Please Select:`. Sending `1` echoes `1` and runs menu item 1 (Device Information).
+
+**Input path:** TCP bytes are pushed into the guest TinyUSB CDC RX fifo; `stdio_usb` driver RAM is seeded because `stdio_usb_init` is skipped under emulation.
 
 ### Flags
 

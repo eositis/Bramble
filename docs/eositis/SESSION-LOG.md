@@ -222,6 +222,18 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 
 ---
 
+## 2026-06-02 — Session: USB console input fix
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Diagnose USB CDC TCP input not working at `UserTerminal` menu |
+| **Root cause** | Skipping `stdio_usb_init` left `stdio_usb` driver @ `0x200047D4` zeroed; TCP RX went to host DPRAM only, not guest CDC RX fifo |
+| **Fix** | Seed stdio USB driver + active driver pointer; push TCP RX into guest `tu_fifo` RX; hook `stdio_usb_in_chars` / `tud_cdc_n_read` to pop fifo |
+| **Verified** | Python client: menu 962 B, send `1` → echo `1\n\n` + menu refresh (option 1) |
+| **Tests** | 322/322 pass |
+
+---
+
 ## YYYY-MM-DD — Session: <title>
 
 | Field | Detail |
