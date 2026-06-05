@@ -60,7 +60,9 @@ Implementation: `src/netbridge.c`, polled from the main loop as `net_bridge_poll
 ./scripts/connect-uart-console.sh 4444
 ```
 
-You should see at least `[u2] init` from `U2_Init` early in `main`. Use `-uart-console-mirror` (enabled in the script) to copy guest TX to Bramble’s stderr as well.
+You should see `[u2] init` from `U2_Init`, then the **MegaFlash DEBUG** banner (version, build date, clock/SPI speeds, heap). Use `-uart-console-mirror` (enabled in the script) to copy guest TX to Bramble’s stderr as well.
+
+**Note:** Connect with `nc` soon after start (avoid `nc -z` port probes — they flush the 4 KiB TX pending buffer without reading). Bramble guest hooks skip slow init/U2 paths and format `__wrap_printf` on the host so banners appear without waiting for `_vfprintf_r`.
 
 **Apple-bus stub path** (not for USB menu testing):
 

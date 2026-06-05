@@ -195,6 +195,20 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 
 ---
 
+## 2026-06-02 — Session: UART main banner over TCP
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Proceed with UART printf bring-up so full MegaFlash banner reaches TCP (not only `[u2] init`) |
+| **Actions** | Host `__wrap_printf` / `__wrap_vprintf` formatter on UART path; skip `U2_MonInit` / `u2_reset` call sites; fix chained `main` call-site stubs (same `cpu_step` executes insn at new PC); stub `clock_get_hz` / `spi_get_baudrate` / `CheckPicoW` |
+| **Files** | `src/usb.c`, `docs/eositis/UART-CONSOLE.md`, `docs/eositis/SESSION-LOG.md`, `docs/eositis/CHANGELOG.md` |
+| **Run** | `./scripts/run-megaflash-uart-console.sh` + `nc localhost 4444` |
+| **Outcome** | **Verified:** 323 B TCP output — U2 init + full DEBUG banner (`Megaflash DEBUG Firmware Version 33`, build date, 150 MHz clocks, heap). Guest still faults later (`PC≈0x1E`) before `UserTerminal` |
+| **Tests** | 322/322 pass |
+| **Transcript** | `c4c672a1-a61d-45a7-8c50-b3eefb78c27b` |
+
+---
+
 ## YYYY-MM-DD — Session: <title>
 
 | Field | Detail |

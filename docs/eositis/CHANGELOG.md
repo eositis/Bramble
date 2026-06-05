@@ -7,7 +7,16 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
-### MegaFlash UART console (2026-06-02)
+### MegaFlash UART console — full banner (2026-06-02)
+
+| Change | Reason |
+|--------|--------|
+| UART path: host `__wrap_printf` / `__wrap_vprintf` (`%s` `%d` `%u` `%lu` `%x` `%c`) | `main` calls `__wrap_printf` not `vprintf`; `_vfprintf_r` locale spin blocked banners |
+| Skip `U2_MonInit` / `u2_reset` at call sites in `U2_Init` | `ldaexb` spin in `U2_MonInit` cost ~200M steps before `main` banners |
+| Chained `main` call-site stubs (`LoadAllConfigs` → `0x10000310`, `multicore` → `0x10000320`) | `cpu_step` runs the insn at the new PC in the same step — `+4` alone still entered next `bl` |
+| Stub `clock_get_hz` / `spi_get_baudrate` / `CheckPicoW` | Banner showed `0MHz`; PicoW branch printed misleading “WIFI Supported = Yes” |
+
+### MegaFlash UART console — initial bridge (2026-06-02, commit `92d1179`)
 
 | Change | Reason |
 |--------|--------|
