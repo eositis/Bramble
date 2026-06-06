@@ -19,8 +19,19 @@ if [[ ! -f "$UF2" ]]; then
   exit 1
 fi
 
+# macOS: default to virtual serial (PTY) so screen/cu/Serial.app can attach.
+# Set USB_CONSOLE_TCP=1 to keep the legacy TCP socket mode instead.
+USE_PTY=0
+if [[ "${USB_CONSOLE_TCP:-0}" == 1 ]]; then
+  USE_PTY=0
+elif [[ "${USB_CONSOLE_PTY:-0}" == 1 ]]; then
+  USE_PTY=1
+elif [[ "$(uname -s)" == Darwin ]]; then
+  USE_PTY=1
+fi
+
 USB_CONSOLE_ARG=(-usb-console "$PORT")
-if [[ "${USB_CONSOLE_PTY:-0}" == 1 ]]; then
+if [[ "$USE_PTY" == 1 ]]; then
   USB_CONSOLE_ARG=(-usb-console "pty:${PTY_PATH}")
 fi
 

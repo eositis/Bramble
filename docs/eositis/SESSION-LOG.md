@@ -268,6 +268,16 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Tests** | 322/322 pass |
 | **Commit** | `7f9d8f2` — feat(console): USB CDC on virtual serial port (PTY) |
 
+---
+
+## 2026-06-02 — Session: macOS default PTY for USB console
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Make USB console usable from macOS terminal/serial programs |
+| **Fix** | PTY default on Darwin in run script; connect auto-detects symlink; `open-usb-console-macos.sh` |
+| **Commit** | *(pending)* |
+
 <!--
 
 | Field | Detail |

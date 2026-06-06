@@ -13,6 +13,7 @@ Scope: local commits on `main` after clone.
 |--------|--------|
 | `-usb-console pty[:path]` / `-usb-serial` → host PTY + optional symlink | Use `screen`, `cu`, Serial.app instead of TCP/`nc` |
 | `USB_CONSOLE_PTY=1` in run/connect scripts | Default symlink `/tmp/bramble-usb-console` |
+| macOS: PTY default in run script; `open-usb-console-macos.sh` | Terminal.app / screen without `USB_CONSOLE_PTY=1` |
 | TCP mode unchanged (`-usb-console <port>`) | Backward compatible with existing workflows |
 
 ### MegaFlash USB menu — Device Information (2026-06-02)

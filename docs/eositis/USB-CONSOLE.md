@@ -12,10 +12,12 @@ Bramble implements (1)–(2) in `src/usb.c` whenever the guest enables the USB c
 
 Use a **PTY** so standard serial programs (`screen`, `cu`, Serial.app, etc.) can attach without TCP.
 
+On **macOS**, `./scripts/run-megaflash-usb-console.sh` defaults to PTY mode (virtual serial). Set `USB_CONSOLE_TCP=1` to use the legacy TCP socket instead.
+
 **Terminal 1 — emulator:**
 
 ```bash
-USB_CONSOLE_PTY=1 ./scripts/run-megaflash-usb-console.sh
+./scripts/run-megaflash-usb-console.sh
 # or:
 ./build/bramble ../MegaFlash/pico/pico2_debug/megaflash.uf2 \
   -arch m33 -clock 150 -cores 1 \
@@ -32,9 +34,20 @@ Wait for:
 **Terminal 2 — menu / diagnostics:**
 
 ```bash
-USB_CONSOLE_PTY=1 ./scripts/connect-usb-console.sh
+./scripts/connect-usb-console.sh
 # or: screen /tmp/bramble-usb-console 115200
 ```
+
+### macOS terminal and serial programs
+
+| Program | How to connect |
+|---------|----------------|
+| **Terminal.app** (new window) | `./scripts/open-usb-console-macos.sh` |
+| **screen** / **cu** | `./scripts/connect-usb-console.sh` or `screen /tmp/bramble-usb-console 115200` |
+| **Serial.app**, **CoolTerm**, etc. | Pick `/dev/ttysNNN` from the port list (path printed in Bramble stderr), or open symlink `/tmp/bramble-usb-console` if the app allows custom paths. Baud: **115200** (ignored by CDC). |
+| **iTerm2** | Same as Terminal: `screen /tmp/bramble-usb-console 115200` |
+
+Bramble must stay running in Terminal 1 while you use the serial port. If connect says `PTY not found`, Bramble is not running or exited (e.g. timeout).
 
 | Flag | Purpose |
 |------|---------|
