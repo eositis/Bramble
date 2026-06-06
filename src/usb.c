@@ -340,6 +340,7 @@ static void usb_log_cdc_active_once(void) {
 #define USB_GUEST_USER_TERMINAL_DEVINFO 0x10005aecu /* bl DeviceInfo */
 #define USB_GUEST_PRINT_BANNER      0x10005af0u
 #define USB_GUEST_GET_DEVICE_INFO   0x10005058u /* GetDeviceInfoString */
+#define USB_GUEST_PRINT_ALL_PARTITIONS 0x100057a0u /* PrintAllPartitions */
 #define USB_GUEST_ASSERT_FUNC       0x1000da68u /* __assert_func */
 #define USB_GUEST_CHECK_ALLOC       0x1000d924u /* check_alloc — skip heap bounds under emu */
 #define USB_GUEST_ENABLE_SPI0       0x10002910u /* enable_spi0 — clamp deviceNum for emu */
@@ -611,13 +612,46 @@ static void usb_guest_hw_claim_bootstrap(void) {
                 (uint32_t)(USB_GUEST_SPIN_LOCK_HW + 2u));
 }
 
+static void usb_guest_write_cstr_to_guest(uint32_t buf, const char *s) {
+    for (uint32_t i = 0; s[i] != '\0'; i++) {
+        mem_write8(buf + i, (uint8_t)s[i]);
+    }
+    mem_write8(buf + (uint32_t)strlen(s), 0);
+}
+
 static void usb_guest_skip_get_device_info_string(void) {
     uint32_t buf = cpu.r[0];
-    static const char k_msg[] = "MegaFlash (Bramble USB console)\r\n";
-    for (uint32_t i = 0; k_msg[i] != '\0'; i++) {
-        mem_write8(buf + i, (uint8_t)k_msg[i]);
+    /*
+     * Native GetDeviceInfoString uses sprintf(%f) after VFP; newlib float
+     * formatting can spin under emulation. Build the same multiline layout
+     * the firmware would produce (see megaflash .rodata @ 0x10035640).
+     */
+    static const char k_msg[] =
+        "Device Information\r\n"
+        "==========\r\n\r\n"
+        "Pico Board = Pico 2 RP2350\r\n"
+        "Wifi Supported = Yes\r\n"
+        "CPU Speed = 150MHz, SPI Speed = 1.0MHz\r\n"
+        "MegaFlash Pico Firmware Version = V1.2.1-eo (DEBUG)\r\n"
+        "Firmware build: 2026-05-03 03:55:51 UTC  (1777780551 Unix s)\r\n"
+        "Pico SDK Version = 2.2.0\r\n"
+        "Total Flash Capacity = 16MB\r\n"
+        "Flash Chip #0 JEDEC ID = EF4017h\r\n"
+        "Flash Chip #1 JEDEC ID = EF4017h\r\n";
+    usb_guest_write_cstr_to_guest(buf, k_msg);
+    cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+}
+
+static void usb_guest_stub_print_all_partitions(void) {
+    static const char k_msg[] =
+        "\r\nPartition Information:\r\n"
+        "Drive Type    Volume Name        Size\r\n"
+        "Flash Unit 1  MegaFlash          16MB (Bramble emu)\r\n";
+    usb_console_tcp_tx((const uint8_t *)k_msg, (int)(sizeof(k_msg) - 1u));
+    if (usb_cdc_stdout_enabled) {
+        fwrite(k_msg, 1, sizeof(k_msg) - 1u, stdout);
+        fflush(stdout);
     }
-    mem_write8(buf + (uint32_t)(sizeof(k_msg) - 1u), 0);
     cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
 }
 
@@ -644,6 +678,10 @@ void usb_console_guest_stdio_hook(void) {
 
     if (pc == USB_GUEST_GET_DEVICE_INFO) {
         usb_guest_skip_get_device_info_string();
+        return;
+    }
+    if (usb_mode && pc == USB_GUEST_PRINT_ALL_PARTITIONS) {
+        usb_guest_stub_print_all_partitions();
         return;
     }
     if (pc == USB_GUEST_ENABLE_SPI0) {
@@ -1012,10 +1050,6 @@ void usb_console_guest_stdio_hook(void) {
         }
         cpu.r[0] = len;
         cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
-        return;
-    }
-    if (pc == USB_GUEST_USER_TERMINAL_DEVINFO) {
-        cpu.r[15] = USB_GUEST_PRINT_BANNER | 1u;
         return;
     }
     if (usb_guest_cdc_synced &&

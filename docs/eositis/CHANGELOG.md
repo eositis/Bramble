@@ -7,6 +7,14 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+### MegaFlash USB menu — Device Information (2026-06-02)
+
+| Change | Reason |
+|--------|--------|
+| Remove `DeviceInfo` → `PrintBanner` redirect @ `0x10005AEC` | Key `1` re-sent full menu instead of device info |
+| Host-built multiline `GetDeviceInfoString` stub @ `0x10005058` | Native path uses `sprintf(%f)` after VFP; spins under emu |
+| Stub `PrintAllPartitions` @ `0x100057A0` for USB console | Flash unit mapping disabled in `UserTerminal`; no partition lines |
+
 ### MegaFlash USB CDC console — input (2026-06-02)
 
 | Change | Reason |

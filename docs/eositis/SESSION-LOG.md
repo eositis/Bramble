@@ -234,7 +234,18 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 
 ---
 
-## YYYY-MM-DD — Session: <title>
+## 2026-06-02 — Session: USB menu Device Information (key 1)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Pressing `1` at `UserTerminal` should show multiline firmware/flash info, not re-send the menu |
+| **Root cause** | Hook @ `0x10005AEC` redirected `DeviceInfo` → `PrintBanner`; prior `GetDeviceInfoString` stub was one line only |
+| **Fix** | Remove redirect; host-build full device-info buffer (matches `.rodata` layout); stub `PrintAllPartitions` for partition header + emu row |
+| **Verified** | TCP `1` → device info, JEDEC lines, partition table, `Press any key to continue...` (no menu repeat) |
+| **Tests** | 322/322 pass |
+| **Commit** | `e33eca6` — fix(console): MegaFlash USB menu Device Information on key 1 |
+
+<!--
 
 | Field | Detail |
 |-------|--------|
