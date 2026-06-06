@@ -8,6 +8,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BRAMBLE="${BRAMBLE:-$ROOT/bramble}"
 UF2="${MEGAFLASH_UF2:-$ROOT/../MegaFlash/pico/pico2_debug/megaflash.uf2}"
 PORT="${USB_CONSOLE_PORT:-5555}"
+PTY_PATH="${USB_CONSOLE_PTY_PATH:-/tmp/bramble-usb-console}"
 
 if [[ ! -x "$BRAMBLE" ]]; then
   BRAMBLE="$ROOT/build/bramble"
@@ -18,11 +19,16 @@ if [[ ! -f "$UF2" ]]; then
   exit 1
 fi
 
+USB_CONSOLE_ARG=(-usb-console "$PORT")
+if [[ "${USB_CONSOLE_PTY:-0}" == 1 ]]; then
+  USB_CONSOLE_ARG=(-usb-console "pty:${PTY_PATH}")
+fi
+
 exec "$BRAMBLE" "$UF2" \
   -arch m33 \
   -clock 150 \
   -cores 2 \
-  -usb-console "$PORT" \
+  "${USB_CONSOLE_ARG[@]}" \
   -usb-stdio \
   -timeout "${TIMEOUT:-120}" \
   "$@"

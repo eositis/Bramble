@@ -1,9 +1,27 @@
 #!/usr/bin/env bash
-# Attach to Bramble USB CDC TCP console (-usb-console).
+# Attach to Bramble USB CDC console (-usb-console TCP or PTY).
 set -euo pipefail
 
 HOST="${USB_CONSOLE_HOST:-127.0.0.1}"
 PORT="${1:-${USB_CONSOLE_PORT:-5555}}"
+PTY_PATH="${USB_CONSOLE_PTY_PATH:-/tmp/bramble-usb-console}"
+BAUD="${USB_CONSOLE_BAUD:-115200}"
+
+if [[ "${USB_CONSOLE_PTY:-0}" == 1 || "${1:-}" == "pty" ]]; then
+  if [[ ! -e "$PTY_PATH" ]]; then
+    echo "PTY not found: $PTY_PATH" >&2
+    echo "Start Bramble with: USB_CONSOLE_PTY=1 ./scripts/run-megaflash-usb-console.sh" >&2
+    exit 1
+  fi
+  if command -v screen >/dev/null 2>&1; then
+    exec screen "$PTY_PATH" "$BAUD"
+  fi
+  if command -v cu >/dev/null 2>&1; then
+    exec cu -l "$PTY_PATH" -s "$BAUD"
+  fi
+  echo "Need screen or cu to open $PTY_PATH (baud $BAUD is ignored by CDC)" >&2
+  exit 1
+fi
 
 if command -v nc >/dev/null 2>&1; then
   exec nc "$HOST" "$PORT"

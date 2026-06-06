@@ -256,6 +256,18 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Tests** | 322/322 pass |
 | **Commit** | `1823f07` — fix(console): report 64MB per flash chip in USB device info |
 
+---
+
+## 2026-06-02 — Session: USB console virtual serial port (PTY)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Expose USB CDC console as virtual serial port for standard terminal/COM programs |
+| **Fix** | `openpty` bridge in `usb.c`; `-usb-serial` / `-usb-console pty[:path]`; script env `USB_CONSOLE_PTY=1` |
+| **Verified** | Symlink `/tmp/bramble-usb-console` → menu + device info over PTY |
+| **Tests** | 322/322 pass |
+| **Commit** | `7f9d8f2` — feat(console): USB CDC on virtual serial port (PTY) |
+
 <!--
 
 | Field | Detail |

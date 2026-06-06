@@ -343,6 +343,8 @@ int main(int argc, char **argv) {
         fprintf(stderr, "  -stdin     Bridge host stdin/stdout to guest console (UART or USB)\n");
         fprintf(stderr, "  -usb-stdio Prefer USB CDC for -stdin (MegaFlash UserTerminal)\n");
         fprintf(stderr, "  -usb-console <port>  Bidirectional USB CDC over TCP (nc localhost <port>)\n");
+        fprintf(stderr, "  -usb-console pty[:path]  USB CDC on a PTY (virtual serial; default symlink /tmp/bramble-usb-console)\n");
+        fprintf(stderr, "  -usb-serial [path]     Alias for -usb-console pty[:path]\n");
         fprintf(stderr, "  -gdb [port] Start GDB server (default port: %d)\n", GDB_DEFAULT_PORT);
         fprintf(stderr, "  -clock <MHz> Set CPU clock frequency (default: 1, real: 125)\n");
         fprintf(stderr, "  -cores <N|auto> Active cores per instance (1, 2, or auto; default: 1)\n");
@@ -474,9 +476,23 @@ int main(int argc, char **argv) {
             stdin_enabled = 1;
             usb_cdc_stdout_enabled = 1;
             usb_stdio_prefer_usb = 1;
+        } else if (strcmp(argv[i], "-usb-serial") == 0) {
+            const char *link = "/tmp/bramble-usb-console";
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                link = argv[++i];
+            }
+            usb_console_set_pty(link);
         } else if (strcmp(argv[i], "-usb-console") == 0) {
             if (i + 1 < argc) {
-                usb_console_tcp_set_port(atoi(argv[++i]));
+                const char *arg = argv[++i];
+                if (strcmp(arg, "pty") == 0) {
+                    usb_console_set_pty("/tmp/bramble-usb-console");
+                } else if (strncmp(arg, "pty:", 4) == 0) {
+                    const char *link = arg + 4;
+                    usb_console_set_pty(link[0] != '\0' ? link : NULL);
+                } else {
+                    usb_console_tcp_set_port(atoi(arg));
+                }
             }
         } else if (strcmp(argv[i], "-gdb") == 0) {
             gdb_enabled = 1;
@@ -990,7 +1006,7 @@ skip_fuse:
     }
 
     if (usb_console_tcp_init() < 0) {
-        fprintf(stderr, "[Error] Failed to initialize USB CDC TCP console\n");
+        fprintf(stderr, "[Error] Failed to initialize USB CDC console\n");
         return EXIT_FAILURE;
     }
 

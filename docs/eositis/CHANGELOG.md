@@ -7,6 +7,14 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+### MegaFlash USB console — virtual serial port (PTY)
+
+| Change | Reason |
+|--------|--------|
+| `-usb-console pty[:path]` / `-usb-serial` → host PTY + optional symlink | Use `screen`, `cu`, Serial.app instead of TCP/`nc` |
+| `USB_CONSOLE_PTY=1` in run/connect scripts | Default symlink `/tmp/bramble-usb-console` |
+| TCP mode unchanged (`-usb-console <port>`) | Backward compatible with existing workflows |
+
 ### MegaFlash USB menu — Device Information (2026-06-02)
 
 | Change | Reason |

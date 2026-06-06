@@ -8,7 +8,43 @@ MegaFlash on Pico W checks **`stdio_usb_connected()`** after boot. That maps to 
 
 Bramble implements (1)–(2) in `src/usb.c` whenever the guest enables the USB controller.
 
-## Quick start — TCP session (recommended)
+## Quick start — virtual serial port (recommended for terminal apps)
+
+Use a **PTY** so standard serial programs (`screen`, `cu`, Serial.app, etc.) can attach without TCP.
+
+**Terminal 1 — emulator:**
+
+```bash
+USB_CONSOLE_PTY=1 ./scripts/run-megaflash-usb-console.sh
+# or:
+./build/bramble ../MegaFlash/pico/pico2_debug/megaflash.uf2 \
+  -arch m33 -clock 150 -cores 1 \
+  -usb-serial -usb-stdio -timeout 120
+```
+
+Wait for:
+
+```text
+[USB] CDC console on serial port /dev/ttysNNN
+[USB]   attach: screen /tmp/bramble-usb-console 115200
+```
+
+**Terminal 2 — menu / diagnostics:**
+
+```bash
+USB_CONSOLE_PTY=1 ./scripts/connect-usb-console.sh
+# or: screen /tmp/bramble-usb-console 115200
+```
+
+| Flag | Purpose |
+|------|---------|
+| `-usb-serial [path]` | PTY with optional symlink (default `/tmp/bramble-usb-console`) |
+| `-usb-console pty[:path]` | Same as `-usb-serial` |
+| `-usb-console <port>` | Legacy TCP mode (`nc localhost <port>`) |
+
+Baud rate is ignored by USB CDC but terminal programs often require one (use `115200`).
+
+## Quick start — TCP session
 
 Same pattern as [UART-CONSOLE.md](UART-CONSOLE.md), but traffic goes to **USB CDC**, not UART0.
 
@@ -50,6 +86,7 @@ You should see the DEBUG boot banner, ASCII art, and `UserTerminal()` main menu 
 | Flag | Purpose |
 |------|---------|
 | `-usb-console <port>` | Bidirectional USB CDC ↔ TCP (`nc localhost <port>`) |
+| `-usb-console pty[:path]` / `-usb-serial` | USB CDC on a host PTY (virtual serial port) |
 | `-usb-stdio` | Route host input to **USB CDC first** (needed when firmware also prints on UART0) |
 | `-stdin` | Bridge terminal to guest console (UART or USB); implies USB stdout when CDC is active |
 | `-trace-usb` | Log enumeration steps to stderr (debug “connected at boot”) |

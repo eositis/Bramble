@@ -179,12 +179,13 @@ extern int usb_enum_trace_enabled;
 /* Prefer USB CDC over UART0 for -stdin when both are active (-usb-stdio) */
 extern int usb_stdio_prefer_usb;
 
-/* TCP bridge for USB CDC (-usb-console <port>), bidirectional like -uart-console */
+/* Host console bridge for USB CDC (-usb-console <port> | pty[:symlink]) */
 int  usb_console_tcp_init(void);
 void usb_console_tcp_cleanup(void);
 void usb_console_tcp_poll(void);
 int  usb_console_tcp_active(void);
 void usb_console_tcp_set_port(int port);
+void usb_console_set_pty(const char *symlink_path);
 
 /* MegaFlash: capture stdio_put_string before guest mutex/driver path (-usb-console) */
 void usb_console_guest_stdio_hook(void);

@@ -15,10 +15,14 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <poll.h>
+#if !defined(_WIN32)
+#include <util.h>
+#endif
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -61,18 +65,28 @@ int usb_enum_trace_enabled = 0;
 int usb_stdio_prefer_usb = 0;
 
 /* ========================================================================
- * USB CDC ↔ TCP console (-usb-console)
+ * USB CDC ↔ host console (-usb-console <port> | pty[:symlink])
  * ======================================================================== */
 
+typedef enum {
+    USB_CONSOLE_OFF = 0,
+    USB_CONSOLE_TCP,
+    USB_CONSOLE_PTY,
+} usb_console_transport_t;
+
 typedef struct {
+    usb_console_transport_t transport;
     int listen_fd;
     int client_fd;
     int port;
-} usb_tcp_bridge_t;
+    int pty_slave_fd;
+    char pty_slave_name[128];
+    char pty_symlink[256];
+} usb_console_bridge_t;
 
 #define USB_TCP_TX_PENDING_MAX 4096u
 
-static usb_tcp_bridge_t usb_tcp;
+static usb_console_bridge_t usb_tcp;
 static uint8_t usb_tcp_tx_pending[USB_TCP_TX_PENDING_MAX];
 static size_t usb_tcp_tx_pending_len;
 static int usb_tcp_logged_ready;
@@ -87,7 +101,7 @@ static int usb_guest_cdc_rx_fifo_push(uint8_t byte);
 static int usb_guest_cdc_rx_fifo_pop(uint8_t *out);
 
 static int usb_console_bridge_mode(void) {
-    return usb_tcp.port > 0;
+    return usb_tcp.transport != USB_CONSOLE_OFF;
 }
 
 static int guest_megaflash_hook_active(void) {
@@ -108,17 +122,91 @@ static void usb_tcp_set_nodelay(int fd) {
 
 void usb_console_tcp_set_port(int port) {
     usb_tcp.port = port;
+    usb_tcp.transport = port > 0 ? USB_CONSOLE_TCP : USB_CONSOLE_OFF;
+}
+
+void usb_console_set_pty(const char *symlink_path) {
+    usb_tcp.transport = USB_CONSOLE_PTY;
+    usb_tcp.port = 0;
+    usb_tcp.pty_symlink[0] = '\0';
+    if (symlink_path != NULL && symlink_path[0] != '\0') {
+        strncpy(usb_tcp.pty_symlink, symlink_path, sizeof(usb_tcp.pty_symlink) - 1u);
+        usb_tcp.pty_symlink[sizeof(usb_tcp.pty_symlink) - 1u] = '\0';
+    }
 }
 
 int usb_console_tcp_active(void) {
-    return usb_tcp.port > 0;
+    return usb_tcp.transport != USB_CONSOLE_OFF;
 }
+
+#if !defined(_WIN32)
+static int usb_console_pty_init(void) {
+    int master = -1;
+    int slave = -1;
+    char slave_name[sizeof(usb_tcp.pty_slave_name)];
+
+    if (openpty(&master, &slave, slave_name, NULL, NULL) != 0) {
+        fprintf(stderr, "[USB] PTY console: openpty failed: %s\n", strerror(errno));
+        return -1;
+    }
+#if defined(__linux__)
+    if (grantpt(slave) != 0 || unlockpt(slave) != 0) {
+        fprintf(stderr, "[USB] PTY console: grant/unlock failed: %s\n", strerror(errno));
+        close(master);
+        close(slave);
+        return -1;
+    }
+#endif
+
+    usb_tcp_set_nonblock(master);
+    usb_tcp.client_fd = master;
+    usb_tcp.pty_slave_fd = slave;
+    strncpy(usb_tcp.pty_slave_name, slave_name, sizeof(usb_tcp.pty_slave_name) - 1u);
+    usb_tcp.pty_slave_name[sizeof(usb_tcp.pty_slave_name) - 1u] = '\0';
+
+    const char *open_path = usb_tcp.pty_slave_name;
+    if (usb_tcp.pty_symlink[0] != '\0') {
+        unlink(usb_tcp.pty_symlink);
+        if (symlink(usb_tcp.pty_slave_name, usb_tcp.pty_symlink) != 0) {
+            fprintf(stderr, "[USB] PTY console: symlink %s -> %s failed: %s\n",
+                    usb_tcp.pty_symlink, usb_tcp.pty_slave_name, strerror(errno));
+        } else {
+            open_path = usb_tcp.pty_symlink;
+            fprintf(stderr, "[USB] CDC console symlink: %s -> %s\n",
+                    usb_tcp.pty_symlink, usb_tcp.pty_slave_name);
+        }
+    }
+
+    fprintf(stderr,
+            "[USB] CDC console on serial port %s\n"
+            "[USB]   attach: screen %s 115200   (or cu -l %s -s 115200)\n",
+            usb_tcp.pty_slave_name, open_path, open_path);
+
+    if (usb_tcp_tx_pending_len > 0) {
+        usb_console_tcp_tx(usb_tcp_tx_pending, (int)usb_tcp_tx_pending_len);
+        usb_tcp_tx_pending_len = 0;
+    }
+    return 0;
+}
+#endif
 
 int usb_console_tcp_init(void) {
     usb_tcp.listen_fd = -1;
     usb_tcp.client_fd = -1;
-    if (usb_tcp.port <= 0) {
+    usb_tcp.pty_slave_fd = -1;
+    usb_tcp.pty_slave_name[0] = '\0';
+    if (usb_tcp.transport == USB_CONSOLE_OFF) {
         return 0;
+    }
+
+#if !defined(_WIN32)
+    if (usb_tcp.transport == USB_CONSOLE_PTY) {
+        return usb_console_pty_init();
+    }
+#endif
+    if (usb_tcp.transport != USB_CONSOLE_TCP) {
+        fprintf(stderr, "[USB] PTY console is not supported on this platform\n");
+        return -1;
     }
 
     int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -156,18 +244,27 @@ void usb_console_tcp_cleanup(void) {
         close(usb_tcp.client_fd);
         usb_tcp.client_fd = -1;
     }
+    if (usb_tcp.pty_slave_fd >= 0) {
+        close(usb_tcp.pty_slave_fd);
+        usb_tcp.pty_slave_fd = -1;
+    }
     if (usb_tcp.listen_fd >= 0) {
         close(usb_tcp.listen_fd);
         usb_tcp.listen_fd = -1;
     }
+    if (usb_tcp.pty_symlink[0] != '\0') {
+        unlink(usb_tcp.pty_symlink);
+    }
+    usb_tcp.transport = USB_CONSOLE_OFF;
 }
 
 void usb_console_tcp_poll(void) {
-    if (usb_tcp.port <= 0) {
+    if (usb_tcp.transport == USB_CONSOLE_OFF) {
         return;
     }
 
-    if (usb_tcp.listen_fd >= 0 && usb_tcp.client_fd < 0) {
+    if (usb_tcp.transport == USB_CONSOLE_TCP &&
+        usb_tcp.listen_fd >= 0 && usb_tcp.client_fd < 0) {
         struct sockaddr_in client_addr;
         socklen_t addr_len = sizeof(client_addr);
         int cfd = accept(usb_tcp.listen_fd, (struct sockaddr *)&client_addr, &addr_len);
@@ -202,6 +299,9 @@ void usb_console_tcp_poll(void) {
                 }
             }
         } else if (n == 0) {
+            if (usb_tcp.transport == USB_CONSOLE_PTY) {
+                return;
+            }
             fprintf(stderr, "[USB] CDC console client disconnected\n");
             close(usb_tcp.client_fd);
             usb_tcp.client_fd = -1;
@@ -229,6 +329,9 @@ static void usb_console_tcp_tx(const uint8_t *data, int len) {
             continue;
         }
         if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            break;
+        }
+        if (usb_tcp.transport == USB_CONSOLE_PTY) {
             break;
         }
         fprintf(stderr, "[USB] CDC console write error, disconnecting\n");
