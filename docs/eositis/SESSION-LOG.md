@@ -276,6 +276,17 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 |-------|--------|
 | **Request** | Make USB console usable from macOS terminal/serial programs |
 | **Fix** | PTY default on Darwin in run script; connect auto-detects symlink; `open-usb-console-macos.sh` |
+| **Commit** | `ce991a0` — fix(console): default USB PTY on macOS for terminal apps |
+
+---
+
+## 2026-06-02 — Session: USB XMODEM upload via macOS serial
+
+| Field | Detail |
+|-------|--------|
+| **Request** | macOS serial for MegaFlash menu + XMODEM file upload |
+| **Fix** | PTY (default on macOS); flash unit stubs; DisableFlashUnitMapping no-op; XMODEM doc (minicom/lrzsz) |
+| **Limit** | External SPI flash write during XMODEM still partial in emulator |
 | **Commit** | *(pending)* |
 
 <!--

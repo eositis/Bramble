@@ -49,6 +49,33 @@ Wait for:
 
 Bramble must stay running in Terminal 1 while you use the serial port. If connect says `PTY not found`, Bramble is not running or exited (e.g. timeout).
 
+### XMODEM upload (menu item 2)
+
+The PTY is a **binary-safe** serial pipe — suitable for XMODEM-CRC. Use a program that can **send a file on the same connection** you use for the menu:
+
+**Recommended: minicom** (single session, built-in XMODEM send):
+
+```bash
+brew install minicom
+# Terminal 1: ./scripts/run-megaflash-usb-console.sh
+# Terminal 2:
+minicom -D /tmp/bramble-usb-console -b 115200
+```
+
+In minicom: menu **2** (Upload) → unit **1** → type **CONFIRM** → when MegaFlash sends **`C`** repeatedly, press **Ctrl-A** then **S**, pick your `.po`/`.hdv` file, choose **xmodem** or **xmodem-crc**.
+
+**Alternative: lrzsz** (must own the port — disconnect screen/minicom first):
+
+```bash
+brew install lrzsz
+# After MegaFlash shows "Please start upload..." and sends C, quit other clients, then:
+sz -y /tmp/bramble-usb-console /path/to/disk.po
+```
+
+Only **one** program may open the serial port at a time.
+
+**Emulator note:** Bramble now exposes one flash unit for upload (`GetTotalUnitCount` / mapping stubs). Full SPI flash programming during XMODEM is still partial under emulation — you may reach the XMODEM handshake before writes complete or verify. TCP mode works the same way but is harder to use with standard serial/XMODEM tools.
+
 | Flag | Purpose |
 |------|---------|
 | `-usb-serial [path]` | PTY with optional symlink (default `/tmp/bramble-usb-console`) |

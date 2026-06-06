@@ -22,6 +22,7 @@
 #include <poll.h>
 #if !defined(_WIN32)
 #include <util.h>
+#include <termios.h>
 #endif
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -159,6 +160,14 @@ static int usb_console_pty_init(void) {
 #endif
 
     usb_tcp_set_nonblock(master);
+#if !defined(_WIN32)
+    struct termios tio;
+    if (tcgetattr(master, &tio) == 0) {
+        cfmakeraw(&tio);
+        tio.c_cflag |= (tcflag_t)(CLOCAL | CREAD);
+        (void)tcsetattr(master, TCSANOW, &tio);
+    }
+#endif
     usb_tcp.client_fd = master;
     usb_tcp.pty_slave_fd = slave;
     strncpy(usb_tcp.pty_slave_name, slave_name, sizeof(usb_tcp.pty_slave_name) - 1u);
@@ -482,6 +491,12 @@ static void usb_log_cdc_active_once(void) {
 #define USB_GUEST_MUTEX_ENTER_V     0x10034858u /* __recursive_mutex_enter_blocking_veneer */
 #define USB_GUEST_MUTEX_EXIT_V      0x10034848u /* __recursive_mutex_exit_veneer */
 #define USB_GUEST_TS_READ_JEDECID   0x10003088u /* tsReadJEDECID — stub JEDEC for emu flash */
+#define USB_GUEST_DISABLE_FLASH_MAP 0x100033f4u /* DisableFlashUnitMapping */
+#define USB_GUEST_GET_TOTAL_UNIT_COUNT 0x10003490u /* GetTotalUnitCount */
+#define USB_GUEST_FLASH_MAP_ENABLED   0x2005bc90u
+#define USB_GUEST_FLASH_UNIT_COUNT    0x2005bc2cu
+#define USB_GUEST_FLASH_CHIP0_UNITS   0x2005bc24u
+#define USB_GUEST_FLASH_CHIP1_UNITS   0x2005bc28u
 #define USB_GUEST_EXIT              0x1000d9c0u /* _exit → BKPT loop */
 #define USB_GUEST_PANIC             0x1000a8b8u /* panic — skip BKPT _exit under emu */
 #define USB_GUEST_HW_CLAIM_LOCK       0x1000a8e8u /* hw_claim_lock */
@@ -715,6 +730,17 @@ static void usb_guest_hw_claim_bootstrap(void) {
                 (uint32_t)(USB_GUEST_SPIN_LOCK_HW + 2u));
 }
 
+static void usb_guest_flash_bootstrap(void) {
+    if (!usb_console_tcp_active()) {
+        return;
+    }
+    /* One external flash unit for UserTerminal upload/download (XMODEM). */
+    mem_write8(USB_GUEST_FLASH_MAP_ENABLED, 1u);
+    mem_write32(USB_GUEST_FLASH_UNIT_COUNT, 1u);
+    mem_write32(USB_GUEST_FLASH_CHIP0_UNITS, 1u);
+    mem_write32(USB_GUEST_FLASH_CHIP1_UNITS, 0u);
+}
+
 #define USB_GUEST_EMU_FLASH_CHIP_MB  64u  /* per external flash chip in device-info stub */
 
 static void usb_guest_write_cstr_to_guest(uint32_t buf, const char *s) {
@@ -779,8 +805,12 @@ void usb_console_guest_stdio_hook(void) {
 
     static int hw_claim_bootstrapped;
     static int user_terminal_logged;
+    static int flash_bootstrapped;
     if (!hw_claim_bootstrapped++) {
         usb_guest_hw_claim_bootstrap();
+    }
+    if (usb_mode && !flash_bootstrapped++) {
+        usb_guest_flash_bootstrap();
     }
 
     uint32_t pc = cpu.r[15] & ~1u;
@@ -798,6 +828,16 @@ void usb_console_guest_stdio_hook(void) {
     }
     if (usb_mode && pc == USB_GUEST_PRINT_ALL_PARTITIONS) {
         usb_guest_stub_print_all_partitions();
+        return;
+    }
+    if (usb_mode && pc == USB_GUEST_DISABLE_FLASH_MAP) {
+        /* UserTerminal disables mapping; keep one flash unit for XMODEM upload. */
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return;
+    }
+    if (usb_mode && pc == USB_GUEST_GET_TOTAL_UNIT_COUNT) {
+        cpu.r[0] = 1u;
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
         return;
     }
     if (pc == USB_GUEST_ENABLE_SPI0) {

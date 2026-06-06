@@ -14,6 +14,8 @@ Scope: local commits on `main` after clone.
 | `-usb-console pty[:path]` / `-usb-serial` → host PTY + optional symlink | Use `screen`, `cu`, Serial.app instead of TCP/`nc` |
 | `USB_CONSOLE_PTY=1` in run/connect scripts | Default symlink `/tmp/bramble-usb-console` |
 | macOS: PTY default in run script; `open-usb-console-macos.sh` | Terminal.app / screen without `USB_CONSOLE_PTY=1` |
+| Flash unit stubs + keep mapping for USB XMODEM upload path | Menu item 2 no longer stops at "Error: no flash" |
+| PTY raw mode + XMODEM workflow in `USB-CONSOLE.md` | Binary XMODEM via minicom / lrzsz on virtual serial |
 | TCP mode unchanged (`-usb-console <port>`) | Backward compatible with existing workflows |
 
 ### MegaFlash USB menu — Device Information (2026-06-02)
