@@ -243,7 +243,18 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Fix** | Remove redirect; host-build full device-info buffer (matches `.rodata` layout); stub `PrintAllPartitions` for partition header + emu row |
 | **Verified** | TCP `1` → device info, JEDEC lines, partition table, `Press any key to continue...` (no menu repeat) |
 | **Tests** | 322/322 pass |
-| **Commit** | `e33eca6` — fix(console): MegaFlash USB menu Device Information on key 1 |
+| **Commit** | `2053c69` — fix(console): MegaFlash USB menu Device Information on key 1 |
+
+---
+
+## 2026-06-02 — Session: USB device-info flash size 64MB/chip
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Increase emulated flash size to 64MB each in USB menu device info |
+| **Fix** | `USB_GUEST_EMU_FLASH_CHIP_MB` = 64; total 128MB (2 chips); partition row 64MB |
+| **Tests** | 322/322 pass |
+| **Commit** | `1823f07` — fix(console): report 64MB per flash chip in USB device info |
 
 <!--
 

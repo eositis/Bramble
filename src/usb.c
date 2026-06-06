@@ -612,6 +612,8 @@ static void usb_guest_hw_claim_bootstrap(void) {
                 (uint32_t)(USB_GUEST_SPIN_LOCK_HW + 2u));
 }
 
+#define USB_GUEST_EMU_FLASH_CHIP_MB  64u  /* per external flash chip in device-info stub */
+
 static void usb_guest_write_cstr_to_guest(uint32_t buf, const char *s) {
     for (uint32_t i = 0; s[i] != '\0'; i++) {
         mem_write8(buf + i, (uint8_t)s[i]);
@@ -626,7 +628,9 @@ static void usb_guest_skip_get_device_info_string(void) {
      * formatting can spin under emulation. Build the same multiline layout
      * the firmware would produce (see megaflash .rodata @ 0x10035640).
      */
-    static const char k_msg[] =
+    char k_msg[512];
+    unsigned total_mb = USB_GUEST_EMU_FLASH_CHIP_MB * 2u;
+    int n = snprintf(k_msg, sizeof(k_msg),
         "Device Information\r\n"
         "==========\r\n\r\n"
         "Pico Board = Pico 2 RP2350\r\n"
@@ -635,21 +639,30 @@ static void usb_guest_skip_get_device_info_string(void) {
         "MegaFlash Pico Firmware Version = V1.2.1-eo (DEBUG)\r\n"
         "Firmware build: 2026-05-03 03:55:51 UTC  (1777780551 Unix s)\r\n"
         "Pico SDK Version = 2.2.0\r\n"
-        "Total Flash Capacity = 16MB\r\n"
+        "Total Flash Capacity = %uMB\r\n"
         "Flash Chip #0 JEDEC ID = EF4017h\r\n"
-        "Flash Chip #1 JEDEC ID = EF4017h\r\n";
-    usb_guest_write_cstr_to_guest(buf, k_msg);
+        "Flash Chip #1 JEDEC ID = EF4017h\r\n",
+        total_mb);
+    if (n > 0) {
+        usb_guest_write_cstr_to_guest(buf, k_msg);
+    }
     cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
 }
 
 static void usb_guest_stub_print_all_partitions(void) {
-    static const char k_msg[] =
+    char k_msg[256];
+    int n = snprintf(k_msg, sizeof(k_msg),
         "\r\nPartition Information:\r\n"
         "Drive Type    Volume Name        Size\r\n"
-        "Flash Unit 1  MegaFlash          16MB (Bramble emu)\r\n";
-    usb_console_tcp_tx((const uint8_t *)k_msg, (int)(sizeof(k_msg) - 1u));
+        "Flash Unit 1  MegaFlash          %uMB (Bramble emu)\r\n",
+        (unsigned)USB_GUEST_EMU_FLASH_CHIP_MB);
+    if (n <= 0) {
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return;
+    }
+    usb_console_tcp_tx((const uint8_t *)k_msg, n);
     if (usb_cdc_stdout_enabled) {
-        fwrite(k_msg, 1, sizeof(k_msg) - 1u, stdout);
+        fwrite(k_msg, 1, (size_t)n, stdout);
         fflush(stdout);
     }
     cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
