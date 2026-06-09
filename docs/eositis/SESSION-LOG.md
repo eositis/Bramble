@@ -354,6 +354,15 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Tests** | `bramble_tests` 322/322; automated full 32MB XMODEM `VERIFY OK` (~65s) |
 | **Commit** | `56f230d` — fix(console): do not latch throttle on 8KB XMODEM read-ahead |
 
+## 2026-06-08 — tio XMODEM failures (~1s ACK timeout)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | tio XMODEM-CRC fails in ~15s; XMODEM-1K runs longer then fails |
+| **Actions** | Root cause: tio waits ~1s/ACK vs Python test 120s+; emulator packet handling too slow. Added in-packet CPU turbo (4096 steps), per-step PTY poll during XMODEM, ACK `tcdrain`, PTY TX pending queue, raw mode on slave PTY; removed `-usb-stdio` default from run script; documented tio limits |
+| **Tests** | `bramble_tests` 322/322; 256KB + full 32MB automated XMODEM `VERIFY OK` |
+| **Commit** | _(pending)_ |
+
 <!--
 
 | Field | Detail |

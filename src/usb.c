@@ -103,6 +103,8 @@ static int usb_guest_cdc_synced;
 
 static void usb_guest_bridge_activate(void);
 static void usb_console_tcp_tx(const uint8_t *data, int len);
+static void usb_console_tcp_tx_flush_pending(void);
+static void usb_console_tcp_tx_drain_pty(void);
 static uint16_t usb_guest_fifo_count(uint32_t fifo_addr);
 static int usb_guest_cdc_rx_fifo_push(uint8_t byte);
 static int usb_guest_cdc_rx_fifo_pop(uint8_t *out);
@@ -126,6 +128,7 @@ static uint64_t usb_guest_host_rx_total_pushed;
 static volatile int usb_guest_bulk_rx_active;
 static volatile int usb_guest_getraw_popping;
 static volatile int usb_guest_xmodem_active;
+static volatile int usb_guest_in_packet_received;
 
 static unsigned usb_guest_host_rx_high_water(void) {
     return (USB_GUEST_HOST_RX_USABLE * 90u) / 100u;
@@ -323,6 +326,11 @@ static int usb_console_pty_init(void) {
         tio.c_cflag |= (tcflag_t)(CLOCAL | CREAD);
         (void)tcsetattr(master, TCSANOW, &tio);
     }
+    if (tcgetattr(slave, &tio) == 0) {
+        cfmakeraw(&tio);
+        tio.c_cflag |= (tcflag_t)(CLOCAL | CREAD);
+        (void)tcsetattr(slave, TCSANOW, &tio);
+    }
 #endif
     usb_tcp.client_fd = master;
     usb_tcp.pty_slave_fd = slave;
@@ -431,6 +439,7 @@ void usb_console_tcp_poll_rx(int force_rx) {
     if (usb_tcp.transport == USB_CONSOLE_OFF) {
         return;
     }
+    usb_console_tcp_tx_flush_pending();
 
     if (usb_tcp.transport == USB_CONSOLE_TCP &&
         usb_tcp.listen_fd >= 0 && usb_tcp.client_fd < 0) {
@@ -508,6 +517,56 @@ void usb_console_tcp_poll_rx(int force_rx) {
     }
 }
 
+static void usb_console_tcp_tx_flush_pending(void) {
+    if (usb_tcp.client_fd < 0 || usb_tcp_tx_pending_len == 0u) {
+        return;
+    }
+    size_t off = 0;
+    while (off < usb_tcp_tx_pending_len) {
+        ssize_t n = write(usb_tcp.client_fd, usb_tcp_tx_pending + off,
+                          usb_tcp_tx_pending_len - off);
+        if (n > 0) {
+            off += (size_t)n;
+            continue;
+        }
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            break;
+        }
+        if (usb_tcp.transport == USB_CONSOLE_PTY) {
+            break;
+        }
+        close(usb_tcp.client_fd);
+        usb_tcp.client_fd = -1;
+        usb_tcp_tx_pending_len = 0;
+        return;
+    }
+    if (off > 0u) {
+        memmove(usb_tcp_tx_pending, usb_tcp_tx_pending + off,
+                usb_tcp_tx_pending_len - off);
+        usb_tcp_tx_pending_len -= off;
+    }
+}
+
+static void usb_console_tcp_tx_drain_pty(void) {
+#if !defined(_WIN32)
+    usb_console_tcp_tx_flush_pending();
+    if (usb_tcp.transport == USB_CONSOLE_PTY && usb_tcp.client_fd >= 0) {
+        (void)tcdrain(usb_tcp.client_fd);
+    }
+#endif
+}
+
+int usb_guest_xmodem_active_for_host(void) {
+    return usb_guest_xmodem_active;
+}
+
+int usb_guest_cpu_step_batch(void) {
+    if (usb_guest_in_packet_received && !usb_guest_bulk_rx_active) {
+        return 4096;
+    }
+    return 1;
+}
+
 static void usb_console_tcp_tx(const uint8_t *data, int len) {
     if (len <= 0) {
         return;
@@ -520,6 +579,9 @@ static void usb_console_tcp_tx(const uint8_t *data, int len) {
         }
         return;
     }
+    if (usb_tcp_tx_pending_len > 0u) {
+        usb_console_tcp_tx_flush_pending();
+    }
     ssize_t off = 0;
     while (off < len) {
         ssize_t n = write(usb_tcp.client_fd, data + off, (size_t)(len - off));
@@ -528,9 +590,21 @@ static void usb_console_tcp_tx(const uint8_t *data, int len) {
             continue;
         }
         if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            for (ssize_t i = off; i < len; i++) {
+                if (usb_tcp_tx_pending_len < USB_TCP_TX_PENDING_MAX) {
+                    usb_tcp_tx_pending[usb_tcp_tx_pending_len++] =
+                        data[(size_t)i];
+                }
+            }
             break;
         }
         if (usb_tcp.transport == USB_CONSOLE_PTY) {
+            for (ssize_t i = off; i < len; i++) {
+                if (usb_tcp_tx_pending_len < USB_TCP_TX_PENDING_MAX) {
+                    usb_tcp_tx_pending[usb_tcp_tx_pending_len++] =
+                        data[(size_t)i];
+                }
+            }
             break;
         }
         fprintf(stderr, "[USB] CDC console write error, disconnecting\n");
@@ -699,6 +773,9 @@ static void usb_log_cdc_active_once(void) {
 #define USB_GUEST_VERIFICATION_ERRORS 0x2005bc50u
 #define USB_GUEST_PACKET_RECEIVED     0x10003f08u
 #define USB_GUEST_XMODEM_RX_HI        0x10004300u /* xmodemrx + helpers */
+#define USB_GUEST_XMODEM_RX_END       0x10004500u
+#define USB_GUEST_PACKET_HANDLER_LO   0x10003f00u
+#define USB_GUEST_PACKET_HANDLER_HI   0x100042ffu
 #define USB_GUEST_XMODEM_CLEANUP      0x10003f76u /* post-write: LED off, inc blockNum */
 #define USB_GUEST_XMODEM_POST_WRITE   0x10003f82u /* inc blockNum, reset buffer (no LED) */
 #define USB_GUEST_TURN_ON_PICOLED     0x10004ea4u
@@ -1769,9 +1846,8 @@ static uint32_t usb_guest_host_rx_fill_guest(uint32_t guest_buf, uint32_t len,
         }
         if (received > 0) {
             usb_console_tcp_poll_rx(1);
-            usleep(100);
         } else {
-            usleep(1000);
+            usleep(usb_guest_xmodem_active ? 50 : 1000);
         }
     }
     usb_guest_getraw_popping = 0;
@@ -1851,11 +1927,21 @@ void usb_console_guest_stdio_hook(void) {
     if (usb_mode) {
         static uint32_t host_poll_div;
         if (usb_guest_xmodem_busy()) {
-            if ((host_poll_div++ & 0xFFu) == 0u) {
-                usb_console_tcp_poll();
+            if ((host_poll_div++ & 0x1Fu) == 0u) {
+                usb_console_tcp_poll_rx(1);
             }
         } else if ((host_poll_div++ & 0x1Fu) == 0u) {
             usb_console_tcp_poll();
+        }
+    }
+
+    uint32_t pc = cpu.r[15] & ~1u;
+    if (usb_mode && usb_guest_xmodem_active) {
+        if (pc >= USB_GUEST_PACKET_HANDLER_LO && pc <= USB_GUEST_PACKET_HANDLER_HI) {
+            usb_guest_in_packet_received = 1;
+        } else if (usb_guest_in_packet_received &&
+                   pc >= USB_GUEST_XMODEM_RX_HI && pc < USB_GUEST_XMODEM_RX_END) {
+            usb_guest_in_packet_received = 0;
         }
     }
 
@@ -1865,7 +1951,6 @@ void usb_console_guest_stdio_hook(void) {
         usb_guest_hw_claim_bootstrap();
     }
 
-    uint32_t pc = cpu.r[15] & ~1u;
     if (usb_mode && !user_terminal_logged &&
         (pc == USB_GUEST_MAIN_USB_LOOP || pc == USB_GUEST_USER_TERMINAL)) {
         user_terminal_logged = 1;
@@ -1909,6 +1994,7 @@ void usb_console_guest_stdio_hook(void) {
     }
     if (usb_mode && pc == USB_GUEST_PACKET_RECEIVED) {
         usb_guest_xmodem_active = 1;
+        usb_guest_in_packet_received = 1;
     }
     if (usb_mode && pc == USB_GUEST_PACKET_ASSERT_BLOCK) {
         uint32_t parts = mem_read32(USB_GUEST_PARTS_IN_BUFFER);
@@ -1992,6 +2078,9 @@ void usb_console_guest_stdio_hook(void) {
         if (usb_cdc_stdout_enabled) {
             fputc((int)ch, stdout);
             fflush(stdout);
+        }
+        if (ch == 0x06u && usb_guest_xmodem_active) {
+            usb_console_tcp_tx_drain_pty();
         }
         cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
         return;

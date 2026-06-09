@@ -7,7 +7,11 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
-_(none)_
+| Change | Reason |
+|--------|--------|
+| In-packet CPU turbo + aggressive PTY poll during XMODEM | tio/minicom wait ~1s per ACK; emulated PacketReceived was too slow wall-clock |
+| PTY TX pending queue + `tcdrain` on ACK | ACK bytes must reach tio before its 1s timeout |
+| Raw termios on PTY slave; `-usb-stdio` opt-in via `USB_CONSOLE_STDIO=1` | Avoid cooked slave + stray stdin on Terminal 1 during tio upload |
 
 ---
 

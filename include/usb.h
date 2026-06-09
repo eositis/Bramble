@@ -196,4 +196,8 @@ void usb_guest_spi_flash_close(void);
 /* MegaFlash: capture stdio_put_string before guest mutex/driver path (-usb-console) */
 void usb_console_guest_stdio_hook(void);
 
+/* XMODEM host pacing (tio/minicom ~1s ACK timeout vs slow emulation) */
+int usb_guest_xmodem_active_for_host(void);
+int usb_guest_cpu_step_batch(void);
+
 #endif /* USB_H */

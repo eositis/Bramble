@@ -1472,25 +1472,37 @@ skip_fuse:
                 }
             }
 
-            dual_core_step();
-            pio_step();
-            usb_step();
-            step_count++;
+            int batch = usb_guest_cpu_step_batch();
+            for (int bi = 0; bi < batch; bi++) {
+                dual_core_step();
+                pio_step();
+                usb_step();
+                step_count++;
 
-            /* Fault injection and scripted I/O */
-            if (__builtin_expect(fault_count > 0, 0))
-                fault_check(global_cycle_count);
-            if (__builtin_expect(script_enabled, 0)) {
-                /* Guest µs for scripts: TIMER0, or infer from core0 steps if timer lags */
-                uint32_t eus = (uint32_t)(timer_state.time_us & 0xFFFFFFFFu);
-                if (timing_config.cycles_per_us > 0) {
-                    uint32_t step_us =
-                        (uint32_t)(cores[CORE0].step_count / timing_config.cycles_per_us);
-                    if (step_us > eus) {
-                        eus = step_us;
-                    }
+                /* Fault injection and scripted I/O */
+                if (__builtin_expect(fault_count > 0, 0)) {
+                    fault_check(global_cycle_count);
                 }
-                script_poll(eus);
+                if (__builtin_expect(script_enabled, 0)) {
+                    /* Guest µs for scripts: TIMER0, or infer from core0 steps if timer lags */
+                    uint32_t eus = (uint32_t)(timer_state.time_us & 0xFFFFFFFFu);
+                    if (timing_config.cycles_per_us > 0) {
+                        uint32_t step_us =
+                            (uint32_t)(cores[CORE0].step_count / timing_config.cycles_per_us);
+                        if (step_us > eus) {
+                            eus = step_us;
+                        }
+                    }
+                    script_poll(eus);
+                }
+
+                if (usb_guest_xmodem_active_for_host() && (bi & 0x7F) == 0) {
+                    usb_console_tcp_poll_rx(1);
+                }
+
+                if (timeout_expired || semihost_exit_requested) {
+                    break;
+                }
             }
 
             /* Poll stdin for UART Rx data every 1024 steps */
@@ -1499,7 +1511,9 @@ skip_fuse:
             }
 
             /* Poll network bridges, wire links, and WiFi TAP every 1024 steps */
-            if ((step_count & 0x3FF) == 0) {
+            if (usb_guest_xmodem_active_for_host()) {
+                usb_console_tcp_poll_rx(1);
+            } else if ((step_count & 0x3FF) == 0) {
                 net_bridge_poll();
                 usb_console_tcp_poll();
                 wire_poll();

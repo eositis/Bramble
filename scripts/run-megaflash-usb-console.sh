@@ -53,12 +53,17 @@ if [[ -n "${SPI_FLASH2_SIZE:-}" ]]; then
   SPI_FLASH_ARGS+=(-spi-flash2-size "$SPI_FLASH2_SIZE")
 fi
 
+STDIO_ARGS=()
+if [[ "${USB_CONSOLE_STDIO:-0}" == 1 ]]; then
+  STDIO_ARGS=(-usb-stdio)
+fi
+
 exec "$BRAMBLE" "$UF2" \
   -arch m33 \
   -clock 150 \
   -cores "${CORES:-1}" \
   "${USB_CONSOLE_ARG[@]}" \
-  -usb-stdio \
+  ${STDIO_ARGS+"${STDIO_ARGS[@]}"} \
   "${SPI_FLASH_ARGS[@]}" \
   -timeout "${TIMEOUT:-7200}" \
   "$@"
