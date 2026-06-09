@@ -113,8 +113,10 @@ static void usb_guest_drain_host_pty(void);
 
 static int usb_console_last_host_rx_was_cr;
 
-#define USB_GUEST_HOST_RX_CAP 65536u
+#define USB_GUEST_HOST_RX_CAP 262144u
 #define USB_GUEST_HOST_RX_USABLE (USB_GUEST_HOST_RX_CAP - 1u)
+/* Max bytes buffered ahead of guest XMODEM consumer (background PTY reads). */
+#define USB_GUEST_HOST_RX_XMODEM_AHEAD 8192u
 static uint8_t usb_guest_host_rx_buf[USB_GUEST_HOST_RX_CAP];
 static unsigned usb_guest_host_rx_rd;
 static unsigned usb_guest_host_rx_wr;
@@ -168,6 +170,8 @@ static int usb_guest_host_rx_push(uint8_t byte) {
     unsigned limit = usb_guest_host_rx_high_water();
     if (usb_guest_bulk_rx_active) {
         limit = USB_GUEST_HOST_RX_USABLE;
+    } else if (usb_guest_xmodem_active) {
+        limit = USB_GUEST_HOST_RX_XMODEM_AHEAD;
     }
     if (!usb_guest_bulk_rx_active &&
         (usb_guest_host_rx_throttled || count >= limit)) {
@@ -456,6 +460,8 @@ void usb_console_tcp_poll_rx(int force_rx) {
         unsigned fill_limit = usb_guest_host_rx_high_water();
         if (force_rx && usb_guest_bulk_rx_active) {
             fill_limit = USB_GUEST_HOST_RX_USABLE;
+        } else if (usb_guest_xmodem_active && !force_rx) {
+            fill_limit = USB_GUEST_HOST_RX_XMODEM_AHEAD;
         }
         for (;;) {
             if (usb_guest_cdc_synced && usb_guest_host_rx_throttled && !force_rx) {
@@ -1308,8 +1314,20 @@ static int usb_guest_flash_write_block_data(uint32_t unit, uint32_t block,
         memcpy(c->map + off, src, USB_GUEST_FLASH_BLOCK_BYTES);
         seq->valid = 1;
         seq->next_off = off + USB_GUEST_FLASH_BLOCK_BYTES;
-        if (++usb_guest_flash_msync_pending[chip] >= 512u) {
-            (void)msync(c->map, c->map_bytes, MS_ASYNC);
+        if (++usb_guest_flash_msync_pending[chip] >= 4096u) {
+            size_t sync_len = 4096u * USB_GUEST_FLASH_BLOCK_BYTES;
+            uint64_t sync_off = off + USB_GUEST_FLASH_BLOCK_BYTES;
+            if (sync_off > sync_len) {
+                sync_off -= sync_len;
+            } else {
+                sync_off = 0;
+            }
+            if (sync_off + sync_len > c->map_bytes) {
+                sync_len = c->map_bytes - (size_t)sync_off;
+            }
+            if (sync_len > 0u) {
+                (void)msync(c->map + sync_off, sync_len, MS_ASYNC);
+            }
             usb_guest_flash_msync_pending[chip] = 0u;
         }
         return 1;

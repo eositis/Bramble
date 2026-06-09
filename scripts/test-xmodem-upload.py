@@ -14,6 +14,7 @@ import tty
 PTY = os.environ.get("USB_CONSOLE_PTY_PATH", "/tmp/bramble-usb-console")
 IMAGE = sys.argv[1] if len(sys.argv) > 1 else "A2OSX.STABLE.32MB.po"
 MAX_BYTES = int(os.environ.get("XMODEM_TEST_BYTES", "0"))
+ACK_TIMEOUT = float(os.environ.get("XMODEM_ACK_TIMEOUT", "120"))
 
 
 def crc16_xmodem(data: bytes) -> int:
@@ -133,13 +134,13 @@ def send_xmodem_crc(pty: Pty, path: str, max_bytes: int) -> int:
         csum = crc16_xmodem(chunk)
         frame = bytes([header]) + body + bytes([(csum >> 8) & 0xFF, csum & 0xFF])
         pty.write(frame)
-        ack = read_ack(pty)
+        ack = read_ack(pty, timeout=ACK_TIMEOUT)
         if ack != 0x06:
             raise RuntimeError(f"NAK/timeout on block {block}: got {ack!r}")
         offset += size
         sent += size
         block = (block + 1) & 0xFF
-        if block % 16 == 0:
+        if block % 16 == 0 or (block & 0xFF) == 0:
             print(f"  block {(block - 1) & 0xFF}, {offset}/{len(payload)}", flush=True)
 
     pty.write(b"\x04")
@@ -168,9 +169,19 @@ def main() -> int:
         pty.write(b"CONFIRM\n")
         pty.read_until(b"Please start upload", timeout=30.0)
         sent = send_xmodem_crc(pty, IMAGE, MAX_BYTES)
-        tail = pty.read_until(b"blocks received", timeout=120.0)
+        tail = pty.read_until(b"blocks received", timeout=7200.0)
         print(tail.decode("utf-8", errors="replace"), flush=True)
         print(f"Done ({sent} bytes sent)", flush=True)
+        if MAX_BYTES <= 0:
+            expected = os.path.getsize(IMAGE)
+            with open(f"flash/spi-flash1.bin", "rb") as f:
+                got = f.read(expected)
+            with open(IMAGE, "rb") as f:
+                ref = f.read(expected)
+            if got != ref:
+                print(f"VERIFY FAIL: flash {len(got)} bytes != image {len(ref)}", file=sys.stderr)
+                return 1
+            print(f"VERIFY OK: {len(got)} bytes match {IMAGE}", flush=True)
     finally:
         pty.close()
     return 0

@@ -23,6 +23,8 @@ Scope: local commits on `main` after clone.
 | SPI baud stub 75 MHz + Winbond W25Q512JV JEDEC (`0xEF4020`) | Boot/device info showed placeholder 1 MHz; SPI `0x9F` veneer had wrong byte order |
 | mmap flash backing + sequential I/O + lighter XMODEM host poll | XMODEM flash writes were ~19s/256KB due to per-instruction PTY poll and fseek/fwrite/fflush per 512 B block |
 | Host RX throttle 90%/80% hysteresis on PTY reads | 64KB host RX buffer overflow dropped XMODEM data when guest lagged behind the sender |
+| 256KB host RX buffer + 8KB XMODEM read-ahead cap | Long uploads prefetched dozens of packets while guest processed flash, refilling buffer to overflow |
+| Windowed mmap msync (2MB) during flash writes | Full 64MB msync every 256KB stalled guest and backed up PTY |
 
 ### MegaFlash USB console — virtual serial port (PTY)
 
