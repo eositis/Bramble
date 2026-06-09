@@ -361,7 +361,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Request** | tio XMODEM-CRC fails in ~15s; XMODEM-1K runs longer then fails |
 | **Actions** | Root cause: tio waits ~1s/ACK vs Python test 120s+; emulator packet handling too slow. Added in-packet CPU turbo (4096 steps), per-step PTY poll during XMODEM, ACK `tcdrain`, PTY TX pending queue, raw mode on slave PTY; removed `-usb-stdio` default from run script; documented tio limits |
 | **Tests** | `bramble_tests` 322/322; 256KB + full 32MB automated XMODEM `VERIFY OK` |
-| **Commit** | _(pending)_ |
+| **Commit** | `d2901fd` — fix(console): speed XMODEM ACK path for tio's 1s timeout |
 
 <!--
 

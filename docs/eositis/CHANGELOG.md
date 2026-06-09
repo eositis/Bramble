@@ -7,6 +7,12 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+_(none)_
+
+---
+
+## 2026-06-08 — `d2901fd` — speed XMODEM ACK path for tio's 1s timeout
+
 | Change | Reason |
 |--------|--------|
 | In-packet CPU turbo + aggressive PTY poll during XMODEM | tio/minicom wait ~1s per ACK; emulated PacketReceived was too slow wall-clock |
