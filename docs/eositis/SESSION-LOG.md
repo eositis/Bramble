@@ -326,6 +326,9 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Actions** | Hysteresis throttle on PTY reads (90% on, 80% off); `usb_console_tcp_poll_rx(force)` for active packet reads; removed flash-write PTY drain that prefilled buffer |
 | **Tests** | `XMODEM_TEST_BYTES=262144` passes; 256KB verified |
 | **Commit** | `9196826` — fix(console): throttle host RX at 90% during XMODEM uploads |
+
+<!--
+
 | Field | Detail |
 |-------|--------|
 | **Request** | |
