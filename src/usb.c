@@ -173,15 +173,16 @@ static int usb_guest_host_rx_push(uint8_t byte) {
     } else if (usb_guest_xmodem_active) {
         limit = USB_GUEST_HOST_RX_XMODEM_AHEAD;
     }
-    if (!usb_guest_bulk_rx_active &&
-        (usb_guest_host_rx_throttled || count >= limit)) {
-        usb_guest_host_rx_throttled = 1;
+    if (!usb_guest_bulk_rx_active && usb_guest_host_rx_throttled) {
         static int host_rx_drop_logged;
         if (!host_rx_drop_logged++) {
             fprintf(stderr,
-                    "[USB] host RX full/throttled (%u/%u) — deferring PTY read\n",
+                    "[USB] host RX throttled (%u/%u) — deferring PTY read\n",
                     count, USB_GUEST_HOST_RX_USABLE);
         }
+        return 0;
+    }
+    if (!usb_guest_bulk_rx_active && count >= limit) {
         return 0;
     }
     if (count >= USB_GUEST_HOST_RX_USABLE) {
@@ -472,7 +473,8 @@ void usb_console_tcp_poll_rx(int force_rx) {
                 for (ssize_t j = 0; j < n; j++) {
                     unsigned count = usb_guest_host_rx_count();
                     if (count >= fill_limit) {
-                        if (!force_rx) {
+                        if (!force_rx &&
+                            fill_limit >= usb_guest_host_rx_high_water()) {
                             usb_guest_host_rx_throttled = 1;
                             usb_guest_host_rx_throttle_log(1, count);
                         }

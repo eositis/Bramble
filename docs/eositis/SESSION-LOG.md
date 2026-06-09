@@ -345,6 +345,15 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Tests** | `make -C build bramble bramble_tests`; `./build/bramble_tests` |
 | **Commit** | `8b6f6de` — docs(eositis): apply PROJECT-RULES changelog and session housekeeping |
 
+## 2026-06-08 — XMODEM broke after 8KB read-ahead throttle
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Manual minicom upload dies after block 3 with `host RX throttle ON (8192/262143 bytes)` |
+| **Actions** | 8KB read-ahead cap was setting the same `throttled` flag as 90% high-water; release required ~209KB consumption. Only set `throttled` at ≥90% fill; 8KB cap now pauses background PTY reads without the flag |
+| **Tests** | `bramble_tests` 322/322; automated full 32MB XMODEM `VERIFY OK` (~65s) |
+| **Commit** | _(pending)_ |
+
 <!--
 
 | Field | Detail |
