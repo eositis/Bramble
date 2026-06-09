@@ -183,6 +183,7 @@ extern int usb_stdio_prefer_usb;
 int  usb_console_tcp_init(void);
 void usb_console_tcp_cleanup(void);
 void usb_console_tcp_poll(void);
+void usb_console_tcp_poll_rx(int force_rx);
 int  usb_console_tcp_active(void);
 void usb_console_tcp_set_port(int port);
 void usb_console_set_pty(const char *symlink_path);

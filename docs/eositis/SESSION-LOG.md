@@ -318,6 +318,15 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Outcome** | Device info and boot banner show 75 MHz / EF4020h; upload path verified |
 | **Commit** | `b0af78f` — fix(console): XMODEM flash upload reliability and mmap-backed SPI I/O |
 
+## 2026-06-08 — Host RX throttle for XMODEM
+
+| Field | Detail |
+|-------|--------|
+| **Request** | XMODEM still breaks with host RX buffer full / dropped data; need 90%/80% transfer throttling |
+| **Actions** | Hysteresis throttle on PTY reads (90% on, 80% off); `usb_console_tcp_poll_rx(force)` for active packet reads; removed flash-write PTY drain that prefilled buffer |
+| **Tests** | `XMODEM_TEST_BYTES=262144` passes; 256KB verified |
+| **Commit** | (pending) |
+
 <!--
 
 | Field | Detail |

@@ -106,7 +106,7 @@ static void usb_console_tcp_tx(const uint8_t *data, int len);
 static uint16_t usb_guest_fifo_count(uint32_t fifo_addr);
 static int usb_guest_cdc_rx_fifo_push(uint8_t byte);
 static int usb_guest_cdc_rx_fifo_pop(uint8_t *out);
-static void usb_console_push_host_rx(uint8_t byte);
+static int usb_console_push_host_rx(uint8_t byte);
 static void usb_guest_drain_line_ending(void);
 static void usb_guest_emulate_getstring(void);
 static void usb_guest_drain_host_pty(void);
@@ -114,30 +114,78 @@ static void usb_guest_drain_host_pty(void);
 static int usb_console_last_host_rx_was_cr;
 
 #define USB_GUEST_HOST_RX_CAP 65536u
+#define USB_GUEST_HOST_RX_USABLE (USB_GUEST_HOST_RX_CAP - 1u)
 static uint8_t usb_guest_host_rx_buf[USB_GUEST_HOST_RX_CAP];
 static unsigned usb_guest_host_rx_rd;
 static unsigned usb_guest_host_rx_wr;
+static volatile int usb_guest_host_rx_throttled;
+
+static uint64_t usb_guest_host_rx_total_pushed;
+static volatile int usb_guest_bulk_rx_active;
+static volatile int usb_guest_getraw_popping;
+static volatile int usb_guest_xmodem_active;
+
+static unsigned usb_guest_host_rx_high_water(void) {
+    return (USB_GUEST_HOST_RX_USABLE * 90u) / 100u;
+}
+
+static unsigned usb_guest_host_rx_low_water(void) {
+    return (USB_GUEST_HOST_RX_USABLE * 80u) / 100u;
+}
 
 static unsigned usb_guest_host_rx_count(void) {
     return (usb_guest_host_rx_wr + USB_GUEST_HOST_RX_CAP - usb_guest_host_rx_rd) %
            USB_GUEST_HOST_RX_CAP;
 }
 
-static int usb_guest_host_rx_push(uint8_t byte) {
-    if (usb_guest_host_rx_count() >= USB_GUEST_HOST_RX_CAP - 1u) {
-        static int host_rx_overflow_logged;
-        usb_guest_drain_host_pty();
-        if (usb_guest_host_rx_count() >= USB_GUEST_HOST_RX_CAP - 1u) {
-            if (!host_rx_overflow_logged++) {
-                fprintf(stderr,
-                        "[USB] host RX buffer full (%u) — XMODEM data dropped\n",
-                        USB_GUEST_HOST_RX_CAP);
-            }
-            return 0;
+static void usb_guest_host_rx_throttle_log(int on, unsigned count) {
+    fprintf(stderr, "[USB] host RX throttle %s (%u/%u bytes)\n",
+            on ? "ON" : "OFF", count, USB_GUEST_HOST_RX_USABLE);
+}
+
+static void usb_guest_host_rx_note_consumed(void) {
+    if (!usb_guest_host_rx_throttled) {
+        return;
+    }
+    unsigned count = usb_guest_host_rx_count();
+    if (count < usb_guest_host_rx_low_water()) {
+        usb_guest_host_rx_throttled = 0;
+        usb_guest_host_rx_throttle_log(0, count);
+    }
+}
+
+static void usb_guest_host_rx_note_produced(unsigned count) {
+    if (count >= usb_guest_host_rx_high_water()) {
+        if (!usb_guest_host_rx_throttled) {
+            usb_guest_host_rx_throttled = 1;
+            usb_guest_host_rx_throttle_log(1, count);
         }
+    }
+}
+
+static int usb_guest_host_rx_push(uint8_t byte) {
+    unsigned count = usb_guest_host_rx_count();
+    unsigned limit = usb_guest_host_rx_high_water();
+    if (usb_guest_bulk_rx_active) {
+        limit = USB_GUEST_HOST_RX_USABLE;
+    }
+    if (!usb_guest_bulk_rx_active &&
+        (usb_guest_host_rx_throttled || count >= limit)) {
+        usb_guest_host_rx_throttled = 1;
+        static int host_rx_drop_logged;
+        if (!host_rx_drop_logged++) {
+            fprintf(stderr,
+                    "[USB] host RX full/throttled (%u/%u) — deferring PTY read\n",
+                    count, USB_GUEST_HOST_RX_USABLE);
+        }
+        return 0;
+    }
+    if (count >= USB_GUEST_HOST_RX_USABLE) {
+        return 0;
     }
     usb_guest_host_rx_buf[usb_guest_host_rx_wr] = byte;
     usb_guest_host_rx_wr = (usb_guest_host_rx_wr + 1u) % USB_GUEST_HOST_RX_CAP;
+    usb_guest_host_rx_note_produced(usb_guest_host_rx_count());
     return 1;
 }
 
@@ -154,22 +202,20 @@ static int usb_guest_host_rx_pop(uint8_t *out) {
         return 0;
     }
     usb_guest_host_rx_rd = (usb_guest_host_rx_rd + 1u) % USB_GUEST_HOST_RX_CAP;
+    usb_guest_host_rx_note_consumed();
     return 1;
 }
 
-static uint64_t usb_guest_host_rx_total_pushed;
-static volatile int usb_guest_bulk_rx_active;
-static volatile int usb_guest_getraw_popping;
-static volatile int usb_guest_xmodem_active;
-
-static void usb_console_push_host_rx(uint8_t byte) {
+static int usb_console_push_host_rx(uint8_t byte) {
     if (usb_guest_cdc_synced) {
         if (usb_guest_host_rx_push(byte)) {
             usb_guest_host_rx_total_pushed++;
+            return 1;
         }
-    } else {
-        (void)usb_cdc_rx_push(byte);
+        return 0;
     }
+    (void)usb_cdc_rx_push(byte);
+    return 1;
 }
 
 static int usb_console_bridge_mode(void) {
@@ -181,11 +227,14 @@ static int guest_megaflash_hook_active(void) {
 }
 
 static void usb_guest_drain_host_pty(void) {
-    if (!usb_console_bridge_mode()) {
+    if (!usb_console_bridge_mode() || usb_guest_host_rx_throttled) {
         return;
     }
-    int max_pass = usb_guest_xmodem_active ? 12 : 4;
+    int max_pass = usb_guest_xmodem_active ? 4 : 4;
     for (int pass = 0; pass < max_pass; pass++) {
+        if (usb_guest_host_rx_count() >= usb_guest_host_rx_high_water()) {
+            break;
+        }
         unsigned before = usb_guest_host_rx_count();
         usb_console_tcp_poll();
         if (usb_guest_host_rx_count() == before) {
@@ -370,6 +419,10 @@ void usb_console_tcp_cleanup(void) {
 }
 
 void usb_console_tcp_poll(void) {
+    usb_console_tcp_poll_rx(0);
+}
+
+void usb_console_tcp_poll_rx(int force_rx) {
     if (usb_tcp.transport == USB_CONSOLE_OFF) {
         return;
     }
@@ -400,11 +453,34 @@ void usb_console_tcp_poll(void) {
     struct pollfd pfd = { .fd = usb_tcp.client_fd, .events = POLLIN };
     if (poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN)) {
         uint8_t buf[4096];
+        unsigned fill_limit = usb_guest_host_rx_high_water();
+        if (force_rx && usb_guest_bulk_rx_active) {
+            fill_limit = USB_GUEST_HOST_RX_USABLE;
+        }
         for (;;) {
+            if (usb_guest_cdc_synced && usb_guest_host_rx_throttled && !force_rx) {
+                break;
+            }
             ssize_t n = read(usb_tcp.client_fd, buf, sizeof(buf));
             if (n > 0) {
                 for (ssize_t j = 0; j < n; j++) {
-                    usb_console_push_host_rx(buf[j]);
+                    unsigned count = usb_guest_host_rx_count();
+                    if (count >= fill_limit) {
+                        if (!force_rx) {
+                            usb_guest_host_rx_throttled = 1;
+                            usb_guest_host_rx_throttle_log(1, count);
+                        }
+                        break;
+                    }
+                    if (!usb_console_push_host_rx(buf[j])) {
+                        break;
+                    }
+                }
+                if (!force_rx && usb_guest_host_rx_throttled) {
+                    break;
+                }
+                if (usb_guest_host_rx_count() >= fill_limit) {
+                    break;
                 }
                 continue;
             }
@@ -1236,9 +1312,6 @@ static int usb_guest_flash_write_block_data(uint32_t unit, uint32_t block,
             (void)msync(c->map, c->map_bytes, MS_ASYNC);
             usb_guest_flash_msync_pending[chip] = 0u;
         }
-        if (usb_guest_xmodem_active) {
-            usb_guest_drain_host_pty();
-        }
         return 1;
     }
 #endif
@@ -1262,9 +1335,6 @@ static int usb_guest_flash_write_block_data(uint32_t unit, uint32_t block,
         if (++usb_guest_flash_fflush_pending >= 256u) {
             fflush(c->fp);
             usb_guest_flash_fflush_pending = 0u;
-        }
-        if (usb_guest_xmodem_active) {
-            usb_guest_drain_host_pty();
         }
         return 1;
     }
@@ -1618,7 +1688,7 @@ static int usb_guest_host_rx_pop_byte(uint8_t *out, uint32_t timeout_us) {
             return 1;
         }
         if (usb_console_bridge_mode()) {
-            usb_console_tcp_poll();
+            usb_console_tcp_poll_rx(1);
         }
         if (usb_guest_host_elapsed_us(&start) >= timeout_us) {
             return 0;
@@ -1662,7 +1732,7 @@ static uint32_t usb_guest_host_rx_fill_guest(uint32_t guest_buf, uint32_t len,
                 int wait_ms = (len >= 1028u && received > 0) ? 50 : 0;
                 (void)poll(&pfd, 1, wait_ms);
             }
-            usb_console_tcp_poll();
+            usb_console_tcp_poll_rx(1);
         }
         uint64_t elapsed = usb_guest_host_elapsed_us(&start);
         if (elapsed >= wall_limit_us) {
@@ -1671,14 +1741,14 @@ static uint32_t usb_guest_host_rx_fill_guest(uint32_t guest_buf, uint32_t len,
                     stall_start = elapsed;
                 }
                 if (elapsed - stall_start < 2000000u) {
-                    usb_console_tcp_poll();
+                    usb_console_tcp_poll_rx(1);
                     continue;
                 }
             }
             break;
         }
         if (received > 0) {
-            usb_console_tcp_poll();
+            usb_console_tcp_poll_rx(1);
             usleep(100);
         } else {
             usleep(1000);
@@ -2269,7 +2339,7 @@ void usb_console_guest_stdio_hook(void) {
                 uint8_t ch;
                 if (!usb_guest_cdc_rx_fifo_pop(&ch)) {
                     if (usb_console_bridge_mode()) {
-                        usb_console_tcp_poll();
+                        usb_console_tcp_poll_rx(usb_guest_xmodem_active ? 1 : 0);
                         if (!usb_guest_cdc_rx_fifo_pop(&ch)) {
                             break;
                         }

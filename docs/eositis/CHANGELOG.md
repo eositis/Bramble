@@ -22,6 +22,7 @@ Scope: local commits on `main` after clone.
 | Default `TIMEOUT=7200`, `CORES=1` in USB run script | 120s timeout killed long uploads; dual-core added avoidable load during XMODEM |
 | SPI baud stub 75 MHz + Winbond W25Q512JV JEDEC (`0xEF4020`) | Boot/device info showed placeholder 1 MHz; SPI `0x9F` veneer had wrong byte order |
 | mmap flash backing + sequential I/O + lighter XMODEM host poll | XMODEM flash writes were ~19s/256KB due to per-instruction PTY poll and fseek/fwrite/fflush per 512 B block |
+| Host RX throttle 90%/80% hysteresis on PTY reads | 64KB host RX buffer overflow dropped XMODEM data when guest lagged behind the sender |
 
 ### MegaFlash USB console — virtual serial port (PTY)
 
