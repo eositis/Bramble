@@ -343,7 +343,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Request** | Apply `docs/eositis/PROJECT-RULES.md` (session log, changelog, commit, build/test) |
 | **Actions** | Moved Unreleased CHANGELOG bullets into dated commit sections (`37c38a5`–`ac96692`, `5840a76`, `aaf9ee3`); documented `test-32mb-xmodem.sh` in `USB-CONSOLE.md`; fixed session log template comment |
 | **Tests** | `make -C build bramble bramble_tests`; `./build/bramble_tests` |
-| **Commit** | _(this entry)_ |
+| **Commit** | `8b6f6de` — docs(eositis): apply PROJECT-RULES changelog and session housekeeping |
 
 <!--
 
