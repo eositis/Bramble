@@ -305,8 +305,8 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 |-------|--------|
 | **Request** | 32MB `.po` XMODEM upload fails mid-transfer (`N????`, Write packet to serial failed, PTY gone) |
 | **Actions** | Fixed flash write fall-through (blocks 8+ went to hash not file); clamp copy at 4×128; flush on buffer full; bulk mem read/write; 64KB host RX + PTY drain while XMODEM active; guest hooks on all cores; `TIMEOUT=7200`, `CORES=1` defaults; docs |
-| **Outcome** | 262144-byte automated test passes; 32MB needs `TIMEOUT=7200`, `CORES=1`, exclusive PTY (~45+ min emulated) |
-| **Commit** | (pending) |
+| **Outcome** | 262144-byte automated test passes; 32MB needs `TIMEOUT=7200`, `CORES=1`, exclusive PTY |
+| **Commit** | `b0af78f` — fix(console): XMODEM flash upload reliability and mmap-backed SPI I/O |
 
 ## 2026-06-07 — SPI stubs + flash I/O performance
 
@@ -316,7 +316,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Actions** | Stub `spi_get_baudrate` → 75 MHz (`SPI_SPEED_FINAL`); JEDEC `0xEF4020` (W25Q512JV) + fix `0x9F` SPI read byte order; mmap-backed flash writes, sequential seek skip, reduced XMODEM PTY poll/drain, bulk block stubs |
 | **Tests** | `make -C build bramble bramble_tests`; `./build/bramble_tests` 322/322; 256KB XMODEM ~1s (was ~19s) |
 | **Outcome** | Device info and boot banner show 75 MHz / EF4020h; upload path verified |
-| **Commit** | (pending) |
+| **Commit** | `b0af78f` — fix(console): XMODEM flash upload reliability and mmap-backed SPI I/O |
 
 <!--
 
