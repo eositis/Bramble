@@ -222,7 +222,11 @@ static void stdin_pending_flush(void) {
         int pushed = 0;
 
         if (target == STDIN_TARGET_USB_CDC) {
-            pushed = usb_cdc_rx_push(byte);
+            uint8_t guest_byte = byte;
+            if (guest_byte == '\n') {
+                guest_byte = '\r';
+            }
+            pushed = usb_cdc_rx_push(guest_byte);
         } else {
             pushed = uart_rx_push(0, byte);
         }
@@ -328,6 +332,10 @@ static void reboot_from_watchdog(const char *tap_name,
  * Main Entry Point
  * ============================================================================ */
 
+static int cli_next_arg_is_value(int argc, char **argv, int i) {
+    return i + 1 < argc && argv[i + 1][0] != '-';
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         fprintf(stderr, "Usage: %s <firmware.uf2> [options]\n", argv[0]);
@@ -353,6 +361,10 @@ int main(int argc, char **argv) {
         fprintf(stderr, "  -no-boot2  Skip boot2 even if detected in firmware\n");
         fprintf(stderr, "  -debug-mem Log unmapped peripheral accesses\n");
         fprintf(stderr, "  -flash <path> Persistent flash storage (2MB file)\n");
+        fprintf(stderr, "  -spi-flash1 [path]       MegaFlash SPI chip #1 backing file (default: flash/spi-flash1.bin)\n");
+        fprintf(stderr, "  -spi-flash1-size <MB>    SPI chip #1 size in MB (default: 64, multiple of 32)\n");
+        fprintf(stderr, "  -spi-flash2 [path]       MegaFlash SPI chip #2 backing file (default: flash/spi-flash2.bin)\n");
+        fprintf(stderr, "  -spi-flash2-size <MB>    SPI chip #2 size in MB (default: 64, multiple of 32)\n");
         fprintf(stderr, "  -mount <dir>  Mount flash FAT filesystem via FUSE (requires -flash, may need sudo)\n");
         fprintf(stderr, "  -mount-offset <hex>  Flash offset of FAT region (default: auto-scan)\n");
         fprintf(stderr, "\nStorage:\n");
@@ -534,6 +546,26 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[i], "-flash") == 0) {
             if (i + 1 < argc) {
                 flash_path = argv[++i];
+            }
+        } else if (strcmp(argv[i], "-spi-flash1") == 0) {
+            const char *path = NULL;
+            if (cli_next_arg_is_value(argc, argv, i)) {
+                path = argv[++i];
+            }
+            usb_guest_spi_flash_configure(0u, path);
+        } else if (strcmp(argv[i], "-spi-flash1-size") == 0) {
+            if (i + 1 < argc) {
+                usb_guest_spi_flash_set_size(0u, (uint32_t)atoi(argv[++i]));
+            }
+        } else if (strcmp(argv[i], "-spi-flash2") == 0) {
+            const char *path = NULL;
+            if (cli_next_arg_is_value(argc, argv, i)) {
+                path = argv[++i];
+            }
+            usb_guest_spi_flash_configure(1u, path);
+        } else if (strcmp(argv[i], "-spi-flash2-size") == 0) {
+            if (i + 1 < argc) {
+                usb_guest_spi_flash_set_size(1u, (uint32_t)atoi(argv[++i]));
             }
         } else if (strcmp(argv[i], "-mount") == 0) {
             if (i + 1 < argc) {
@@ -1564,6 +1596,7 @@ skip_fuse:
         flash_persist_save_all();
         flash_persist_close();
     }
+    usb_guest_spi_flash_close();
 
     /* Core pool cleanup */
     corepool_cleanup();

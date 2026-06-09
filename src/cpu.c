@@ -1342,9 +1342,7 @@ static int guest_megaflash_memset_accel(uint32_t pc) {
 static uint32_t cpu_step_prev_pc;
 
 __attribute__((hot)) void cpu_step(void) {
-    if (get_active_core() == CORE0) {
-        usb_console_guest_stdio_hook();
-    }
+    usb_console_guest_stdio_hook();
 
     uint32_t pc = cpu.r[15] & ~1u;
 

@@ -35,11 +35,30 @@ if [[ "$USE_PTY" == 1 ]]; then
   USB_CONSOLE_ARG=(-usb-console "pty:${PTY_PATH}")
 fi
 
+SPI_FLASH_ARGS=()
+if [[ -n "${SPI_FLASH1:-}" ]]; then
+  SPI_FLASH_ARGS+=(-spi-flash1 "$SPI_FLASH1")
+else
+  SPI_FLASH_ARGS+=(-spi-flash1)
+fi
+if [[ -n "${SPI_FLASH1_SIZE:-}" ]]; then
+  SPI_FLASH_ARGS+=(-spi-flash1-size "$SPI_FLASH1_SIZE")
+fi
+if [[ -n "${SPI_FLASH2:-}" ]]; then
+  SPI_FLASH_ARGS+=(-spi-flash2 "$SPI_FLASH2")
+else
+  SPI_FLASH_ARGS+=(-spi-flash2)
+fi
+if [[ -n "${SPI_FLASH2_SIZE:-}" ]]; then
+  SPI_FLASH_ARGS+=(-spi-flash2-size "$SPI_FLASH2_SIZE")
+fi
+
 exec "$BRAMBLE" "$UF2" \
   -arch m33 \
   -clock 150 \
-  -cores 2 \
+  -cores "${CORES:-1}" \
   "${USB_CONSOLE_ARG[@]}" \
   -usb-stdio \
-  -timeout "${TIMEOUT:-120}" \
+  "${SPI_FLASH_ARGS[@]}" \
+  -timeout "${TIMEOUT:-7200}" \
   "$@"

@@ -74,7 +74,27 @@ sz -y /tmp/bramble-usb-console /path/to/disk.po
 
 Only **one** program may open the serial port at a time.
 
-**Emulator note:** Bramble now exposes one flash unit for upload (`GetTotalUnitCount` / mapping stubs). Full SPI flash programming during XMODEM is still partial under emulation — you may reach the XMODEM handshake before writes complete or verify. TCP mode works the same way but is harder to use with standard serial/XMODEM tools.
+**External flash persistence:** MegaFlash has two SPI flash chips. Each chip is backed by its own host file when `-spi-flash1` / `-spi-flash2` is set. With no path, Bramble creates `flash/spi-flash1.bin` and `flash/spi-flash2.bin` (64MB each by default). Units are 32MB slices within each chip file (chip #1 → units 1–2, chip #2 → units 3–4 at default sizes). XMODEM uploads survive between runs. Without these flags, flash is volatile (in-memory only).
+
+| Flag | Purpose |
+|------|---------|
+| `-spi-flash1 [path]` | SPI chip #1 backing file (default: `flash/spi-flash1.bin`) |
+| `-spi-flash1-size <MB>` | Chip #1 size in MB (default 64; rounded up to multiple of 32) |
+| `-spi-flash2 [path]` | SPI chip #2 backing file (default: `flash/spi-flash2.bin`) |
+| `-spi-flash2-size <MB>` | Chip #2 size in MB |
+| `SPI_FLASH1`, `SPI_FLASH2` | Run-script env overrides for chip paths |
+| `SPI_FLASH1_SIZE`, `SPI_FLASH2_SIZE` | Run-script env overrides for chip sizes |
+
+**Emulator note:** XMODEM upload uses `WriteBlockForImageTransfer` (direct SPI program path), not the normal `WriteBlock` veneer — Bramble stubs that to the SPI flash backing files. Bulk RX uses host-polling `usb_getraw_timeout` for XMODEM-1K packets.
+
+**Large uploads (32MB `.po`):** Emulated XMODEM is slow. Use **one core**, a long timeout, and no other program on the PTY (quit `tio`/`minicom` before restarting Bramble):
+
+```bash
+CORES=1 TIMEOUT=7200 ./scripts/run-megaflash-usb-console.sh
+# minicom / tio on /tmp/bramble-usb-console → menu 2 → drive → CONFIRM → XMODEM-1K send
+```
+
+If the host shows `N`/`Write packet to serial failed`, the guest likely hit its XMODEM error limit while flash writes were slow under emulation (PTY backpressure), or Bramble exited (`-timeout` too low). Restart with `TIMEOUT=7200` (or `TIMEOUT=0`), `-cores 1`, and no other client on the PTY. A full 32MB image can take a long time in the emulator.
 
 | Flag | Purpose |
 |------|---------|
@@ -96,8 +116,8 @@ Same pattern as [UART-CONSOLE.md](UART-CONSOLE.md), but traffic goes to **USB CD
 ./scripts/run-megaflash-usb-console.sh
 # or:
 ./build/bramble ../MegaFlash/pico/pico2_debug/megaflash.uf2 \
-  -arch m33 -clock 150 -cores 2 \
-  -usb-console 5555 -usb-stdio -timeout 120
+  -arch m33 -clock 150 -cores 1 \
+  -usb-console 5555 -usb-stdio -timeout 7200
 ```
 
 Wait for:

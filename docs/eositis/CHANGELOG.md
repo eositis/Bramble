@@ -7,6 +7,22 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+### MegaFlash external flash persistence
+
+| Change | Reason |
+|--------|--------|
+| `-spi-flash1` / `-spi-flash2` with optional path per chip | Two SPI chips match MegaFlash hardware layout |
+| Default paths `flash/spi-flash1.bin`, `flash/spi-flash2.bin` | Auto-create `flash/` when no path given |
+| `-spi-flash1-size` / `-spi-flash2-size` (MB, multiple of 32) | Configurable chip capacity (default 64MB each) |
+| Run script enables both chips with defaults | Persistent storage without extra flags |
+| `WriteBlockForImageTransfer` stub → SPI backing files | XMODEM upload bypasses WriteBlock veneer; was hitting unemulated SPI program |
+| Host-polling `usb_getraw_timeout` / larger `stdio_usb_in` reads | XMODEM-1K (1028-byte) packets need bulk CDC RX |
+| XMODEM flash flush hooks + 64KB host RX buffer + PTY drain during transfer | Full 32MB upload was NAK/serial-fail when PTY backed up during slow emulated flash writes |
+| 30s host RX timeout + aggressive PTY drain during XMODEM | Guest xmodemrx 1s packet timeout was too tight vs emulated flash write latency |
+| Default `TIMEOUT=7200`, `CORES=1` in USB run script | 120s timeout killed long uploads; dual-core added avoidable load during XMODEM |
+| SPI baud stub 75 MHz + Winbond W25Q512JV JEDEC (`0xEF4020`) | Boot/device info showed placeholder 1 MHz; SPI `0x9F` veneer had wrong byte order |
+| mmap flash backing + sequential I/O + lighter XMODEM host poll | XMODEM flash writes were ~19s/256KB due to per-instruction PTY poll and fseek/fwrite/fflush per 512 B block |
+
 ### MegaFlash USB console — virtual serial port (PTY)
 
 | Change | Reason |

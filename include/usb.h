@@ -187,6 +187,11 @@ int  usb_console_tcp_active(void);
 void usb_console_tcp_set_port(int port);
 void usb_console_set_pty(const char *symlink_path);
 
+/* MegaFlash external SPI flash chips (USB console / XMODEM path) */
+void usb_guest_spi_flash_configure(unsigned chip, const char *path);
+void usb_guest_spi_flash_set_size(unsigned chip, uint32_t size_mb);
+void usb_guest_spi_flash_close(void);
+
 /* MegaFlash: capture stdio_put_string before guest mutex/driver path (-usb-console) */
 void usb_console_guest_stdio_hook(void);
 
