@@ -94,7 +94,21 @@ CORES=1 TIMEOUT=7200 ./scripts/run-megaflash-usb-console.sh
 # minicom / tio on /tmp/bramble-usb-console → menu 2 → drive → CONFIRM → XMODEM-1K send
 ```
 
-If the host shows `N`/`Write packet to serial failed`, the guest likely hit its XMODEM error limit while flash writes were slow under emulation (PTY backpressure), or Bramble exited (`-timeout` too low). Bramble throttles PTY reads when the host RX buffer exceeds **90%** full and resumes below **80%** (stderr: `host RX throttle ON/OFF`). Restart with `TIMEOUT=7200` (or `TIMEOUT=0`), `-cores 1`, and no other client on the PTY. A full 32MB image can take a long time in the emulator.
+If the host shows `N`/`Write packet to serial failed`, the guest likely hit its XMODEM error limit while flash writes were slow under emulation (PTY backpressure), or Bramble exited (`-timeout` too low). Bramble throttles PTY reads when the host RX buffer exceeds **90%** full and resumes below **80%** (stderr: `host RX throttle ON/OFF`). Restart with `TIMEOUT=7200` (or `TIMEOUT=0`), `-cores 1`, and no other client on the PTY. A full 32MB image can take ~1–2 minutes in the emulator with mmap-backed flash I/O.
+
+**Automated full-image test** (starts Bramble, waits for menu, runs XMODEM, verifies `flash/spi-flash1.bin`):
+
+```bash
+./scripts/test-32mb-xmodem.sh
+# optional image path:
+./scripts/test-32mb-xmodem.sh /path/to/disk.po
+```
+
+Do not run another client on `/tmp/bramble-usb-console` while this script is active. Smaller regression:
+
+```bash
+XMODEM_TEST_BYTES=262144 python3 scripts/test-xmodem-upload.py /path/to/disk.po
+```
 
 | Flag | Purpose |
 |------|---------|

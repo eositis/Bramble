@@ -335,6 +335,18 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Actions** | 256KB RX buffer; 8KB read-ahead cap; windowed msync; 300s ACK timeout; `scripts/test-32mb-xmodem.sh`; verify uses actual file size (33553920 B) |
 | **Tests** | Full image upload ~76s, `65535 blocks received`, `VERIFY OK` vs `flash/spi-flash1.bin` |
 | **Commit** | `ac96692` — fix(console): sustain 32MB XMODEM uploads with RX read-ahead cap |
+
+## 2026-06-08 — Apply PROJECT-RULES.md
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Apply `docs/eositis/PROJECT-RULES.md` (session log, changelog, commit, build/test) |
+| **Actions** | Moved Unreleased CHANGELOG bullets into dated commit sections (`37c38a5`–`ac96692`, `5840a76`, `aaf9ee3`); documented `test-32mb-xmodem.sh` in `USB-CONSOLE.md`; fixed session log template comment |
+| **Tests** | `make -C build bramble bramble_tests`; `./build/bramble_tests` |
+| **Commit** | _(this entry)_ |
+
+<!--
+
 | Field | Detail |
 |-------|--------|
 | **Request** | |

@@ -7,7 +7,32 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
-### MegaFlash external flash persistence
+_(none)_
+
+---
+
+## 2026-06-08 — `ac96692` — sustain 32MB XMODEM uploads
+
+| Change | Reason |
+|--------|--------|
+| 256KB host RX buffer + 8KB XMODEM read-ahead cap | Long uploads prefetched dozens of packets while guest wrote flash, refilling buffer to overflow |
+| Windowed mmap msync (2MB) during flash writes | Full 64MB msync every 256KB stalled guest and backed up PTY |
+| `scripts/test-32mb-xmodem.sh`; `XMODEM_ACK_TIMEOUT=300` in test driver | Supervised full-image regression; guest 1s packet timeout needs generous host ACK wait |
+| Verify against actual `.po` size (33553920 B for `A2OSX.STABLE.32MB.po`) | Image is not exactly 32 MiB |
+
+---
+
+## 2026-06-08 — `9196826` — throttle host RX at 90% during XMODEM
+
+| Change | Reason |
+|--------|--------|
+| Host RX throttle 90%/80% hysteresis on PTY reads | 64KB host RX buffer overflow dropped XMODEM data when guest lagged behind the sender |
+| `usb_console_tcp_poll_rx(force_rx)` for active packet reads | Background reads must not starve in-flight XMODEM block assembly |
+| Removed flash-write PTY drain that prefilled host RX | Prefetch during slow flash writes caused overflow before throttle helped |
+
+---
+
+## 2026-06-08 — `b0af78f` — XMODEM flash upload reliability and mmap-backed SPI I/O
 
 | Change | Reason |
 |--------|--------|
@@ -17,36 +42,61 @@ Scope: local commits on `main` after clone.
 | Run script enables both chips with defaults | Persistent storage without extra flags |
 | `WriteBlockForImageTransfer` stub → SPI backing files | XMODEM upload bypasses WriteBlock veneer; was hitting unemulated SPI program |
 | Host-polling `usb_getraw_timeout` / larger `stdio_usb_in` reads | XMODEM-1K (1028-byte) packets need bulk CDC RX |
-| XMODEM flash flush hooks + 64KB host RX buffer + PTY drain during transfer | Full 32MB upload was NAK/serial-fail when PTY backed up during slow emulated flash writes |
-| 30s host RX timeout + aggressive PTY drain during XMODEM | Guest xmodemrx 1s packet timeout was too tight vs emulated flash write latency |
+| XMODEM flash flush hooks + 64KB host RX buffer | Full upload was NAK/serial-fail when PTY backed up during slow emulated flash writes |
+| 30s host RX timeout | Guest xmodemrx 1s packet timeout was too tight vs emulated flash write latency |
 | Default `TIMEOUT=7200`, `CORES=1` in USB run script | 120s timeout killed long uploads; dual-core added avoidable load during XMODEM |
 | SPI baud stub 75 MHz + Winbond W25Q512JV JEDEC (`0xEF4020`) | Boot/device info showed placeholder 1 MHz; SPI `0x9F` veneer had wrong byte order |
 | mmap flash backing + sequential I/O + lighter XMODEM host poll | XMODEM flash writes were ~19s/256KB due to per-instruction PTY poll and fseek/fwrite/fflush per 512 B block |
-| Host RX throttle 90%/80% hysteresis on PTY reads | 64KB host RX buffer overflow dropped XMODEM data when guest lagged behind the sender |
-| 256KB host RX buffer + 8KB XMODEM read-ahead cap | Long uploads prefetched dozens of packets while guest processed flash, refilling buffer to overflow |
-| Windowed mmap msync (2MB) during flash writes | Full 64MB msync every 256KB stalled guest and backed up PTY |
+| `scripts/test-xmodem-upload.py` | Automated menu + XMODEM driver for regression |
 
-### MegaFlash USB console — virtual serial port (PTY)
+---
+
+## 2026-06-06 — `efc5d1c` — enable USB flash unit path for XMODEM upload
+
+| Change | Reason |
+|--------|--------|
+| Flash unit stubs + keep mapping for USB XMODEM upload path | Menu item 2 no longer stops at "Error: no flash" |
+| PTY raw mode + XMODEM workflow in `USB-CONSOLE.md` | Binary XMODEM via minicom / lrzsz on virtual serial |
+
+---
+
+## 2026-06-06 — `ce991a0` — default USB PTY on macOS
+
+| Change | Reason |
+|--------|--------|
+| macOS: PTY default in run script; `open-usb-console-macos.sh` | Terminal.app / screen without `USB_CONSOLE_PTY=1` |
+
+---
+
+## 2026-06-05 — `4e33ca1` — USB CDC on virtual serial port (PTY)
 
 | Change | Reason |
 |--------|--------|
 | `-usb-console pty[:path]` / `-usb-serial` → host PTY + optional symlink | Use `screen`, `cu`, Serial.app instead of TCP/`nc` |
 | `USB_CONSOLE_PTY=1` in run/connect scripts | Default symlink `/tmp/bramble-usb-console` |
-| macOS: PTY default in run script; `open-usb-console-macos.sh` | Terminal.app / screen without `USB_CONSOLE_PTY=1` |
-| Flash unit stubs + keep mapping for USB XMODEM upload path | Menu item 2 no longer stops at "Error: no flash" |
-| PTY raw mode + XMODEM workflow in `USB-CONSOLE.md` | Binary XMODEM via minicom / lrzsz on virtual serial |
 | TCP mode unchanged (`-usb-console <port>`) | Backward compatible with existing workflows |
 
-### MegaFlash USB menu — Device Information (2026-06-02)
+---
+
+## 2026-06-05 — `e98c27f` — report 64MB per flash chip in USB device info
+
+| Change | Reason |
+|--------|--------|
+| Device-info / partition stubs: 64MB per chip (128MB total) | Match emulated MegaFlash external flash sizing |
+
+---
+
+## 2026-06-05 — `2053c69` — MegaFlash USB menu Device Information on key 1
 
 | Change | Reason |
 |--------|--------|
 | Remove `DeviceInfo` → `PrintBanner` redirect @ `0x10005AEC` | Key `1` re-sent full menu instead of device info |
 | Host-built multiline `GetDeviceInfoString` stub @ `0x10005058` | Native path uses `sprintf(%f)` after VFP; spins under emu |
 | Stub `PrintAllPartitions` @ `0x100057A0` for USB console | Flash unit mapping disabled in `UserTerminal`; no partition lines |
-| Device-info / partition stubs: 64MB per chip (128MB total) | Match emulated MegaFlash external flash sizing |
 
-### MegaFlash USB CDC console — input (2026-06-02)
+---
+
+## 2026-06-04 — `d7f10d9` — USB CDC TCP input via guest RX fifo
 
 | Change | Reason |
 |--------|--------|
@@ -54,7 +104,9 @@ Scope: local commits on `main` after clone.
 | TCP RX → guest CDC RX `tu_fifo` (not host DPRAM only) | TinyUSB stack not running; guest reads guest RAM fifo |
 | Hook `stdio_usb_in_chars`, `tud_cdc_n_available`, `tud_cdc_n_read` | Bypass mutex/`tud_task` spin; direct fifo pop |
 
-### MegaFlash USB CDC console — UserTerminal (2026-06-02)
+---
+
+## 2026-06-04 — `37c38a5` — MegaFlash USB CDC UserTerminal over TCP
 
 | Change | Reason |
 |--------|--------|
@@ -63,6 +115,10 @@ Scope: local commits on `main` after clone.
 | `IsAppleConnected` → 0 (call sites + `0x10004D80`); skip `core0Loop` veneer | Apple II must be offline for USB diagnostic menu |
 | `CheckPicoW` → 1 in USB mode; seed `0x2005BC82` | Enter PicoW `stdio_usb_init` / USB wait path |
 | Skip `stdio_usb_init`, USB wait loops → `UserTerminal` | TinyUSB init spin/fault under partial USB emu; CDC already bridged in Bramble |
+
+---
+
+## 2026-06-02 — `92d1179` — MegaFlash UART TCP bridge
 
 ### MegaFlash UART console — full banner (2026-06-02)
 
@@ -73,7 +129,7 @@ Scope: local commits on `main` after clone.
 | Chained `main` call-site stubs (`LoadAllConfigs` → `0x10000310`, `multicore` → `0x10000320`) | `cpu_step` runs the insn at the new PC in the same step — `+4` alone still entered next `bl` |
 | Stub `clock_get_hz` / `spi_get_baudrate` / `CheckPicoW` | Banner showed `0MHz`; PicoW branch printed misleading “WIFI Supported = Yes” |
 
-### MegaFlash UART console — initial bridge (2026-06-02, commit `92d1179`)
+### Initial bridge
 
 | Change | Reason |
 |--------|--------|
@@ -84,32 +140,7 @@ Scope: local commits on `main` after clone.
 | `netbridge`: 4 KiB TX pending buffer until TCP client connects | Early guest output not lost before `nc` attaches |
 | `scripts/run-megaflash-uart-console.sh` | No Apple-bus stub; mirror + port 4444 |
 
-### MegaFlash USB console — U2/SPI/multicore (2026-06-02)
-
-| Change | Reason |
-|--------|--------|
-| Guest hooks: skip `U2_Init`, `U2_Net_Init`, `u2_mon_push`, `U2_Net_Poll`, `U2_MonPollFlush` | U2 monitor stack fault @ `U2_MonReset` return; Apple II bus not needed for USB menu test |
-| Bootstrap `0x20005A774` crit section + `0x200047A4` alarm pool lock → `spin_lock_hw` | Uninitialized lock ptr broke `ldaexb` in `u2_mon_push` / alarm pool |
-| `alarm_pool_get_default` hook | Avoid assert @ line 101 when pool singleton unset |
-| SPI: idle `0xFF` MISO, auto-clock on empty `SSPDR` read; `__spi_read_blocking_veneer` fill | Guest spun in RAM `spi_read_blocking` @ `0x20002C12` (no RX) |
-| One-shot log when PC hits `0x10000464` / `0x10005AD0` | Confirm USB menu path (not yet observed in 90s run) |
-
-**Known blocker:** After ~157M steps/90s, core0 PC lands in low ROM (`0x24`–`0x1B6`); **UserTerminal / TCP menu bytes not verified**.
-
-### MegaFlash USB console — stdio hooks + RP2350 bring-up (2026-06-03)
-
-| Change | Reason |
-|--------|--------|
-| `cpu_step`: run `usb_console_guest_stdio_hook()` before reading `pc` | Hooks that set `cpu.r[15]` were ignored; guest kept executing stubbed insns |
-| `clocks_bus_match` / RP2350 `RESETS` @ `0x40020000`; `pads_qspi` @ `0x40040000` | `spi_unreset` polled wrong peripheral (PADS stub); infinite spin @ `0x1001192A` |
-| `thumb32_pico_gpioc`: decode `EE40`/`EE60` `.inst` GPIO helpers | Mis-decoded as ALU → corrupt PC (`0xDF00325C`) in flash init |
-| `spi_match` RP2350 bases `0x40080000` / `0x40088000` | Flash driver uses relocated SPI0 |
-| Guest hooks: `_vfprintf_r`, `__ascii_mbtowc`, `check_alloc`, flash/SPI veneers, `panic` skip | Past locale spin, JEDEC read, and `BKPT` `_exit` after `hw_claim` panic |
-| One-shot HardFault OOB log (`prev` PC + step) | Diagnose flash path faults |
-
-**Known blocker:** Guest still high-step count (~169M/90s) in `hw_claim` @ ~`0x1000A9D6` after skipped `panic`; **TCP menu bytes not yet verified**.
-
-### IRQ / Thumb-2 (2026-06-03)
+## 2026-06-03 — `5840a76` — IRQ ldmdb and aligned PC fetch
 
 | Change | Reason |
 |--------|--------|
@@ -118,18 +149,34 @@ Scope: local commits on `main` after clone.
 | `t32_bl`: branch target `& ~1` | Consistent even-PC convention |
 | `test_m33_thumb2_ldmdb` | Regression for `E912 0007` |
 
-### USB stdio / RP2350 bootrom (2026-06-03 session)
+---
+
+## 2026-06-03 — `aaf9ee3` — RP2350 bootrom sys_info and USB guest stdio hooks
+
+### U2 / SPI / multicore
 
 | Change | Reason |
 |--------|--------|
+| Guest hooks: skip `U2_Init`, `U2_Net_Init`, `u2_mon_push`, `U2_Net_Poll`, `U2_MonPollFlush` | U2 monitor stack fault @ `U2_MonReset` return; Apple II bus not needed for USB menu test |
+| Bootstrap `0x20005A774` crit section + `0x200047A4` alarm pool lock → `spin_lock_hw` | Uninitialized lock ptr broke `ldaexb` in `u2_mon_push` / alarm pool |
+| `alarm_pool_get_default` hook | Avoid assert @ line 101 when pool singleton unset |
+| SPI: idle `0xFF` MISO, auto-clock on empty `SSPDR` read; `__spi_read_blocking_veneer` fill | Guest spun in RAM `spi_read_blocking` @ `0x20002C12` (no RX) |
+
+### stdio hooks + RP2350 bring-up
+
+| Change | Reason |
+|--------|--------|
+| `cpu_step`: run `usb_console_guest_stdio_hook()` before reading `pc` | Hooks that set `cpu.r[15]` were ignored; guest kept executing stubbed insns |
+| `clocks_bus_match` / RP2350 `RESETS` @ `0x40020000`; `pads_qspi` @ `0x40040000` | `spi_unreset` polled wrong peripheral (PADS stub); infinite spin @ `0x1001192A` |
+| `thumb32_pico_gpioc`: decode `EE40`/`EE60` `.inst` GPIO helpers | Mis-decoded as ALU → corrupt PC (`0xDF00325C`) in flash init |
+| `spi_match` RP2350 bases `0x40080000` / `0x40088000` | Flash driver uses relocated SPI0 |
+| Guest hooks: `_vfprintf_r`, `__ascii_mbtowc`, `check_alloc`, flash/SPI veneers, `panic` skip | Past locale spin, JEDEC read, and `BKPT` `_exit` after `hw_claim` panic |
 | `rom_get_sys_info` + RP2350 ROM header (`rom_apply_rp2350_header`) + lookup intercept @ `0x0200` | Pre-main `unique_id.c` assert (`rc == 4`) blocked all boot before USB menu |
 | Guest stdio hooks: skip `__wrap_printf` by LR, bypass `__wrap_puts` to TCP, force `stdio_usb_connected` when CDC synced | newlib `_vfprintf_r` locale loop hangs under partial VFP |
 | RP2350 ADC @ `0x400A0000`; ADC ch0–3 → not Pico W when USB console active | Wrong Pico W detect path |
 | Minimal VFP in `thumb32.c` | Float formats in `GetDeviceInfoString` / printf |
 | `a2bus`: no-op `a2phi` while USB console TCP active | Stub must not fake Apple online during USB menu test |
 | `scripts/run-megaflash-usb-console.sh`, `USB-CONSOLE.md` updates | Document no-stub path for USB menu |
-
-**Commit:** `aaf9ee3` — fix(megaflash): RP2350 bootrom sys_info and USB guest stdio hooks
 
 ---
 
