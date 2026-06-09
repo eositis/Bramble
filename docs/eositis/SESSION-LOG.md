@@ -334,10 +334,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Request** | 32MB `A2OSX.STABLE.32MB.po` still fails well after 256KB tests |
 | **Actions** | 256KB RX buffer; 8KB read-ahead cap; windowed msync; 300s ACK timeout; `scripts/test-32mb-xmodem.sh`; verify uses actual file size (33553920 B) |
 | **Tests** | Full image upload ~76s, `65535 blocks received`, `VERIFY OK` vs `flash/spi-flash1.bin` |
-| **Commit** | (pending) |
-
-<!--
-
+| **Commit** | `ac96692` — fix(console): sustain 32MB XMODEM uploads with RX read-ahead cap |
 | Field | Detail |
 |-------|--------|
 | **Request** | |
