@@ -7,6 +7,12 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+_(none)_
+
+---
+
+## 2026-06-08 — `56f230d` — decouple XMODEM read-ahead from host-RX throttle
+
 | Change | Reason |
 |--------|--------|
 | Decouple 8KB XMODEM read-ahead from 90% host-RX throttle flag | Read-ahead cap at 8192 B wrongly set `throttled`; release needed ~209KB drain, blocking PTY RX after a few flash blocks |
