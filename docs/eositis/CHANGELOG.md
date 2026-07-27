@@ -5,7 +5,20 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-07-27 — `2f20b08` — retarget MegaFlash USB hooks + macOS PTY TX
+
+| Change | Reason |
+|--------|--------|
+| Retarget MegaFlash USB guest hooks to current `pico2_debug/megaflash.elf` symbols/BSS | Rebuilt UF2 shifted code/RAM; old PCs left console stuck before UserTerminal |
+| Close openpty slave FD after symlink; keep only master | Holding slave open on macOS blocked tio/external readers from seeing master TX |
+
+---
+
 ## Unreleased
+
+_(none)_
+
+<!-- moved -->
 
 | Change | Reason |
 |--------|--------|
