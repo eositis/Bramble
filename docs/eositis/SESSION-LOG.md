@@ -390,6 +390,16 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Tests** | `bramble_tests` 322/322; 256KB + full 32MB automated XMODEM `VERIFY OK` |
 | **Commit** | `d2901fd` — fix(console): speed XMODEM ACK path for tio's 1s timeout |
 
+## 2026-07-27 — MAME + Bramble MegaFlash bridge
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Plan A: MAME apple2c4 + Bramble MegaFlash over TCP; integrated launcher; use local `iic.bin` |
+| **Actions** | `-a2bus-bridge` TCP RPC; Lua plugin taps `$C0C0–$C0C3`; `run-megaflash-mame.sh`; docs; gitignore ROM |
+| **Tests** | `bramble_tests` 322/322; bridge smoke: Slinky `registers[2]=0xf0`, activation → ID `$96` |
+| **Outcome** | Bramble↔MegaFlash bus bridge ready; MAME not installed on this host (`brew install mame` + CHR/keyboard dumps needed for full GUI run) |
+| **Commit** | _(pending)_ |
+
 <!--
 
 | Field | Detail |

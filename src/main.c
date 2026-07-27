@@ -62,6 +62,8 @@ typedef enum { ARCH_M0PLUS, ARCH_RV32, ARCH_M33 } arch_t;
 #include "vnet.h"
 #include "sdd.h"
 #include "w5500.h"
+#include "a2bus.h"
+#include "a2bus_bridge.h"
 
 
 int any_core_running(void);
@@ -408,6 +410,8 @@ int main(int argc, char **argv) {
         fprintf(stderr, "  -timeout <seconds>    Kill emulator after N seconds (exit 124)\n");
         fprintf(stderr, "  -symbols <elf>        Load ELF symbols for readable reports\n");
         fprintf(stderr, "  -script <file>        Scripted I/O (timestamped UART/GPIO input)\n");
+        fprintf(stderr, "  -a2bus-bridge [port]  MegaFlash Apple-bus TCP bridge (default 19765)\n");
+        fprintf(stderr, "  -a2bus-regs <addr>    Guest BSS address of MegaFlash registers\n");
         fprintf(stderr, "  -expect <file>        Compare stdout against golden file (exit 0/1)\n");
         fprintf(stderr, "  -watch <addr[:len]>   Log reads/writes to address range\n");
         fprintf(stderr, "  -callgraph <file>     Write call graph in DOT format\n");
@@ -454,6 +458,8 @@ int main(int argc, char **argv) {
     int timeout_secs = 0;
     char *symbols_path = NULL;
     char *script_path = NULL;
+    int a2bus_bridge_port = 0; /* 0 = off; >0 = listen port */
+    uint32_t a2bus_regs_addr = 0;
     char *expect_file = NULL;
     char *callgraph_path = NULL;
     char *gpio_trace_path = NULL;
@@ -725,6 +731,16 @@ int main(int argc, char **argv) {
             if (i + 1 < argc) symbols_path = argv[++i];
         } else if (strcmp(argv[i], "-script") == 0) {
             if (i + 1 < argc) script_path = argv[++i];
+        } else if (strcmp(argv[i], "-a2bus-bridge") == 0) {
+            a2bus_bridge_port = 19765;
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                a2bus_bridge_port = atoi(argv[++i]);
+                if (a2bus_bridge_port <= 0) a2bus_bridge_port = 19765;
+            }
+        } else if (strcmp(argv[i], "-a2bus-regs") == 0) {
+            if (i + 1 < argc) {
+                a2bus_regs_addr = (uint32_t)strtoul(argv[++i], NULL, 0);
+            }
         } else if (strcmp(argv[i], "-expect") == 0) {
             if (i + 1 < argc) expect_file = argv[++i];
         } else if (strcmp(argv[i], "-watch") == 0) {
@@ -1040,6 +1056,26 @@ skip_fuse:
     if (usb_console_tcp_init() < 0) {
         fprintf(stderr, "[Error] Failed to initialize USB CDC console\n");
         return EXIT_FAILURE;
+    }
+
+    if (a2bus_bridge_port > 0) {
+        if (a2bus_regs_addr == 0 && symbols_path) {
+            uint32_t resolved = a2bus_bridge_regs_from_elf(symbols_path);
+            if (resolved) {
+                a2bus_regs_addr = resolved;
+                fprintf(stderr, "[A2Bus] resolved registers @ 0x%08X from %s\n",
+                        a2bus_regs_addr, symbols_path);
+            }
+        }
+        if (a2bus_regs_addr != 0) {
+            a2bus_bridge_set_regs_addr(a2bus_regs_addr);
+        }
+        a2bus_bridge_set_port(a2bus_bridge_port);
+        a2bus_bridge_set_pump(NULL); /* default: dual_core_step + pio_step */
+        if (a2bus_bridge_init() < 0) {
+            fprintf(stderr, "[Error] Failed to initialize A2 bus bridge\n");
+            return EXIT_FAILURE;
+        }
     }
 
     /* Wire protocol initialization */
@@ -1393,6 +1429,7 @@ skip_fuse:
             corepool_lock();
             net_bridge_poll();
             usb_console_tcp_poll();
+            if (a2bus_bridge_active()) a2bus_bridge_poll();
             wire_poll();
             cyw43_tap_poll();
             if (vnet_enabled) vnet_poll();
@@ -1493,6 +1530,11 @@ skip_fuse:
                 script_poll(eus);
             }
 
+            /* Poll A2 bus bridge often enough for MAME RPC, not every step. */
+            if (a2bus_bridge_active() && (step_count & 0x7F) == 0) {
+                a2bus_bridge_poll();
+            }
+
             /* Poll stdin for UART Rx data every 1024 steps */
             if (stdin_enabled && (step_count & 0x3FF) == 0) {
                 uart_stdin_poll();
@@ -1575,6 +1617,7 @@ skip_fuse:
 
     net_bridge_cleanup();
     usb_console_tcp_cleanup();
+    a2bus_bridge_cleanup();
     wire_cleanup();
     cyw43_tap_close();
     if (vnet_enabled) vnet_cleanup();

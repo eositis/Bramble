@@ -11,6 +11,16 @@ _(none)_
 
 ---
 
+## 2026-07-27 — MAME MegaFlash bus bridge
+
+| Change | Reason |
+|--------|--------|
+| Add `-a2bus-bridge` TCP server + register peek/inject path (`a2bus_bridge.c`) | Let MAME forward `$C0C0–$C0C3` to MegaFlash under Bramble |
+| MAME Lua plugin `megaflash_bridge`, `run-megaflash-mame.sh`, `MAME-BRIDGE.md` | Integrated apple2c4 + `iic.bin` launch; keep default 128K RAM |
+| Gitignore `iic.bin` / `roms/` | Apple ROM IP stays local |
+
+---
+
 ## 2026-07-27 — `124252e` — add tio console and XMODEM upload guide
 
 | Change | Reason |

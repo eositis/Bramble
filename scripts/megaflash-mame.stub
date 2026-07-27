@@ -1,0 +1,7 @@
+# MegaFlash Apple-bus bring-up for MAME bridge (-a2bus-bridge).
+# PHI0 so IsAppleConnected(); core1launch for BusLoop. No USB console.
+
+10ms: gpio20 1
+10ms: gpio19 0
+200ms: a2phi
+800ms: core1launch

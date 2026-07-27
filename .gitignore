@@ -18,7 +18,8 @@ bramble_tests
 python/
 mpy.bin
 cpy.bin
-megaflash.uf2
-flash/
+iic.bin
+roms/
+
 A2OSX.STABLE.32MB.po
 .DS_Store

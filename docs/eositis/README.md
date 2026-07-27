@@ -10,5 +10,6 @@ Personal working notes and process rules for the **Bramble** fork used to run **
 | [UART-CONSOLE.md](UART-CONSOLE.md) | Bidirectional UART debug via TCP (`-uart-console`) |
 | [USB-CONSOLE.md](USB-CONSOLE.md) | MegaFlash USB diagnostic terminal (`-usb-console`, `-usb-stdio`) |
 | [TIO-CONSOLE.md](TIO-CONSOLE.md) | tio: attach, menu XMODEM upload, quit |
+| [MAME-BRIDGE.md](MAME-BRIDGE.md) | MAME Apple //c + Bramble MegaFlash `$C0C0–$C0C3` TCP bridge |
 
 Cursor agents should follow `.cursor/rules/eositis-project.mdc` on every task in this repo.
