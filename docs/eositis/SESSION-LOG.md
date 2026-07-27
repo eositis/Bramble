@@ -352,7 +352,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Request** | Markdown doc for tio console use, triggering XMODEM upload, and exiting tio |
 | **Actions** | Added `docs/eositis/TIO-CONSOLE.md`; linked from `README.md` and `USB-CONSOLE.md` |
 | **Outcome** | Step-by-step: start Bramble, `tio /tmp/bramble-usb-console`, menu 2/CONFIRM, Ctrl-T x, Ctrl-T q |
-| **Commit** | _(pending)_ |
+| **Commit** | `124252e` — docs(eositis): add tio console and XMODEM upload guide |
 
 ## 2026-07-27 — blank tio after MegaFlash UF2 rebuild
 
