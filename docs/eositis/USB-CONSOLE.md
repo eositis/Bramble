@@ -64,7 +64,7 @@ minicom -D /tmp/bramble-usb-console -b 115200
 
 In minicom: menu **2** (Upload) → unit **1** → type **CONFIRM** → when MegaFlash sends **`C`** repeatedly, press **Ctrl-A** then **S**, pick your `.po`/`.hdv` file, choose **xmodem** or **xmodem-crc**.
 
-**Using tio:** tio works for the menu (`tio /tmp/bramble-usb-console`), but its built-in XMODEM sender (`Ctrl-T x`) waits only **~1 second per ACK**. Emulated flash handling can exceed that, so uploads may show `?`, `N`, or `Write packet to serial failed`. After rebuilding Bramble, **XMODEM-1K** may complete for smaller images; for a full 32MB `.po` use **minicom**, **lrzsz**, or `./scripts/test-32mb-xmodem.sh` instead. **XMODEM-CRC (128-byte)** fails sooner on tio.
+**Using tio:** step-by-step attach, menu upload, and quit are in **[TIO-CONSOLE.md](TIO-CONSOLE.md)** (`tio /tmp/bramble-usb-console`, menu **2** → **CONFIRM** → **Ctrl-T** **`x`**, quit with **Ctrl-T** **`q`**). tio’s sender waits ~1s per ACK, so a full 32MB `.po` may still fail; for that use **minicom**, **lrzsz**, or `./scripts/test-32mb-xmodem.sh`. **XMODEM-1K** is preferred over 128-byte CRC in tio.
 
 **Alternative: lrzsz** (must own the port — disconnect tio/minicom first):
 
