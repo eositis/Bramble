@@ -345,6 +345,15 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Tests** | `make -C build bramble bramble_tests`; `./build/bramble_tests` |
 | **Commit** | `8b6f6de` — docs(eositis): apply PROJECT-RULES changelog and session housekeeping |
 
+## 2026-07-27 — Apple IIc emulator candidates for MegaFlash link
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Assess retrotech71 web-a2e for IIc/MegaFlash linking; suggest alternatives if not adaptable |
+| **Actions** | Reviewed MegaFlash (IIc memexp/Slinky connector + ROM replace); web-a2e (IIe Enhanced only, MIT, WASM); AppleWin (no IIc); MAME (`apple2c`/`apple2cp` + memexp); Virtual ][ (IIc but limited hooks) |
+| **Outcome** | web-a2e not a good fit for MegaFlash; recommend MAME as primary open integration target |
+| **Commit** | _(none — advisory only)_ |
+
 ## 2026-07-27 — tio console / XMODEM how-to doc
 
 | Field | Detail |
