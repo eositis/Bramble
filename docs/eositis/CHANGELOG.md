@@ -7,6 +7,12 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+_(none)_
+
+---
+
+## 2026-07-27 — `124252e` — add tio console and XMODEM upload guide
+
 | Change | Reason |
 |--------|--------|
 | Add `docs/eositis/TIO-CONSOLE.md`; link from README and USB-CONSOLE | Document tio attach, menu XMODEM (`Ctrl-T x`), and quit (`Ctrl-T q`) |
