@@ -398,7 +398,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Actions** | `-a2bus-bridge` TCP RPC; Lua plugin taps `$C0C0–$C0C3`; `run-megaflash-mame.sh`; docs; gitignore ROM |
 | **Tests** | `bramble_tests` 322/322; bridge smoke: Slinky `registers[2]=0xf0`, activation → ID `$96` |
 | **Outcome** | Bramble↔MegaFlash bus bridge ready; MAME not installed on this host (`brew install mame` + CHR/keyboard dumps needed for full GUI run) |
-| **Commit** | _(pending)_ |
+| **Commit** | `05a0fc0` — feat(a2bus): bridge MegaFlash slot I/O to MAME over TCP |
 
 <!--
 
