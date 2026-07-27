@@ -8,18 +8,12 @@ Link MAME’s Apple //c (rev 4, `apple2c4`) to MegaFlash running under Bramble. 
 2. **MegaFlash UF2/ELF:** default `../MegaFlash/pico/pico2_debug/megaflash.{uf2,elf}`
 3. **MegaFlash IIc ROM:** place `iic.bin` (32 KiB) at the repo root (gitignored)
 4. **MAME:** `brew install mame` (or set `MAME=/path/to/mame`)
-5. **Stock `apple2c4` CHR + keyboard dumps** under a rompath (MAME still needs `gfx1` / `keyboard`; only `maincpu` is replaced by `iic.bin`)
+5. **Stock `apple2c4` ROM set** (CHR, keyboard, speech, stock maincpu). On macOS with Ample, this is usually already at:
+   `~/Library/Application Support/Ample/roms` (`apple2c.zip`, `votrsc01a.zip`). The launcher uses that path by default.
 
-Example rompath layout after the launcher stages the ROM:
+The launcher does **not** replace `3410445b.256` on disk with `iic.bin` (wrong CRC fails ROM load). Instead the Lua plugin overlays `iic.bin` onto `:maincpu` after a clean stock load (`BRAMBLE_IIC_BIN`).
 
-```text
-roms/apple2c4/
-  3410445b.256          # copied from iic.bin
-  341-0265-a.chr        # charset (from your dump set)
-  342-0132-c.e12        # keyboard (from your dump set)
-```
-
-Set `MAME_ROMPATH` if your dumps live elsewhere (launcher still writes `3410445b.256` under `$MAME_ROMPATH/apple2c4/`).
+Set `MAME_ROMPATH` only if your dumps live elsewhere.
 
 ## Run (integrated)
 
@@ -45,9 +39,11 @@ What it does:
 | `MEGAFLASH_UF2` | `../MegaFlash/pico/pico2_debug/megaflash.uf2` | Guest firmware |
 | `MEGAFLASH_ELF` | sibling `.elf` | Resolves `registers` BSS address |
 | `IIC_BIN` | `./iic.bin` | MegaFlash-patched system ROM |
-| `MAME_ROMPATH` | `./roms` | MAME `-rompath` |
+| `MAME_ROMPATH` | Ample roms + `./roms` | MAME `-rompath` (override to force a single dir; on macOS use `;` between dirs) |
+| `AMPLE_ROMS` | `~/Library/Application Support/Ample/roms` | Default stock Apple II romset location |
+| `BRAMBLE_IIC_BIN` | set by launcher to `IIC_BIN` | Path Lua uses to overlay MegaFlash ROM |
 | `MAME` | `mame` | Emulator binary |
-| `TIMEOUT` | `0` (none) | Bramble `-timeout` seconds |
+| `TIMEOUT` | unset (none) | Bramble `-timeout` seconds |
 
 ## Protocol (Bramble `-a2bus-bridge`)
 
@@ -71,7 +67,7 @@ Firmware boots in **Slinky** mode (`registers[2] == 0xf0`). MegaFlash ROM (or th
 2. In MAME with `iic.bin`, boot far enough for MegaFlash cold-start / activation.
 3. `$C0C3` should show MegaFlash ID behavior (`$96` / `$69` alternating on successive reads).
 
-CRC warnings for `3410445b.256` are expected when using MegaFlash’s patched ROM.
+CRC warnings are avoided: stock `3410445b.256` stays on disk; MegaFlash `iic.bin` is applied in-process by the plugin.
 
 ## Files
 

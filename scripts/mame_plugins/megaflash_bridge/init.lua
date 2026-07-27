@@ -2,10 +2,12 @@
 -- Forward Apple //c memexp soft-switches ($C0C0-$C0C3) to Bramble's
 -- MegaFlash a2bus TCP bridge. Keep MAME at default 128K so built-in Slinky
 -- stays inert; taps override the floating-bus values with MegaFlash bytes.
+-- Optionally overlay MegaFlash iic.bin onto :maincpu after reset (CRC-clean stock
+-- dump stays on disk for MAME's ROM loader).
 
 local exports = {
 	name = "megaflash_bridge",
-	version = "0.1.0",
+	version = "0.1.1",
 	description = "Bramble MegaFlash $C0C0-$C0C3 TCP bridge",
 	license = "BSD-3-Clause",
 	author = { name = "eositis" }
@@ -19,6 +21,37 @@ local function getenv_port()
 		return tonumber(p)
 	end
 	return 19765
+end
+
+local function load_iic_rom()
+	local path = os.getenv("BRAMBLE_IIC_BIN")
+	if not path or path == "" then
+		return
+	end
+
+	local f = io.open(path, "rb")
+	if not f then
+		emu.print_error(string.format("megaflash_bridge: cannot open IIC_BIN %s", path))
+		return
+	end
+	local data = f:read("*a")
+	f:close()
+	if not data or #data < 0x8000 then
+		emu.print_error(string.format("megaflash_bridge: IIC_BIN too small (%s, %d bytes)",
+			path, data and #data or 0))
+		return
+	end
+
+	local region = manager.machine.memory.regions[":maincpu"]
+	if not region then
+		emu.print_error("megaflash_bridge: :maincpu region missing")
+		return
+	end
+
+	for i = 0, 0x7fff do
+		region:write_u8(i, data:byte(i + 1))
+	end
+	emu.print_info(string.format("megaflash_bridge: overlaid %s onto :maincpu (32768 bytes)", path))
 end
 
 local function open_bridge()
@@ -62,7 +95,6 @@ end
 function plugin.startplugin()
 	local sock = nil
 	local taps = {}
-	local reset_sub, stop_sub
 
 	local function install_taps()
 		local cpu = manager.machine.devices[":maincpu"]
@@ -75,6 +107,8 @@ function plugin.startplugin()
 			emu.print_error("megaflash_bridge: program space missing")
 			return
 		end
+
+		load_iic_rom()
 
 		if not sock then
 			sock = open_bridge()
@@ -111,11 +145,11 @@ function plugin.startplugin()
 		emu.print_info("megaflash_bridge: taps installed on $C0C0-$C0C3")
 	end
 
-	reset_sub = emu.add_machine_reset_notifier(function()
+	emu.add_machine_reset_notifier(function()
 		install_taps()
 	end)
 
-	stop_sub = emu.add_machine_stop_notifier(function()
+	emu.add_machine_stop_notifier(function()
 		taps = {}
 		if sock then
 			sock:close()
