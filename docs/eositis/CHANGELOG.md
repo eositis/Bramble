@@ -11,7 +11,7 @@ _(none)_
 
 ---
 
-## 2026-07-27 — MAME MegaFlash bus bridge
+## 2026-07-27 — `05a0fc0` — MAME MegaFlash bus bridge
 
 | Change | Reason |
 |--------|--------|
