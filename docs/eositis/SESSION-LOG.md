@@ -345,6 +345,15 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Tests** | `make -C build bramble bramble_tests`; `./build/bramble_tests` |
 | **Commit** | `8b6f6de` — docs(eositis): apply PROJECT-RULES changelog and session housekeeping |
 
+## 2026-07-27 — blank tio after MegaFlash UF2 rebuild
+
+| Field | Detail |
+|-------|--------|
+| **Request** | No output on tio USB console; boot log stopped after CDC/BSS init |
+| **Actions** | Rebuilt `megaflash.uf2` shifted symbols (e.g. UserTerminal `0x10005ad0`→`0x10005b00`, BSS size 378036). Updated Bramble-only hook addresses in `src/usb.c`. Fixed macOS PTY: close slave FD after openpty so external clients can read master TX. Did not modify MegaFlash sources |
+| **Tests** | `bramble_tests` 322/322; PTY shows `Please Select:`; 8KB XMODEM upload OK |
+| **Commit** | _(pending)_ |
+
 ## 2026-06-08 — XMODEM broke after 8KB read-ahead throttle
 
 | Field | Detail |
