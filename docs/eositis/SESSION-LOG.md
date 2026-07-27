@@ -400,6 +400,15 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Outcome** | Bramble↔MegaFlash bus bridge ready; MAME not installed on this host (`brew install mame` + CHR/keyboard dumps needed for full GUI run) |
 | **Commit** | `05a0fc0` — feat(a2bus): bridge MegaFlash slot I/O to MAME over TCP |
 
+## 2026-07-27 — Fix MAME rompath / iic.bin overlay
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Launcher failed: missing CHR/keyboard/`sc01a`, wrong checksum on staged `iic.bin` |
+| **Actions** | Default rompath to Ample (`apple2c.zip` + `votrsc01a.zip`); `;` separator on macOS; Lua overlays `iic.bin`; preflight `-verifyroms` |
+| **Outcome** | `apple2c4` romset verifies good against Ample path |
+| **Commit** | `98be297` — fix(mame): use Ample romset and overlay iic.bin in Lua |
+
 <!--
 
 | Field | Detail |

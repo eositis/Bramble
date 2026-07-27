@@ -7,6 +7,12 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+_(none)_
+
+---
+
+## 2026-07-27 — `98be297` — fix MAME rompath / iic overlay
+
 | Change | Reason |
 |--------|--------|
 | Launcher uses Ample rompath + Lua `iic.bin` overlay (no on-disk CRC replace) | Missing CHR/keyboard/`sc01a`; wrong `3410445b.256` CRC aborted MAME |
