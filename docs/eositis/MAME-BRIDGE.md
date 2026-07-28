@@ -35,6 +35,8 @@ The launcher sets `-pluginspath` to `scripts/mame_plugins` **plus** the stock MA
 
 The Lua plugin must open the bridge socket with **READ|WRITE only** (no CREATE). With CREATE, MAME tries to listen on the same port if connect fails and hits `Address already in use` while Bramble holds the port — MegaFlash then appears missing.
 
+Bramble must keep running for the whole MAME session: with `-a2bus-bridge` the usual 1B-instruction safety exit is disabled (same idea as stdin/GDB interactive mode). If you see `Instruction limit reached (1B)` then MegaFlash dies under MAME.
+
 ## Environment
 
 | Variable | Default | Meaning |

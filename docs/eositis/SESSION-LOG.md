@@ -446,6 +446,15 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Actions** | Client-only open + retry; append stock plugins; drop dead TCP clients; validated MAGIC→GETDEVINFO→`$88 $74` under MAME |
 | **Commit** | `6caa058` — fix(mame): connect MegaFlash bridge as TCP client |
 
+## 2026-07-28 — MegaFlash still not found (1B instr exit)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Interactive MAME still reports MegaFlash not found; log shows connect then `Instruction limit reached (1B)` |
+| **Cause** | Without stdin/GDB, Bramble exits after 1B guest steps and tears down the a2bus bridge while MAME is still running |
+| **Actions** | Skip 1B limit when `a2bus_bridge_active()`; plugin v0.1.5 installs taps via periodic if reset missed; validated MAGIC→`$88 $74` and 20s post-BusLoop survival |
+| **Commit** | _(pending)_ |
+
 <!--
 
 | Field | Detail |

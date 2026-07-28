@@ -1372,8 +1372,8 @@ skip_fuse:
             /* Timeout and semihosting */
             if (timeout_expired || semihost_exit_requested) break;
 
-            /* Safety limit */
-            if (!stdin_enabled && step_count > 1000000000) {
+            /* Safety limit (skip when interactive I/O keeps the guest alive) */
+            if (!stdin_enabled && !a2bus_bridge_active() && step_count > 1000000000) {
                 fprintf(stderr, "[Warning] Instruction limit reached (1B)\n");
                 break;
             }
@@ -1471,8 +1471,8 @@ skip_fuse:
             /* Semihosting exit */
             if (semihost_exit_requested) break;
 
-            /* Safety limit */
-            if (!stdin_enabled && step_count > 1000000) {
+            /* Safety limit (skip for a2bus bridge — MAME session needs indefinite run) */
+            if (!stdin_enabled && !a2bus_bridge_active() && step_count > 1000000) {
                 /* Approximate: each poll ~= 1000 instructions */
                 instruction_count = cores[CORE0].step_count + cores[CORE1].step_count;
                 if (instruction_count > 1000000000) {
@@ -1612,9 +1612,10 @@ skip_fuse:
             /* Semihosting exit */
             if (semihost_exit_requested) break;
 
-            /* Safety limit: prevent infinite loops (disabled in interactive/GDB mode) */
+            /* Safety limit: prevent infinite loops (disabled for interactive I/O) */
             instruction_count = cores[CORE0].step_count + cores[CORE1].step_count;
-            if (!gdb_enabled && !stdin_enabled && instruction_count > 1000000000) {
+            if (!gdb_enabled && !stdin_enabled && !a2bus_bridge_active() &&
+                instruction_count > 1000000000) {
                 fprintf(stderr,"[Warning] Instruction limit reached (1B)\n");
                 break;
             }

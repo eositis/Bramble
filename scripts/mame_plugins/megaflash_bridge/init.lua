@@ -9,7 +9,7 @@
 
 local exports = {
 	name = "megaflash_bridge",
-	version = "0.1.4",
+	version = "0.1.5",
 	description = "Bramble MegaFlash $C0C0-$C0C3 TCP bridge",
 	license = "BSD-3-Clause",
 	author = { name = "eositis" }
@@ -107,6 +107,7 @@ function plugin.startplugin()
 	local taps = {}
 	local tap_count = 0
 	local connect_tries = 0
+	local taps_ready = false
 
 	local function ensure_sock()
 		if sock then
@@ -139,11 +140,11 @@ function plugin.startplugin()
 	local function install_taps()
 		local cpu = manager.machine.devices[":maincpu"]
 		if not cpu then
-			return
+			return false
 		end
 		local space = cpu.spaces["program"]
 		if not space then
-			return
+			return false
 		end
 
 		load_iic_rom()
@@ -195,22 +196,28 @@ function plugin.startplugin()
 				end
 			end)
 
+		taps_ready = true
 		logf("taps installed sock=%s", sock and "up" or "down (will retry)")
+		return true
 	end
 
 	emu.add_machine_reset_notifier(function()
+		taps_ready = false
 		install_taps()
 	end)
 
-	-- Retry connect if reset-time open lost the race with Bramble.
+	-- Reset may already have fired before the plugin registered; also reconnect.
 	emu.register_periodic(function()
-		if not sock then
+		if not taps_ready then
+			install_taps()
+		elseif not sock then
 			ensure_sock()
 		end
 	end)
 
 	emu.add_machine_stop_notifier(function()
 		logf("stop after %d taps", tap_count)
+		taps_ready = false
 		taps = {}
 		if sock then
 			sock:close()

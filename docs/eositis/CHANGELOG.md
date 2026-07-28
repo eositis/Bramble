@@ -11,6 +11,15 @@ _(none)_
 
 ---
 
+## 2026-07-28 — pending — keep a2bus bridge alive for MAME
+
+| Change | Reason |
+|--------|--------|
+| Skip 1B instruction safety exit when `-a2bus-bridge` active | Bramble exited mid-MAME session; MegaFlash looked missing |
+| Plugin retries tap install from periodic callback (v0.1.5) | Reset notifier can miss first reset; log showed connect without taps |
+
+---
+
 ## 2026-07-28 — `6caa058` — MAME bridge TCP client
 
 | Change | Reason |
