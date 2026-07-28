@@ -11,7 +11,7 @@ _(none)_
 
 ---
 
-## 2026-07-28 — (pending) — host-side DATA/PARAM for LOAD_CPANEL
+## 2026-07-28 — `233ebe4` — host-side DATA/PARAM for LOAD_CPANEL
 
 | Change | Reason |
 |--------|--------|
