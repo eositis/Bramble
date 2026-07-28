@@ -11,7 +11,7 @@ _(none)_
 
 ---
 
-## 2026-07-28 — (pending) — TranslateUnitNum veneer for A2.DESKTOP boot
+## 2026-07-28 —  — TranslateUnitNum veneer for A2.DESKTOP boot
 
 | Change | Reason |
 |--------|--------|
