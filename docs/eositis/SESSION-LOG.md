@@ -499,7 +499,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Request** | MAME should boot A2Desktop from MegaFlash flash volume 1; still likely broken |
 | **Cause** | `flash/spi-flash1.bin` unit 1 already has `A2.DESKTOP`; `GETVOLINFO`/`GetMediumType` hit flash `__TranslateUnitNum_veneer` → Thumb HardFault (`PC=0x5F200010`), leaving BUSY and breaking SmartPort boot naming/status |
 | **Actions** | Rewrite only that veneer to SRAM `TranslateUnitNum`; validated GETVOLINFO name `A2.DESKTOP`, GETDIB, 32+ READBLOCK match flash; document no MAME HD — boot via SmartPort |
-| **Commit** |  — fix(mame): rewrite TranslateUnitNum veneer so flash volume 1 can boot |
+| **Commit** | `229d66f` — fix(mame): rewrite TranslateUnitNum veneer so flash volume 1 can boot |
 
 <!--
 
