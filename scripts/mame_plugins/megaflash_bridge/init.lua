@@ -24,18 +24,28 @@ local function getenv_port()
 end
 
 local function load_iic_rom()
+	-- Prefer staged maincpu (already MegaFlash). Optional re-overlay from BRAMBLE_IIC_BIN.
 	local path = os.getenv("BRAMBLE_IIC_BIN")
 	if not path or path == "" then
 		return
 	end
 
+	local data = nil
 	local f = io.open(path, "rb")
-	if not f then
-		emu.print_error(string.format("megaflash_bridge: cannot open IIC_BIN %s", path))
-		return
+	if f then
+		data = f:read("*a")
+		f:close()
+	else
+		-- Fallback when io.* is sandboxed
+		local ef = emu.file("", 1) -- OPEN_FLAG_READ
+		if ef:open(path) then
+			emu.print_error(string.format("megaflash_bridge: cannot open IIC_BIN %s", path))
+			return
+		end
+		data = ef:read(0x8000)
+		ef:close()
 	end
-	local data = f:read("*a")
-	f:close()
+
 	if not data or #data < 0x8000 then
 		emu.print_error(string.format("megaflash_bridge: IIC_BIN too small (%s, %d bytes)",
 			path, data and #data or 0))
@@ -51,7 +61,13 @@ local function load_iic_rom()
 	for i = 0, 0x7fff do
 		region:write_u8(i, data:byte(i + 1))
 	end
-	emu.print_info(string.format("megaflash_bridge: overlaid %s onto :maincpu (32768 bytes)", path))
+
+	-- Sanity: MegaFlash slot-4 CN00 patch differs from stock at $C400 image offset 0x400
+	local b0 = region:read_u8(0x400)
+	local b8 = region:read_u8(0x408)
+	emu.print_info(string.format(
+		"megaflash_bridge: overlaid %s (:maincpu[0x400]=0x%02X [0x408]=0x%02X; MegaFlash expects 0xA9 at 0x408)",
+		path, b0, b8))
 end
 
 local function open_bridge()

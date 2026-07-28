@@ -7,7 +7,9 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
-_(none)_
+| Change | Reason |
+|--------|--------|
+| Stage MegaFlash `iic.bin` as sole `3410445b.256`; keep Ample off rompath | MAME preferred CRC-matching stock ROM, so MegaFlash never ran |
 
 ---
 

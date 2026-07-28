@@ -8,12 +8,12 @@ Link MAME’s Apple //c (rev 4, `apple2c4`) to MegaFlash running under Bramble. 
 2. **MegaFlash UF2/ELF:** default `../MegaFlash/pico/pico2_debug/megaflash.{uf2,elf}`
 3. **MegaFlash IIc ROM:** place `iic.bin` (32 KiB) at the repo root (gitignored)
 4. **MAME:** `brew install mame` (or set `MAME=/path/to/mame`)
-5. **Stock `apple2c4` ROM set** (CHR, keyboard, speech, stock maincpu). On macOS with Ample, this is usually already at:
-   `~/Library/Application Support/Ample/roms` (`apple2c.zip`, `votrsc01a.zip`). The launcher uses that path by default.
+5. **Stock companion dumps** (CHR, keyboard, Votrax `sc01a.bin`). On macOS with Ample, the launcher copies them from
+   `~/Library/Application Support/Ample/roms` into `./roms/` and stages **`iic.bin` as `3410445b.256`**.
 
-The launcher does **not** replace `3410445b.256` on disk with `iic.bin` (wrong CRC fails ROM load). Instead the Lua plugin overlays `iic.bin` onto `:maincpu` after a clean stock load (`BRAMBLE_IIC_BIN`).
+**Important:** rompath is **local `./roms` only**. If Ample stays on the rompath, MAME prefers the CRC-matching stock `3410445b.256` and silently ignores MegaFlash’s ROM — you get stock Slinky (“unable to start from memory card”) and no MegaFlash boot menu.
 
-Set `MAME_ROMPATH` only if your dumps live elsewhere.
+Expect a **WRONG CHECKSUM** warning for `3410445b.256`; that means MegaFlash ROM is loaded.
 
 ## Run (integrated)
 
@@ -39,9 +39,9 @@ What it does:
 | `MEGAFLASH_UF2` | `../MegaFlash/pico/pico2_debug/megaflash.uf2` | Guest firmware |
 | `MEGAFLASH_ELF` | sibling `.elf` | Resolves `registers` BSS address |
 | `IIC_BIN` | `./iic.bin` | MegaFlash-patched system ROM |
-| `MAME_ROMPATH` | Ample roms + `./roms` | MAME `-rompath` (override to force a single dir; on macOS use `;` between dirs) |
-| `AMPLE_ROMS` | `~/Library/Application Support/Ample/roms` | Default stock Apple II romset location |
-| `BRAMBLE_IIC_BIN` | set by launcher to `IIC_BIN` | Path Lua uses to overlay MegaFlash ROM |
+| `MAME_ROMPATH` | `./roms` (staged) | Must **not** include Ample if you want MegaFlash maincpu |
+| `AMPLE_ROMS` | `~/Library/Application Support/Ample/roms` | Source for CHR/keyboard/speech staging only |
+| `BRAMBLE_IIC_BIN` | set by launcher to `IIC_BIN` | Optional Lua re-overlay path |
 | `MAME` | `mame` | Emulator binary |
 | `TIMEOUT` | unset (none) | Bramble `-timeout` seconds |
 
@@ -67,7 +67,7 @@ Firmware boots in **Slinky** mode (`registers[2] == 0xf0`). MegaFlash ROM (or th
 2. In MAME with `iic.bin`, boot far enough for MegaFlash cold-start / activation.
 3. `$C0C3` should show MegaFlash ID behavior (`$96` / `$69` alternating on successive reads).
 
-CRC warnings are avoided: stock `3410445b.256` stays on disk; MegaFlash `iic.bin` is applied in-process by the plugin.
+CRC: expect **WRONG CHECKSUM** for `3410445b.256` when MegaFlash `iic.bin` is staged. If verifyroms is “good” with no warning, MAME is still using stock ROM4.
 
 ## Files
 
