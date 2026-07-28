@@ -7,6 +7,12 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+_(none)_
+
+---
+
+## 2026-07-28 — `4e5a21f` — restore boot after unsafe F85F decode
+
 | Change | Reason |
 |--------|--------|
 | Revert Thumb-2 global `F85F` literal handler; keep a2bus rewrite of `__CheckWriteEnableKey_veneer` only | Broad LDR-literal decode parked MegaFlash in bootrom (~50 steps / no MAME); option 7 still needs the targeted veneer rewrite |

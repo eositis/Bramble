@@ -528,7 +528,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | Global Thumb-2 `F85F`/`F8DF` literal handler (and briefly `upper_hi>>8`) broke early boot |
 | **Actions** | Revert thumb32 changes; keep targeted `__CheckWriteEnableKey_veneer` rewrite + NSC mute + RTC seed on calendar read |
 | **Validate** | BusLoopSlinky OK; core1 launches |
-| **Commit** | _(pending)_ |
+| **Commit** | `4e5a21f` — fix(mame): restore MegaFlash boot; keep CheckWriteEnableKey veneer hook |
 
 <!--
 
