@@ -11,7 +11,7 @@ _(none)_
 
 ---
 
-## 2026-07-28 — _(pending)_ — NSC mute + option 7 veneer HardFault
+## 2026-07-28 — `c0e80a1` — NSC mute + option 7 veneer HardFault
 
 | Change | Reason |
 |--------|--------|
