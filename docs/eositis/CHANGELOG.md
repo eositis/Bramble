@@ -11,7 +11,7 @@ _(none)_
 
 ---
 
-## 2026-07-28 — pending — a2bus SPI flash stubs for MAME
+## 2026-07-28 — `79f0ca3` — a2bus SPI flash stubs for MAME
 
 | Change | Reason |
 |--------|--------|

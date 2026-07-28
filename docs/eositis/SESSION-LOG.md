@@ -462,7 +462,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Request** | PR#4 “MegaFlash Not Found”; control panel blank hang; tap log shows `$88 $74` then status `$41`/`$45` |
 | **Cause** | `$41`=`MFERR_NOFLASH`, `$45`=`MFERR_INVALIDUNIT` — SPI flash/config stubs only ran under `-usb-console`, so unit count was 0 after COLDSTART |
 | **Actions** | Surgical a2bus flash stubs (InitFlash/configs/blocks/JEDEC) without full USB hook set; validated GETDEVSTATUS → 4 units, no error |
-| **Commit** | _(pending)_ |
+| **Commit** | `79f0ca3` — fix(mame): stub SPI flash units on a2bus bridge path |
 
 <!--
 
