@@ -444,7 +444,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Request** | Still not found after READ-byte fix |
 | **Cause** | Plugin used `emu.file` flags 7 (CREATE); connect fallback listened on 19765 → EADDRINUSE; taps had no socket. Also pluginspath replaced stock plugins. |
 | **Actions** | Client-only open + retry; append stock plugins; drop dead TCP clients; validated MAGIC→GETDEVINFO→`$88 $74` under MAME |
-| **Commit** | _(pending)_ |
+| **Commit** | `6caa058` — fix(mame): connect MegaFlash bridge as TCP client |
 
 <!--
 
