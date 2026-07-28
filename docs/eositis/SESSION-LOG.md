@@ -480,7 +480,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Request** | PR#4 locks for hours; hard to kill; log shows READBLOCK status `$80` then HardFault at `0x1000DF80` (`_exit`) |
 | **Cause** | `DoReadBlock` BL to RAM `ReadBlock`; veneer-only stub missed; native SPI/DMA hung BUSY then aborted |
 | **Actions** | Stub RAM ReadBlock/WriteBlock; cut pump_steps to 65536; validated READBLOCK status 0 + ProDOS block `01 38…` |
-| **Commit** | _(pending)_ |
+| **Commit** | `3f26e1a` — fix(mame): stub RAM ReadBlock so PR#4 does not hang BUSY |
 
 <!--
 

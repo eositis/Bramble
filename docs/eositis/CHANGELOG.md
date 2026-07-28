@@ -11,7 +11,7 @@ _(none)_
 
 ---
 
-## 2026-07-28 — pending — a2bus ReadBlock + lower RPC pump
+## 2026-07-28 — `3f26e1a` — a2bus ReadBlock + lower RPC pump
 
 | Change | Reason |
 |--------|--------|
