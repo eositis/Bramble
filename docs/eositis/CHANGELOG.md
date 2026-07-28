@@ -7,6 +7,12 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+_(none)_
+
+---
+
+## 2026-07-28 — `61993d3` — force MegaFlash maincpu in MAME
+
 | Change | Reason |
 |--------|--------|
 | Stage MegaFlash `iic.bin` as sole `3410445b.256`; keep Ample off rompath | MAME preferred CRC-matching stock ROM, so MegaFlash never ran |
