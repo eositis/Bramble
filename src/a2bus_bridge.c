@@ -414,22 +414,23 @@ static void pump_guest(void)
         br.pump(br.pump_steps);
         return;
     }
-    /* Core1 only. Stop when BUSY clears after a command. */
-    uint8_t status0 = peek_reg(0);
-    int wait_busy = (status0 & MF_BUSYFLAG) != 0;
+    /*
+     * Core1 only. After a CMD write, BusLoop sets BUSY then clears it when
+     * DoCommand returns. Do not stop early if BUSY was never observed — a short
+     * spin can finish before core1 enters DoCommand, so the Apple reads PARAM
+     * while WE_KEY is already zeroed and treats configbyte1 as 0 (disables
+     * slot‑4 autoboot). Only exit early after seeing BUSY then idle.
+     */
+    int seen_busy = (peek_reg(0) & MF_BUSYFLAG) != 0;
     for (unsigned i = 0; i < br.pump_steps; i++) {
         if (!cpu_is_halted_core(CORE1)) {
             cpu_step_core(CORE1);
         }
         pio_step();
         uint8_t s = peek_reg(0);
-        if (wait_busy) {
-            if ((s & MF_BUSYFLAG) == 0) {
-                break;
-            }
-        } else if ((s & MF_BUSYFLAG) != 0) {
-            wait_busy = 1;
-        } else if (i >= 512u) {
+        if ((s & MF_BUSYFLAG) != 0) {
+            seen_busy = 1;
+        } else if (seen_busy) {
             break;
         }
     }

@@ -11,6 +11,15 @@ _(none)_
 
 ---
 
+## 2026-07-28 — (pending) — COLDSTART BUSY pump + AUTOBOOT config
+
+| Change | Reason |
+|--------|--------|
+| a2bus pump waits for BUSY assert→clear (no 512-step early exit) | Premature CMD return → Apple read `configbyte1=0`, skipped slot 4 boot; option 7 LOAD_CPANEL raced the same way |
+| Stub `GetConfigByte1`/`GetConfigByte2` on a2bus; ensure AUTOBOOT default | Belt-and-suspenders if configBuffer was left zero |
+
+---
+
 ## 2026-07-28 — `229d66f` — TranslateUnitNum veneer for A2.DESKTOP boot
 
 | Change | Reason |

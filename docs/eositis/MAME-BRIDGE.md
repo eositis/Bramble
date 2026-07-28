@@ -43,6 +43,8 @@ MAME is started **without** a floppy/hard-disk image. The //c is expected to boo
 
 Flash-resident `ldr.w pc` veneers to SRAM are Thumb-broken in Bramble; the a2bus path rewrites `__TranslateUnitNum_veneer` so `GETVOLINFO` / SmartPort medium-type work (volume name visible, boot can proceed).
 
+`CMD_COLDSTART` must finish before the Apple reads `configbyte1`. The bridge pump waits for a full STATUS **BUSY→idle** cycle (no early exit if BUSY was never seen). A premature return left `configbyte1=0`, which clears `AUTOBOOTFLAG` and makes the IIc firmware skip slot 4 (`NEXTBOOTSLOT=$C6`).
+
 ## Environment
 
 | Variable | Default | Meaning |

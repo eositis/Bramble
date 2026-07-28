@@ -787,6 +787,8 @@ static void usb_log_cdc_active_once(void) {
 #define USB_GUEST_INIT_SPI_CALL         0x100002e2u /* main: bl InitSpi */
 #define USB_GUEST_U2_INIT_CALL          0x10000328u /* main: bl U2_Init */
 #define USB_GUEST_LOAD_ALL_CONFIGS      0x10005354u /* LoadAllConfigs */
+#define USB_GUEST_GET_CONFIG_BYTE1      0x100054b8u /* GetConfigByte1 */
+#define USB_GUEST_GET_CONFIG_BYTE2      0x100054d4u /* GetConfigByte2 */
 #define USB_GUEST_SAVE_CONFIGS_CALL     0x10000348u /* main: bl SaveConfigs */
 #define USB_GUEST_IS_APPLE_CONNECTED_CALL  0x10000338u /* main: bl IsAppleConnected */
 #define USB_GUEST_IS_APPLE_CONNECTED_CALL2 0x10000408u
@@ -1555,12 +1557,29 @@ void usb_guest_spi_flash_close(void) {
 
 static void usb_guest_init_default_config(void) {
     mem_write32(USB_GUEST_CONFIG_BUFFER, USB_GUEST_CONFIG_MAGIC);
+    /* DEFCFGBYTE1 = AUTOBOOTFLAG — required for IIc slot‑4 MegaFlash boot. */
     mem_write8(USB_GUEST_CONFIG_BUFFER + 4u, 0x40u);
     mem_write8(USB_GUEST_CONFIG_BUFFER + 5u, 0x00u);
     mem_write8(USB_GUEST_CONFIG_BUFFER + 6u, 0x01u);
     mem_write8(USB_GUEST_CONFIG_BUFFER + 7u, 0x0eu);
     mem_write8(USB_GUEST_CONFIG_BUFFER + USB_GUEST_CONFIG_FD_FLAGS_OFF, 0xffu);
     mem_write8(USB_GUEST_SETTINGS_NOT_FLASH, 0u);
+}
+
+static void usb_guest_stub_get_config_byte1(void) {
+    /* AUTOBOOT|ROMDISK — match LoadAllConfigs stub defaults. */
+    uint8_t b = mem_read8(USB_GUEST_CONFIG_BUFFER + 4u);
+    if (b == 0u) {
+        b = 0x44u; /* AUTOBOOTFLAG|ROMDISKFLAG */
+        mem_write8(USB_GUEST_CONFIG_BUFFER + 4u, b);
+    }
+    cpu.r[0] = b;
+    cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+}
+
+static void usb_guest_stub_get_config_byte2(void) {
+    cpu.r[0] = mem_read8(USB_GUEST_CONFIG_BUFFER + 5u);
+    cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
 }
 
 static void usb_guest_init_flash_stub(void) {
@@ -1741,6 +1760,14 @@ static int a2bus_spi_flash_hooks(void) {
         mem_write8(USB_GUEST_CONFIG_BUFFER + 4u,
                    mem_read8(USB_GUEST_CONFIG_BUFFER + 4u) | 0x04u);
         cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return 1;
+    }
+    if (pc == USB_GUEST_GET_CONFIG_BYTE1) {
+        usb_guest_stub_get_config_byte1();
+        return 1;
+    }
+    if (pc == USB_GUEST_GET_CONFIG_BYTE2) {
+        usb_guest_stub_get_config_byte2();
         return 1;
     }
     if (pc == USB_GUEST_INIT_FLASH) {
