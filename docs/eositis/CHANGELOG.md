@@ -7,6 +7,12 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+_(none)_
+
+---
+
+## 2026-07-28 — `aec4569` — a2bus READ pre-cycle byte
+
 | Change | Reason |
 |--------|--------|
 | a2bus READ RPC returns pre-cycle register shadow | Post-pump peek skipped SIGNATURE1 (`$88`); `chkmegaflashex` / control panel reported MegaFlash not found |

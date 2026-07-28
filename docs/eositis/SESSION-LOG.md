@@ -435,7 +435,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Request** | PR#4 / control panel still report MegaFlash not found after `661b49e` |
 | **Cause** | Bridge READ returned post-BusLoop shadow; PARAM auto-advance made first `$C0C1` read return `$74` instead of `$88` |
 | **Actions** | Peek register before inject+pump on READ; validate `chkmegaflashex`-style sig `0x88 0x74` |
-| **Commit** |  — fix(megaflash): return pre-cycle bus byte on a2bus READ |
+| **Commit** | `aec4569` — fix(megaflash): return pre-cycle bus byte on a2bus READ |
 
 <!--
 
