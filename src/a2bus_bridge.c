@@ -346,9 +346,13 @@ static void handle_one(void)
             br.client_fd = -1;
             return;
         }
+        /* Hardware presents the *current* shadow byte on the bus, then BusLoop
+         * side-effects (PARAM/DATA advance, ID toggle). Peek first so MAME/Apple
+         * sees SIGNATURE1 ($88) on the first $C0C1 read after GETDEVINFO — peek
+         * after pump returned the *next* byte and broke detect. */
+        data = peek_reg(nibble);
         a2bus_inject_read(nibble & 0xFu);
         pump_guest();
-        data = peek_reg(nibble);
         break;
     }
     case A2BUS_BRIDGE_OP_WRITE: {

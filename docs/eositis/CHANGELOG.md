@@ -5,6 +5,14 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## Unreleased
+
+| Change | Reason |
+|--------|--------|
+| a2bus READ RPC returns pre-cycle register shadow | Post-pump peek skipped SIGNATURE1 (`$88`); `chkmegaflashex` / control panel reported MegaFlash not found |
+
+---
+
 ## 2026-07-28 — `661b49e` — MegaFlash detect over a2bus bridge
 
 | Change | Reason |

@@ -53,7 +53,7 @@ Client (MAME plugin) → server (Bramble):
 |----|-------|---------|
 | `0x00` | op | PING |
 | `0x01` | op | PHI0 pulse |
-| `0x02` | op, nibble | Inject READ `$C0C0+nibble`, return register shadow |
+| `0x02` | op, nibble | Inject READ `$C0C0+nibble`; return **pre-cycle** register shadow (bus byte Apple sees) |
 | `0x03` | op, nibble, data | Inject WRITE |
 | `0x04` | op, nibble | PEEK register shadow (no bus inject) |
 

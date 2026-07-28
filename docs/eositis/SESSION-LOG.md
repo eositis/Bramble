@@ -428,6 +428,15 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validation** | MAGIC→ID xor `$FF`; `CMD_GETDEVINFO` status `0`; param signature `0x88 0x74` |
 | **Commit** | `661b49e` — fix(megaflash): make a2bus CMD_GETDEVINFO and detect work |
 
+## 2026-07-28 — MegaFlash still not found (read-byte off-by-one)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | PR#4 / control panel still report MegaFlash not found after `661b49e` |
+| **Cause** | Bridge READ returned post-BusLoop shadow; PARAM auto-advance made first `$C0C1` read return `$74` instead of `$88` |
+| **Actions** | Peek register before inject+pump on READ; validate `chkmegaflashex`-style sig `0x88 0x74` |
+| **Commit** | _(pending)_ |
+
 <!--
 
 | Field | Detail |
