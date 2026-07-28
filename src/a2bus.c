@@ -2,7 +2,6 @@
 #include "gpio.h"
 #include "pio.h"
 #include "usb.h"
-#include <stdio.h>
 
 static void a2bus_set_bus_pins(uint32_t busdata)
 {
@@ -19,10 +18,15 @@ void a2bus_gpio_idle(void)
     a2bus_set_bus_pins(0);
 }
 
-/* After a synthetic bus cycle, nudge listener SM0 RX so BusLoop sees FIFO data. */
+/* Deliver one 13-bit listener word: A3-A0 + R/nW + D7-D0.
+ * Must use the full 13 bits — masking to 5 bits dropped write data so every
+ * CMD write looked like CMD_RESETBOTHPTRS (0) and CMD_GETDEVINFO never ran.
+ *
+ * Do not also run a nDEVSEL sample cycle: SM0 push noblock would enqueue a
+ * second word and leftover FIFO entries later decode as MFERR_UNKNOWNCMD. */
 static void a2bus_notify_listener(uint32_t busdata)
 {
-    pio_inject_rx(0, 0, busdata & 0x1Fu);
+    pio_inject_rx(0, 0, busdata & 0x1FFFu);
 }
 
 void a2bus_phi0_pulse_for_detect(void)
@@ -43,21 +47,13 @@ void a2bus_phi0_pulse_for_detect(void)
 
 static void a2bus_run_slot_cycle(uint32_t busdata)
 {
-    /* a2buslistener: wait nDEVSEL low -> sample -> wait PHI0 low -> wait nDEVSEL high */
+    /* Keep nDEVSEL high so a2buslistener never GPIO-samples; inject exactly
+     * one FIFO word for BusLoop's GetAppleBusBlocking(). Drain first so
+     * boot/PHI noise leftovers cannot decode as bogus CMD writes. */
     gpio_set_input_pin(A2BUS_GPIO_NDEVSEL, 1);
     gpio_set_input_pin(A2BUS_GPIO_PHI0, 0);
-    a2bus_pio_burst(8);
-
     a2bus_set_bus_pins(busdata);
-    gpio_set_input_pin(A2BUS_GPIO_NDEVSEL, 0);
-    gpio_set_input_pin(A2BUS_GPIO_PHI0, 1);
-    a2bus_pio_burst(64);
-
-    gpio_set_input_pin(A2BUS_GPIO_PHI0, 0);
-    a2bus_pio_burst(32);
-
-    gpio_set_input_pin(A2BUS_GPIO_NDEVSEL, 1);
-    a2bus_pio_burst(32);
+    pio_drain_rx(0, 0);
     a2bus_notify_listener(busdata);
 }
 

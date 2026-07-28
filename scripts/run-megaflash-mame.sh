@@ -108,6 +108,11 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+SPI_FLASH_ARGS=()
+if [[ -z "${NO_SPI_FLASH:-}" ]]; then
+  SPI_FLASH_ARGS+=(-spi-flash1 -spi-flash2)
+fi
+
 echo "[mame] starting Bramble MegaFlash bridge on 127.0.0.1:$PORT"
 "$BRAMBLE" "$UF2" \
   -arch m33 \
@@ -115,6 +120,7 @@ echo "[mame] starting Bramble MegaFlash bridge on 127.0.0.1:$PORT"
   -cores 2 \
   -a2bus-bridge "$PORT" \
   -script "$STUB" \
+  "${SPI_FLASH_ARGS[@]}" \
   ${TIMEOUT:+-timeout "$TIMEOUT"} \
   "${REGS_ARGS[@]}" \
   "$@" &

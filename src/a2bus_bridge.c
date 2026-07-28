@@ -37,7 +37,7 @@ static a2bus_bridge_t br = {
     .handling = 0,
     .regs_addr = A2BUS_REGS_DEFAULT,
     .pump = NULL,
-    .pump_steps = 100000u,
+    .pump_steps = 500000u,
 };
 
 static void set_nonblock(int fd)
@@ -295,8 +295,13 @@ static void pump_guest(void)
     if (br.pump) {
         br.pump(br.pump_steps);
     } else {
+        /* Only step core1 (Apple BusLoop). Core0 sits in newlib printf/locale
+         * under MegaFlash debug builds; pumping it hits blx of a bad locale
+         * function pointer and HardFaults both cores, leaving STATUS BUSY. */
         for (unsigned i = 0; i < br.pump_steps; i++) {
-            dual_core_step();
+            if (!cpu_is_halted_core(CORE1)) {
+                cpu_step_core(CORE1);
+            }
             pio_step();
         }
     }

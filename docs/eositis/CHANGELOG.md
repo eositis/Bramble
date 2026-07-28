@@ -11,6 +11,16 @@ _(none)_
 
 ---
 
+## 2026-07-28 — MegaFlash detect over a2bus bridge
+
+| Change | Reason |
+|--------|--------|
+| Inject full 13-bit bus words (`0x1FFF`); inject-only (no nDEVSEL double-push); `pio_drain_rx` before inject | 5-bit mask made every CMD look like RESET; dual FIFO words left leftovers |
+| Do not decode unmatched `EE40`/`EE60` as DP shifted-reg | `gpio_clr_mask` in `DoCommand` was misread as `ORN` and set `r0=0xFFFFFFFF` → `MFERR_UNKNOWNCMD` |
+| a2bus veneer hook for `ldr.w pc,[pc]`; core1-only pump; early `core1launch`; SPI flash flags on MAME launcher | Keep BusLoop alive long enough for MAGIC → `CMD_GETDEVINFO` |
+
+---
+
 ## 2026-07-28 — `61993d3` — force MegaFlash maincpu in MAME
 
 | Change | Reason |

@@ -189,6 +189,7 @@ void     pio_step(void);
 
 /* Push a word into an SM RX FIFO (Apple-bus stub / listener simulation) */
 void     pio_inject_rx(int pio_num, int sm_num, uint32_t word);
+void     pio_drain_rx(int pio_num, int sm_num);
 
 /* Execute one PIO instruction on a specific SM */
 void     pio_sm_exec(int pio_num, int sm_num, uint16_t instr);

@@ -37,6 +37,7 @@
 #include "nvic.h"
 #include "devtools.h"
 #include "emulator.h"
+#include "a2bus_bridge.h"
 
 /*
  * TinyUSB device globals for MegaFlash pico2_debug (megaflash.uf2).
@@ -1936,7 +1937,22 @@ static void usb_guest_skip_get_device_info_string(void) {
 
 void usb_console_guest_stdio_hook(void) {
     int usb_mode = usb_console_bridge_mode();
+
     if (!guest_megaflash_hook_active()) {
+        /* MAME a2bus: Pico `ldr.w pc,[pc]` veneers (F85F F000) are misdecoded as
+         * reg-offset LDR and HardFault. Jump to the literal target instead. */
+        if (a2bus_bridge_active()) {
+            uint32_t pc = cpu.r[15] & ~1u;
+            if (pc >= 0x20000120u && pc < 0x20005174u) {
+                uint16_t hi = mem_read16(pc);
+                uint16_t lo = mem_read16(pc + 2u);
+                if (hi == 0xF85Fu && lo == 0xF000u) {
+                    uint32_t target = mem_read32(pc + 4u);
+                    cpu.r[15] = target & ~1u;
+                    return;
+                }
+            }
+        }
         return;
     }
 
@@ -2388,6 +2404,7 @@ void usb_console_guest_stdio_hook(void) {
         usb_guest_return_to_lr(cpu.r[0]);
         return;
     }
+    /* Skip newlib locale/wchar path under emu (broken Thumb BL / VFP spin). */
     if (pc == USB_GUEST_VFPRINTF_R &&
         (usb_mode || net_bridge_uart_active(0))) {
         usb_guest_return_to_lr(0);

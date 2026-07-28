@@ -1527,6 +1527,24 @@ skip_fuse:
                         eus = step_us;
                     }
                 }
+                /* MAME bridge: also advance on host time so core1launch is not
+                 * starved when guest init burns steps without TIMER0 progress. */
+                if (a2bus_bridge_active()) {
+                    static uint64_t a2bus_script_t0;
+                    static int a2bus_script_t0_set;
+                    struct timespec ts;
+                    clock_gettime(CLOCK_MONOTONIC, &ts);
+                    uint64_t now_us = (uint64_t)ts.tv_sec * 1000000ull +
+                                     (uint64_t)ts.tv_nsec / 1000ull;
+                    if (!a2bus_script_t0_set) {
+                        a2bus_script_t0 = now_us;
+                        a2bus_script_t0_set = 1;
+                    }
+                    uint32_t wall_us = (uint32_t)(now_us - a2bus_script_t0);
+                    if (wall_us > eus) {
+                        eus = wall_us;
+                    }
+                }
                 script_poll(eus);
             }
 

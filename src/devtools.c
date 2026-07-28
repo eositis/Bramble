@@ -642,10 +642,11 @@ void script_poll(uint32_t elapsed_us) {
         } else if (ev->type == 5) {
             a2bus_pio_burst((unsigned)ev->channel);
         } else if (ev->type == 6) {
-            /* MegaFlash defaults: core1Main@0x20000120, stack@0x20080800, VTOR@0x10000100 */
+            /* MegaFlash defaults: core1Main@0x20000120, stack@0x20080800;
+             * VTOR 0 = sio_force_core1_launch picks CORE0.vtor / ram_vector_table. */
             uint32_t entry = 0x20000120u;
             uint32_t sp = 0x20080800u;
-            uint32_t vtor = 0x10000100u;
+            uint32_t vtor = 0;
             if (ev->data_len > 0) {
                 unsigned e = 0, s = 0, v = 0;
                 int n = sscanf((char *)ev->data, "%x %x %x", &e, &s, &v);

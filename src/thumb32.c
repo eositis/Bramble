@@ -319,8 +319,8 @@ static int thumb32_pico_gpioc(uint16_t upper, uint16_t lower) {
     if (lo != 0x0010u && lo != 0x0014u) {
         return 0;
     }
-    unsigned rn = (unsigned)((lower >> 12) & 0xFu);
-    uint32_t mask = cpu.r[rn];
+    unsigned rt = (unsigned)((lower >> 12) & 0xFu);
+    uint32_t mask = cpu.r[rt];
     if (lo == 0x0014u) {
         if ((upper & 0xFFF0u) == 0xEE60u) {
             gpio_state.gpio_oe &= ~mask;
@@ -1166,7 +1166,11 @@ int thumb32_step(uint32_t pc, uint16_t upper, uint16_t lower) {
         if ((upper & 0xFFF0) == 0xED90 || (upper & 0xFFF0) == 0xED80) {
             return 1;
         }
-        if (thumb32_pico_gpioc(upper, lower)) {
+        /* RP2350 SIO GPIO via CP0 (gpio_set/clr_mask): EE40/EE60.
+         * Must NOT fall through to t32_dp_shifted_reg — that mis-decodes
+         * EE60 3010 as ORN and clobbers r0 (broke MegaFlash DoCommand). */
+        if ((upper & 0xFF00u) == 0xEE00u) {
+            (void)thumb32_pico_gpioc(upper, lower);
             return 1;
         }
         t32_dp_shifted_reg(pc, upper, lower);

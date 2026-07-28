@@ -517,7 +517,8 @@ void pio_sm_exec(int pio_num, int sm_num, uint16_t instr) {
  * PIO Step: execute one cycle for all enabled SMs
  * ======================================================================== */
 
-void pio_inject_rx(int pio_num, int sm_num, uint32_t word) {
+void pio_inject_rx(int pio_num, int sm_num, uint32_t word)
+{
     if (pio_num < 0 || pio_num >= PIO_NUM_BLOCKS || sm_num < 0 || sm_num >= PIO_NUM_SM) {
         return;
     }
@@ -526,6 +527,17 @@ void pio_inject_rx(int pio_num, int sm_num, uint32_t word) {
         return;
     }
     pio_check_irq(pio_num);
+}
+
+void pio_drain_rx(int pio_num, int sm_num)
+{
+    if (pio_num < 0 || pio_num >= PIO_NUM_BLOCKS || sm_num < 0 || sm_num >= PIO_NUM_SM) {
+        return;
+    }
+    pio_block_t *p = &pio_state[pio_num];
+    uint32_t val;
+    while (fifo_pop(&p->sm[sm_num].rx_fifo, &val)) {
+    }
 }
 
 void pio_step(void) {

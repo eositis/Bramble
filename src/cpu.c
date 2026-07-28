@@ -2238,7 +2238,12 @@ void sio_force_core1_launch(uint32_t entry_pc, uint32_t stack_sp, uint32_t vtor)
         stack_sp = 0x20080800u;
     }
     if (vtor == 0) {
-        vtor = 0x10000100u;
+        /* Prefer core0's live VTOR (ram_vector_table @ 0x20000000 after SDK init).
+         * 0x10000100 is mid-vector-table on MegaFlash and breaks HardFault delivery. */
+        vtor = cores[CORE0].vtor;
+        if (vtor == 0 || vtor == 0x10000100u) {
+            vtor = 0x20000000u;
+        }
     }
     entry_pc &= ~1u;
 
