@@ -7,11 +7,17 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+_(none)_
+
+---
+
+## 2026-07-28 — `6caa058` — MAME bridge TCP client
+
 | Change | Reason |
 |--------|--------|
-| MAME plugin opens TCP as client-only (no CREATE); retry connect | CREATE made MAME listen on 19765 → `Address already in use`; taps ran with `sock=nil` |
-| Launcher keeps stock MAME `plugins/` on `-pluginspath` and passes `-plugins` | Replacing pluginspath dropped `boot.lua`; plugin never started |
-| Bridge drops disconnected clients (MSG_PEEK EOF) | Stale `client_fd` blocked `accept` after launcher probe |
+| MAME plugin opens TCP as client-only (no CREATE); retry connect | CREATE made MAME listen on 19765 → EADDRINUSE; taps ran with sock=nil |
+| Launcher keeps stock MAME plugins on pluginspath and passes `-plugins` | Replacing pluginspath dropped `boot.lua`; plugin never started |
+| Bridge drops disconnected clients (MSG_PEEK EOF) | Stale `client_fd` blocked accept after launcher probe |
 
 ---
 
