@@ -426,7 +426,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Causes** | (1) inject mask `0x1F` dropped CMD data; (2) GPIO+inject dual FIFO; (3) `EE60` ActLed in `DoCommand` misdecoded as `ORN` → `r0=0xFF..` → `MFERR_UNKNOWNCMD` |
 | **Actions** | 13-bit inject-only + drain; stop EE60→DP fallthrough; veneer hook; core1-only pump; early core1launch; SPI on launcher |
 | **Validation** | MAGIC→ID xor `$FF`; `CMD_GETDEVINFO` status `0`; param signature `0x88 0x74` |
-| **Commit** | _(pending)_ |
+| **Commit** | `661b49e` — fix(megaflash): make a2bus CMD_GETDEVINFO and detect work |
 
 <!--
 

@@ -5,13 +5,7 @@ Scope: local commits on `main` after clone.
 
 ---
 
-## Unreleased
-
-_(none)_
-
----
-
-## 2026-07-28 — MegaFlash detect over a2bus bridge
+## 2026-07-28 — `661b49e` — MegaFlash detect over a2bus bridge
 
 | Change | Reason |
 |--------|--------|
