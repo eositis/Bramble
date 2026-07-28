@@ -11,6 +11,16 @@ _(none)_
 
 ---
 
+## 2026-07-28 — _(pending)_ — NSC mute + option 7 veneer HardFault
+
+| Change | Reason |
+|--------|--------|
+| Fix Thumb-2 `ldr.w` PC-literal (`F85F F000`); rewrite all flash→SRAM veneers on a2bus | Option 7 / DriveMapping HardFaulted at `0x5F200004` via `__CheckWriteEnableKey_veneer` when `r0=1` |
+| Mute MAME DS1216E NSC on `$C100–$CFFF` in `megaflash_bridge` | Built-in no-slot clock must not own ProDOS time; MegaFlash supplies clock |
+| Seed MegaFlash `rtcRunning` + stub `aon_timer_get_time_calendar` on a2bus | No NTP under MAME; `CMD_GETTIMESTR` otherwise returns spaces |
+
+---
+
 ## 2026-07-28 — `c76ea09` — COLDSTART BUSY pump + AUTOBOOT config
 
 | Change | Reason |

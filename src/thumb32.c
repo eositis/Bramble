@@ -982,10 +982,26 @@ static void t32_ldst_single(uint32_t pc, uint16_t upper, uint16_t lower) {
     int L    = (upper >> 4) & 1;   /* 1=load, 0=store */
     int Rt   = (lower >> 12) & 0xF;
 
-    /* Distinguish T3 (12-bit unsigned imm, upper[7]=1 for same-size group,
-     * more precisely: for 0xF8xx upper[8]=1 means T3, for 0xF9xx always T1/T3) */
-    /* Simplification: use upper[11:8] to determine form */
-    int upper_hi = (upper >> 4) & 0xF;  /* bits[11:8] */
+    /*
+     * LDR (literal) T2: 1111 1000 U 101 1111 | Rt imm12
+     * (F85F/F8DF for word). Pico long-branch veneers are `ldr.w pc,[pc]`
+     * with this encoding; mis-handling them as reg-offset LDR makes the
+     * target `literal_word + r0` (e.g. CheckWriteEnableKey(1) → 0x5F200004).
+     */
+    if ((upper & 0xFF7Fu) == 0xF85Fu) {
+        int U = (upper >> 7) & 1;
+        int imm12 = lower & 0xFFF;
+        uint32_t base = (pc + 4u) & ~3u;
+        uint32_t addr = U ? (base + (uint32_t)imm12) : (base - (uint32_t)imm12);
+        cpu.r[Rt] = mem_read32(addr);
+        if (Rt == 15) {
+            pc_updated = 1;
+        }
+        return;
+    }
+
+    /* Distinguish T3 (12-bit unsigned imm): upper bit[8]=1 for F8/F9 group */
+    int upper_hi = (upper >> 8) & 0xF;  /* bits[11:8] */
 
     if (upper_hi & 0x8) {
         /* T3: 12-bit unsigned offset. lower = Rt(4):imm12(12) */

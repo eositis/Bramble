@@ -234,14 +234,17 @@ static int guest_megaflash_hook_active(void) {
     return usb_console_bridge_mode() || net_bridge_any_active();
 }
 
-/* Pico `ldr.w pc,[pc]` veneers; Thumb decode mishandles them. */
+/* Pico `ldr.w pc,[pc]` veneers; Thumb decode historically mishandled them. */
 static void usb_guest_stub_copy_memory_entry(void);
 static void usb_guest_stub_read_block(void);
 static void usb_guest_stub_write_block(void);
+static void a2bus_seed_megaflash_rtc(void);
+static int a2bus_rtc_hooks(void);
 static int a2bus_fix_picoram_veneer(void) {
     if (!a2bus_bridge_active()) {
         return 0;
     }
+    a2bus_seed_megaflash_rtc();
     uint32_t pc = cpu.r[15] & ~1u;
     uint16_t hi = mem_read16(pc);
     uint16_t lo = mem_read16(pc + 2u);
@@ -261,17 +264,12 @@ static int a2bus_fix_picoram_veneer(void) {
         usb_guest_stub_write_block();
         return 1;
     }
-    /* TranslateUnitNum: flash veneer → SRAM; needed by GetMediumType / GETVOLINFO. */
-    if (pc == 0x10034dc0u && target == 0x200011fcu) {
+    /* Any flash/RAM `ldr.w pc,[pc]` veneer → literal Thumb target. */
+    if (target >= 0x20000000u && target < 0x20080000u) {
         cpu.r[15] = target | 1u;
         return 1;
     }
-    /* Other veneers: only rewrite when the insn itself lives in Pico RAM. */
-    if (pc < 0x20000120u || pc >= 0x20005174u) {
-        return 0;
-    }
-    cpu.r[15] = target | 1u;
-    return 1;
+    return 0;
 }
 
 static int a2bus_spi_flash_hooks(void); /* defined after flash stub helpers */
@@ -808,6 +806,8 @@ static void usb_log_cdc_active_once(void) {
 #define USB_GUEST_USB_CONN_LOOP       0x10000494u /* non-PicoW USB wait loop */
 #define USB_GUEST_CLOCK_GET_HZ        0x1000c398u
 #define USB_GUEST_SPI_GET_BAUDRATE    0x10011ff0u
+#define USB_GUEST_AON_TIMER_GET_CAL   0x100117ecu /* aon_timer_get_time_calendar */
+#define USB_GUEST_RTC_RUNNING_BSS     0x2006161eu /* rtcRunning (bool) */
 #define USB_GUEST_UART_PUTC           0x1000e308u /* uart_putc — bridge to TCP under -uart-console */
 #define USB_GUEST_MAIN_USB_LOOP       0x10000414u /* bl UserTerminal (PicoW USB path) */
 #define USB_GUEST_USER_TERMINAL       0x10005b00u
@@ -1745,6 +1745,51 @@ static void usb_guest_stub_write_block(void) {
     cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
 }
 
+/* MegaFlash RTC normally starts via NTP; on a2bus seed from host clock. */
+static void a2bus_seed_megaflash_rtc(void) {
+    static int seeded;
+    if (seeded || !a2bus_bridge_active()) {
+        return;
+    }
+    mem_write8(USB_GUEST_RTC_RUNNING_BSS, 1u);
+    seeded = 1;
+    fprintf(stderr, "[A2Bus] MegaFlash RTC seeded from host (rtcRunning=1)\n");
+}
+
+static void usb_guest_stub_aon_timer_get_time_calendar(void) {
+    uint32_t tm_ptr = cpu.r[0];
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    if (!t) {
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return;
+    }
+    /* newlib struct tm: 9x int fields. */
+    mem_write32(tm_ptr + 0u,  (uint32_t)t->tm_sec);
+    mem_write32(tm_ptr + 4u,  (uint32_t)t->tm_min);
+    mem_write32(tm_ptr + 8u,  (uint32_t)t->tm_hour);
+    mem_write32(tm_ptr + 12u, (uint32_t)t->tm_mday);
+    mem_write32(tm_ptr + 16u, (uint32_t)t->tm_mon);
+    mem_write32(tm_ptr + 20u, (uint32_t)t->tm_year);
+    mem_write32(tm_ptr + 24u, (uint32_t)t->tm_wday);
+    mem_write32(tm_ptr + 28u, (uint32_t)t->tm_yday);
+    mem_write32(tm_ptr + 32u, (uint32_t)t->tm_isdst);
+    cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+}
+
+static int a2bus_rtc_hooks(void) {
+    if (!a2bus_bridge_active()) {
+        return 0;
+    }
+    a2bus_seed_megaflash_rtc();
+    uint32_t pc = cpu.r[15] & ~1u;
+    if (pc == USB_GUEST_AON_TIMER_GET_CAL) {
+        usb_guest_stub_aon_timer_get_time_calendar();
+        return 1;
+    }
+    return 0;
+}
+
 /*
  * MAME a2bus: stub flash bring-up + block I/O only. Do not enable the full
  * USB-console hook set (InitSpi/multicore skips HardFault early boot).
@@ -2100,6 +2145,9 @@ void usb_console_guest_stdio_hook(void) {
 
     if (!guest_megaflash_hook_active()) {
         if (a2bus_fix_picoram_veneer()) {
+            return;
+        }
+        if (a2bus_rtc_hooks()) {
             return;
         }
         (void)a2bus_spi_flash_hooks();

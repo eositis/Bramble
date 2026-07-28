@@ -7,9 +7,9 @@
 -- yields "Address already in use" while Bramble already owns the port — taps
 -- then run with sock=nil and MegaFlash is never seen.
 
-local exports = {
+	local exports = {
 	name = "megaflash_bridge",
-	version = "0.1.5",
+	version = "0.1.6",
 	description = "Bramble MegaFlash $C0C0-$C0C3 TCP bridge",
 	license = "BSD-3-Clause",
 	author = { name = "eositis" }
@@ -157,6 +157,36 @@ function plugin.startplugin()
 		if taps.write then
 			taps.write:remove()
 			taps.write = nil
+		end
+		if taps.nsc then
+			taps.nsc:remove()
+			taps.nsc = nil
+		end
+
+		-- apple2c4 always has a built-in DS1216E "no-slot clock". When its
+		-- pattern matches, /CEO substitutes clock bits for Cnxx ROM reads and
+		-- ProDOS may claim that clock instead of MegaFlash. Mute by restoring
+		-- maincpu ROM bytes whenever the read data diverges from either bank.
+		local region = manager.machine.memory.regions[":maincpu"]
+		if region then
+			taps.nsc = space:install_read_tap(0xc100, 0xcfff, "megaflash_nsc_mute",
+				function(offset, data, mask)
+					local addr = offset
+					if addr < 0x1000 then
+						addr = 0xc000 + (addr & 0xfff)
+					end
+					local off = addr - 0xc000
+					if off < 0 or off > 0xfff then
+						return data
+					end
+					local b0 = region:read_u8(off)
+					local b1 = region:read_u8(off + 0x4000)
+					if data == b0 or data == b1 then
+						return data
+					end
+					return b0
+				end)
+			logf("NSC muted on $C100-$CFFF (use MegaFlash clock)")
 		end
 
 		taps.read = space:install_read_tap(0xc0c0, 0xc0c3, "megaflash_r",

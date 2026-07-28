@@ -4414,6 +4414,18 @@ TEST(test_m33_thumb2_ldmdb) {
     PASS();
 }
 
+TEST(test_m33_thumb2_ldr_literal_veneer) {
+    reset_cpu();
+    /* Pico veneer: ldr.w pc, [pc] @ F85F F000. Literal must win over r0.
+     * Place the veneer in SRAM so the literal word is writable. */
+    uint32_t vpc = RAM_BASE + 0x100u;
+    mem_write32(vpc + 4u, 0x2000045du);
+    cpu.r[0] = 1; /* previously produced PC=0x5F200004 via broken decode */
+    thumb32_step(vpc, 0xF85F, 0xF000);
+    ASSERT_EQ(0x2000045du, cpu.r[15], "ldr.w pc,[pc] must load literal, ignore r0");
+    PASS();
+}
+
 /* ========================================================================
  * RISC-V Hazard3 Tests
  * ======================================================================== */
@@ -5246,6 +5258,7 @@ int main(void) {
     RUN_TEST(test_m33_thumb2_movw_movt);
     RUN_TEST(test_m33_thumb2_addw_ldah);
     RUN_TEST(test_m33_thumb2_ldmdb);
+    RUN_TEST(test_m33_thumb2_ldr_literal_veneer);
     END_CATEGORY("Cortex-M33");
 
     BEGIN_CATEGORY("RISC-V CPU");

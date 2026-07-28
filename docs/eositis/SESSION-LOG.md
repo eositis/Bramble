@@ -510,6 +510,16 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Actions** | Pump until BUSY seen then cleared; stub GetConfigByte1/2 with AUTOBOOT\|ROMDISK defaults; validated COLDSTART `cfg1=0x44`, 58-page cpanel, A2.DESKTOP vol + block0 |
 | **Commit** | `c76ea09` — fix(mame): wait for CMD BUSY cycle so COLDSTART keeps slot-4 autoboot |
 
+## 2026-07-28 — Disable MAME NSC; fix option 7 HardFault
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Disable MAME no-slot clock (time from MegaFlash); control panel option 7 still hangs |
+| **Cause** | (1) `apple2c4` hardwires DS1216E; (2) `__CheckWriteEnableKey_veneer` `ldr.w pc,[pc]` misdecoded → `PC=0x5F200004` when `CheckWriteEnableKey(1)` during DriveMapping |
+| **Actions** | Fix Thumb-2 LDR literal; rewrite all flash→SRAM F85F veneers; mute NSC on `$C100–$CFFF` in Lua; seed MegaFlash RTC from host; removed local `nvram/apple2c4/nsc` |
+| **Validate** | `bramble_tests` 323/323 (incl. LDR-literal veneer) |
+| **Commit** | _(pending)_ |
+
 <!--
 
 | Field | Detail |
