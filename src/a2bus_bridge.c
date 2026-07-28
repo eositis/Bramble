@@ -416,9 +416,42 @@ void a2bus_bridge_poll(void)
         return;
     }
 
-    if (!client_readable(br.client_fd)) {
-        return;
+    /* Drop clients that closed without a pending request so accept() can run. */
+    {
+        fd_set rfds, efds;
+        struct timeval tv;
+        FD_ZERO(&rfds);
+        FD_ZERO(&efds);
+        FD_SET(br.client_fd, &rfds);
+        FD_SET(br.client_fd, &efds);
+        tv.tv_sec = 0;
+        tv.tv_usec = 0;
+        int r = select(br.client_fd + 1, &rfds, NULL, &efds, &tv);
+        if (r > 0 && FD_ISSET(br.client_fd, &efds)) {
+            close(br.client_fd);
+            br.client_fd = -1;
+            fprintf(stderr, "[A2Bus] bridge client error — dropped\n");
+            return;
+        }
+        if (r > 0 && FD_ISSET(br.client_fd, &rfds)) {
+            /* Peek: EOF means peer closed. */
+            uint8_t b;
+            ssize_t n = recv(br.client_fd, &b, 1, MSG_PEEK);
+            if (n == 0) {
+                close(br.client_fd);
+                br.client_fd = -1;
+                fprintf(stderr, "[A2Bus] bridge client disconnected\n");
+                return;
+            }
+            if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+                close(br.client_fd);
+                br.client_fd = -1;
+                fprintf(stderr, "[A2Bus] bridge client recv error — dropped\n");
+                return;
+            }
+            if (n > 0) {
+                handle_one();
+            }
+        }
     }
-
-    handle_one();
 }

@@ -1,19 +1,24 @@
 -- license:BSD-3-Clause
 -- Forward Apple //c memexp soft-switches ($C0C0-$C0C3) to Bramble's
--- MegaFlash a2bus TCP bridge. Keep MAME at default 128K so built-in Slinky
--- stays inert; taps override the floating-bus values with MegaFlash bytes.
--- Optionally overlay MegaFlash iic.bin onto :maincpu after reset (CRC-clean stock
--- dump stays on disk for MAME's ROM loader).
+-- MegaFlash a2bus TCP bridge.
+--
+-- IMPORTANT: open the TCP socket as a *client* only (READ|WRITE, no CREATE).
+-- With CREATE, MAME falls back to listen-on-same-port when connect fails, which
+-- yields "Address already in use" while Bramble already owns the port — taps
+-- then run with sock=nil and MegaFlash is never seen.
 
 local exports = {
 	name = "megaflash_bridge",
-	version = "0.1.1",
+	version = "0.1.4",
 	description = "Bramble MegaFlash $C0C0-$C0C3 TCP bridge",
 	license = "BSD-3-Clause",
 	author = { name = "eositis" }
 }
 
 local plugin = exports
+
+-- OPEN_FLAG_READ | OPEN_FLAG_WRITE  (do NOT include CREATE=4)
+local OPEN_RW = 3
 
 local function getenv_port()
 	local p = os.getenv("BRAMBLE_A2BUS_PORT")
@@ -23,8 +28,11 @@ local function getenv_port()
 	return 19765
 end
 
+local function logf(fmt, ...)
+	emu.print_info(string.format("megaflash_bridge: " .. fmt, ...))
+end
+
 local function load_iic_rom()
-	-- Prefer staged maincpu (already MegaFlash). Optional re-overlay from BRAMBLE_IIC_BIN.
 	local path = os.getenv("BRAMBLE_IIC_BIN")
 	if not path or path == "" then
 		return
@@ -36,8 +44,7 @@ local function load_iic_rom()
 		data = f:read("*a")
 		f:close()
 	else
-		-- Fallback when io.* is sandboxed
-		local ef = emu.file("", 1) -- OPEN_FLAG_READ
+		local ef = emu.file("", 1)
 		if ef:open(path) then
 			emu.print_error(string.format("megaflash_bridge: cannot open IIC_BIN %s", path))
 			return
@@ -47,14 +54,12 @@ local function load_iic_rom()
 	end
 
 	if not data or #data < 0x8000 then
-		emu.print_error(string.format("megaflash_bridge: IIC_BIN too small (%s, %d bytes)",
-			path, data and #data or 0))
+		emu.print_error(string.format("megaflash_bridge: IIC_BIN too small (%s)", path))
 		return
 	end
 
 	local region = manager.machine.memory.regions[":maincpu"]
 	if not region then
-		emu.print_error("megaflash_bridge: :maincpu region missing")
 		return
 	end
 
@@ -62,25 +67,18 @@ local function load_iic_rom()
 		region:write_u8(i, data:byte(i + 1))
 	end
 
-	-- Sanity: MegaFlash slot-4 CN00 patch differs from stock at $C400 image offset 0x400
-	local b0 = region:read_u8(0x400)
-	local b8 = region:read_u8(0x408)
-	emu.print_info(string.format(
-		"megaflash_bridge: overlaid %s (:maincpu[0x400]=0x%02X [0x408]=0x%02X; MegaFlash expects 0xA9 at 0x408)",
-		path, b0, b8))
+	logf("overlaid %s (:maincpu[0x408]=0x%02X)", path, region:read_u8(0x408))
 end
 
-local function open_bridge()
+local function try_open_bridge()
 	local port = getenv_port()
-	local sock = emu.file("", 7) -- OPEN_FLAG_READ | OPEN_FLAG_WRITE
+	local sock = emu.file("", OPEN_RW)
 	local path = string.format("socket.127.0.0.1:%d", port)
 	local err = sock:open(path)
 	if err then
-		emu.print_error(string.format("megaflash_bridge: open %s failed (%s)", path, tostring(err)))
-		return nil
+		return nil, tostring(err)
 	end
-	emu.print_info(string.format("megaflash_bridge: connected to %s", path))
-	return sock
+	return sock, nil
 end
 
 local function rpc(sock, req)
@@ -95,77 +93,124 @@ local function rpc(sock, req)
 		if chunk and #chunk > 0 then
 			buf = buf .. chunk
 		elseif os.clock() > deadline then
-			emu.print_error("megaflash_bridge: RPC timeout")
 			return nil
 		end
 	end
-	local status = buf:byte(1)
-	local data = buf:byte(2)
-	if status ~= 0 then
-		emu.print_error(string.format("megaflash_bridge: RPC status=%d", status))
+	if buf:byte(1) ~= 0 then
 		return nil
 	end
-	return data
+	return buf:byte(2)
 end
 
 function plugin.startplugin()
 	local sock = nil
 	local taps = {}
+	local tap_count = 0
+	local connect_tries = 0
+
+	local function ensure_sock()
+		if sock then
+			return true
+		end
+		connect_tries = connect_tries + 1
+		local s, err = try_open_bridge()
+		if not s then
+			if connect_tries <= 5 or (connect_tries % 60) == 0 then
+				emu.print_error(string.format(
+					"megaflash_bridge: connect 127.0.0.1:%d failed (%s) try #%d",
+					getenv_port(), err or "?", connect_tries))
+			end
+			return false
+		end
+		sock = s
+		local pong = rpc(sock, string.char(0x00))
+		logf("connected port=%d PING=0x%02X", getenv_port(), pong or -1)
+		return true
+	end
+
+	local function nibble_from_offset(offset)
+		local addr = offset
+		if addr < 0x100 then
+			addr = 0xc0c0 + (addr & 0x3)
+		end
+		return addr & 0x3, addr
+	end
 
 	local function install_taps()
 		local cpu = manager.machine.devices[":maincpu"]
 		if not cpu then
-			emu.print_error("megaflash_bridge: :maincpu missing")
 			return
 		end
 		local space = cpu.spaces["program"]
 		if not space then
-			emu.print_error("megaflash_bridge: program space missing")
 			return
 		end
 
 		load_iic_rom()
+		ensure_sock()
 
-		if not sock then
-			sock = open_bridge()
-			if sock then
-				local pong = rpc(sock, string.char(0x00))
-				if pong then
-					emu.print_info(string.format("megaflash_bridge: PING -> 0x%02X", pong))
-				end
-			end
+		if taps.read then
+			taps.read:remove()
+			taps.read = nil
+		end
+		if taps.write then
+			taps.write:remove()
+			taps.write = nil
 		end
 
 		taps.read = space:install_read_tap(0xc0c0, 0xc0c3, "megaflash_r",
 			function(offset, data, mask)
-				if not sock then
+				if not ensure_sock() then
 					return data
 				end
-				local nibble = offset & 0x3
+				local nibble, addr = nibble_from_offset(offset)
 				local v = rpc(sock, string.char(0x02, nibble))
+				tap_count = tap_count + 1
+				if tap_count <= 40 then
+					logf("RD $%04X -> %s (#%d)", addr, v and string.format("0x%02X", v) or "nil", tap_count)
+				end
 				if v then
 					return v
 				end
+				sock:close()
+				sock = nil
 				return data
 			end)
 
 		taps.write = space:install_write_tap(0xc0c0, 0xc0c3, "megaflash_w",
 			function(offset, data, mask)
-				if not sock then
+				if not ensure_sock() then
 					return
 				end
-				local nibble = offset & 0x3
-				rpc(sock, string.char(0x03, nibble, data & 0xff))
+				local nibble, addr = nibble_from_offset(offset)
+				local byte = data & 0xff
+				local ok = rpc(sock, string.char(0x03, nibble, byte))
+				tap_count = tap_count + 1
+				if tap_count <= 40 then
+					logf("WR $%04X <- 0x%02X (#%d)", addr, byte, tap_count)
+				end
+				if not ok then
+					sock:close()
+					sock = nil
+				end
 			end)
 
-		emu.print_info("megaflash_bridge: taps installed on $C0C0-$C0C3")
+		logf("taps installed sock=%s", sock and "up" or "down (will retry)")
 	end
 
 	emu.add_machine_reset_notifier(function()
 		install_taps()
 	end)
 
+	-- Retry connect if reset-time open lost the race with Bramble.
+	emu.register_periodic(function()
+		if not sock then
+			ensure_sock()
+		end
+	end)
+
 	emu.add_machine_stop_notifier(function()
+		logf("stop after %d taps", tap_count)
 		taps = {}
 		if sock then
 			sock:close()

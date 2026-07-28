@@ -11,6 +11,27 @@ IIC_BIN="${IIC_BIN:-$ROOT/iic.bin}"
 STUB="$ROOT/scripts/megaflash-mame.stub"
 PORT="${BRAMBLE_A2BUS_PORT:-19765}"
 PLUGINPATH="$ROOT/scripts/mame_plugins"
+# Keep stock MAME plugins (boot.lua etc.) on the path; only appending our dir
+# replaces the default and the plugin system may not start.
+MAME_STOCK_PLUGINS="${MAME_STOCK_PLUGINS:-}"
+if [[ -z "$MAME_STOCK_PLUGINS" ]]; then
+  for d in \
+    /opt/homebrew/share/mame/plugins \
+    /opt/homebrew/Cellar/mame/*/share/mame/plugins \
+    /usr/local/share/mame/plugins
+  do
+    # shellcheck disable=SC2086
+    for dd in $d; do
+      if [[ -d "$dd" && -f "$dd/boot.lua" ]]; then
+        MAME_STOCK_PLUGINS="$dd"
+        break 2
+      fi
+    done
+  done
+fi
+if [[ -n "$MAME_STOCK_PLUGINS" ]]; then
+  PLUGINPATH="$PLUGINPATH;$MAME_STOCK_PLUGINS"
+fi
 MAME_BIN="${MAME:-mame}"
 LOCAL_ROMS="${MAME_LOCAL_ROMS:-$ROOT/roms}"
 AMPLE_ROMS="${AMPLE_ROMS:-$HOME/Library/Application Support/Ample/roms}"
@@ -198,9 +219,11 @@ export BRAMBLE_IIC_BIN="$IIC_BIN"
 
 echo "[mame] launching apple2c4 (rompath=$ROMPATH; MegaFlash maincpu staged)"
 echo "[mame] expect WRONG CHECKSUM warning for 3410445b.256 — MegaFlash ROM, not stock"
+echo "[mame] pluginspath=$PLUGINPATH"
 exec "$MAME_BIN" apple2c4 \
   -rompath "$ROMPATH" \
   -pluginspath "$PLUGINPATH" \
+  -plugins \
   -plugin megaflash_bridge \
   -skip_gameinfo \
   -window

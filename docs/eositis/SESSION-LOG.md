@@ -437,6 +437,15 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Actions** | Peek register before inject+pump on READ; validate `chkmegaflashex`-style sig `0x88 0x74` |
 | **Commit** | `aec4569` — fix(megaflash): return pre-cycle bus byte on a2bus READ |
 
+## 2026-07-28 — MegaFlash still not found (MAME socket)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Still not found after READ-byte fix |
+| **Cause** | Plugin used `emu.file` flags 7 (CREATE); connect fallback listened on 19765 → EADDRINUSE; taps had no socket. Also pluginspath replaced stock plugins. |
+| **Actions** | Client-only open + retry; append stock plugins; drop dead TCP clients; validated MAGIC→GETDEVINFO→`$88 $74` under MAME |
+| **Commit** | _(pending)_ |
+
 <!--
 
 | Field | Detail |

@@ -31,6 +31,10 @@ What it does:
 
 **Do not** combine with `-usb-console` on the Bramble side for this mode (Apple online suppresses the USB UserTerminal).
 
+The launcher sets `-pluginspath` to `scripts/mame_plugins` **plus** the stock MAME plugins directory (needs `boot.lua`). It also passes `-plugins -plugin megaflash_bridge`.
+
+The Lua plugin must open the bridge socket with **READ|WRITE only** (no CREATE). With CREATE, MAME tries to listen on the same port if connect fails and hits `Address already in use` while Bramble holds the port — MegaFlash then appears missing.
+
 ## Environment
 
 | Variable | Default | Meaning |
