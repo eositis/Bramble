@@ -508,7 +508,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Request** | MegaFlash not booting (slot 4 default); boot menu option 7 stalls on control panel |
 | **Cause** | a2bus pump early-exited before core1 set BUSY on CMD writes; Apple `BIT status / BMI` saw idle and read PARAM while WE_KEY already cleared → `configbyte1=0` → skip slot 4. Same race starved LOAD_CPANEL under MAME |
 | **Actions** | Pump until BUSY seen then cleared; stub GetConfigByte1/2 with AUTOBOOT\|ROMDISK defaults; validated COLDSTART `cfg1=0x44`, 58-page cpanel, A2.DESKTOP vol + block0 |
-| **Commit** | _(pending)_ |
+| **Commit** | `c76ea09` — fix(mame): wait for CMD BUSY cycle so COLDSTART keeps slot-4 autoboot |
 
 <!--
 

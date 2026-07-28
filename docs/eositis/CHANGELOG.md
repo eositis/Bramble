@@ -11,7 +11,7 @@ _(none)_
 
 ---
 
-## 2026-07-28 — (pending) — COLDSTART BUSY pump + AUTOBOOT config
+## 2026-07-28 — `c76ea09` — COLDSTART BUSY pump + AUTOBOOT config
 
 | Change | Reason |
 |--------|--------|
