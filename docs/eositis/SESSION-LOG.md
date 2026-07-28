@@ -518,7 +518,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | (1) `apple2c4` hardwires DS1216E; (2) `__CheckWriteEnableKey_veneer` `ldr.w pc,[pc]` misdecoded → `PC=0x5F200004` when `CheckWriteEnableKey(1)` during DriveMapping |
 | **Actions** | Fix Thumb-2 LDR literal; rewrite all flash→SRAM F85F veneers; mute NSC on `$C100–$CFFF` in Lua; seed MegaFlash RTC from host; removed local `nvram/apple2c4/nsc` |
 | **Validate** | `bramble_tests` 323/323 (incl. LDR-literal veneer) |
-| **Commit** | _(pending)_ |
+| **Commit** | `c0e80a1` — fix(mame): mute NSC and repair ldr.w veneers for option 7 |
 
 <!--
 
