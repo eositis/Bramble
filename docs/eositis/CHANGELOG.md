@@ -11,7 +11,7 @@ _(none)_
 
 ---
 
-## 2026-07-28 —  — keep a2bus bridge alive for MAME
+## 2026-07-28 — `afd9efb` — keep a2bus bridge alive for MAME
 
 | Change | Reason |
 |--------|--------|
