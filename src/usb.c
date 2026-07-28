@@ -236,6 +236,8 @@ static int guest_megaflash_hook_active(void) {
 
 /* Pico `ldr.w pc,[pc]` veneers; Thumb decode mishandles them. */
 static void usb_guest_stub_copy_memory_entry(void);
+static void usb_guest_stub_read_block(void);
+static void usb_guest_stub_write_block(void);
 static int a2bus_fix_picoram_veneer(void) {
     if (!a2bus_bridge_active()) {
         return 0;
@@ -247,8 +249,16 @@ static int a2bus_fix_picoram_veneer(void) {
         return 0;
     }
     uint32_t target = mem_read32(pc + 4u) & ~1u;
-    if (target == 0x2000147cu) {
+    if (target == 0x2000147cu) { /* CopyMemoryAligned */
         usb_guest_stub_copy_memory_entry();
+        return 1;
+    }
+    if (target == 0x2000135cu) { /* ReadBlock */
+        usb_guest_stub_read_block();
+        return 1;
+    }
+    if (target == 0x200013f0u) { /* WriteBlock */
+        usb_guest_stub_write_block();
         return 1;
     }
     /* Other veneers: only rewrite when the insn itself lives in Pico RAM. */
@@ -845,7 +855,9 @@ static void usb_log_cdc_active_once(void) {
 #define USB_GUEST_FLASH_UNIT_COUNT    0x200615b4u
 #define USB_GUEST_FLASH_UNIT_MAP      0x200615b8u
 #define USB_GUEST_READ_BLOCK_VENEER   0x10034e28u /* __ReadBlock_veneer */
+#define USB_GUEST_READ_BLOCK          0x2000135cu /* ReadBlock (RAM) — DoReadBlock calls this */
 #define USB_GUEST_WRITE_BLOCK_VENEER  0x10034dc8u /* __WriteBlock_veneer */
+#define USB_GUEST_WRITE_BLOCK         0x200013f0u /* WriteBlock (RAM) */
 #define USB_GUEST_CONFIG_BUFFER       0x2000bef4u
 #define USB_GUEST_CONFIG_MAGIC        0x5e97724cu
 #define USB_GUEST_CONFIG_FD_FLAGS_OFF 0xe2u
@@ -1762,11 +1774,11 @@ static int a2bus_spi_flash_hooks(void) {
         usb_guest_stub_get_volume_info();
         return 1;
     }
-    if (pc == USB_GUEST_READ_BLOCK_VENEER) {
+    if (pc == USB_GUEST_READ_BLOCK_VENEER || pc == USB_GUEST_READ_BLOCK) {
         usb_guest_stub_read_block();
         return 1;
     }
-    if (pc == USB_GUEST_WRITE_BLOCK_VENEER) {
+    if (pc == USB_GUEST_WRITE_BLOCK_VENEER || pc == USB_GUEST_WRITE_BLOCK) {
         usb_guest_stub_write_block();
         return 1;
     }

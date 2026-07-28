@@ -11,6 +11,15 @@ _(none)_
 
 ---
 
+## 2026-07-28 — pending — a2bus ReadBlock + lower RPC pump
+
+| Change | Reason |
+|--------|--------|
+| Stub RAM `ReadBlock`/`WriteBlock` (DoReadBlock calls RAM, not veneer) | PR#4 hung on `CMD_READBLOCK` BUSY then HardFault at `_exit` |
+| Lower a2bus `pump_steps` 500000→65536 | Busy-wait RPCs made MAME nearly unkillable |
+
+---
+
 ## 2026-07-28 — `132d61b` — SmartPort units + LOAD_CPANEL copy
 
 | Change | Reason |

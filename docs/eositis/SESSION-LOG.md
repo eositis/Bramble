@@ -473,6 +473,15 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Actions** | Stub IsValidUnitNum/GetBlockCount; intercept CopyMemoryAligned veneer; guest copy via mem_read8/write8; validated unit `$FFFF` blocks + cpanel data `$A2…` |
 | **Commit** | `132d61b` — fix(mame): SmartPort unit status and LOAD_CPANEL copy |
 
+## 2026-07-28 — PR#4 lockup on READBLOCK
+
+| Field | Detail |
+|-------|--------|
+| **Request** | PR#4 locks for hours; hard to kill; log shows READBLOCK status `$80` then HardFault at `0x1000DF80` (`_exit`) |
+| **Cause** | `DoReadBlock` BL to RAM `ReadBlock`; veneer-only stub missed; native SPI/DMA hung BUSY then aborted |
+| **Actions** | Stub RAM ReadBlock/WriteBlock; cut pump_steps to 65536; validated READBLOCK status 0 + ProDOS block `01 38…` |
+| **Commit** | _(pending)_ |
+
 <!--
 
 | Field | Detail |

@@ -37,7 +37,7 @@ static a2bus_bridge_t br = {
     .handling = 0,
     .regs_addr = A2BUS_REGS_DEFAULT,
     .pump = NULL,
-    .pump_steps = 500000u,
+    .pump_steps = 65536u, /* keep RPC latency low; busy-wait must stay killable */
 };
 
 static void set_nonblock(int fd)
