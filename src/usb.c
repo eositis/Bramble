@@ -261,6 +261,11 @@ static int a2bus_fix_picoram_veneer(void) {
         usb_guest_stub_write_block();
         return 1;
     }
+    /* TranslateUnitNum: flash veneer → SRAM; needed by GetMediumType / GETVOLINFO. */
+    if (pc == 0x10034dc0u && target == 0x200011fcu) {
+        cpu.r[15] = target | 1u;
+        return 1;
+    }
     /* Other veneers: only rewrite when the insn itself lives in Pico RAM. */
     if (pc < 0x20000120u || pc >= 0x20005174u) {
         return 0;

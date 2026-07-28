@@ -39,6 +39,10 @@ Bramble must keep running for the whole MAME session: with `-a2bus-bridge` the u
 
 SPI flash for MAME uses the same `-spi-flash1` / `-spi-flash2` backing files as the USB console (`flash/spi-flash*.bin`). Without those stubs, detect signatures still pass but `CMD_GETDEVSTATUS` returns **MFERR_NOFLASH** and the boot menu shows **MegaFlash Not Found**.
 
+MAME is started **without** a floppy/hard-disk image. The //c is expected to boot through MegaFlash SmartPort (PR#4 / “Boot MegaFlash”) from **flash volume 1** (first 32 MB of `flash/spi-flash1.bin`). That volume currently holds ProDOS **`A2.DESKTOP`** (same contents as `A2DeskTop.hdv`). Upload/replace via the USB console XMODEM path if needed.
+
+Flash-resident `ldr.w pc` veneers to SRAM are Thumb-broken in Bramble; the a2bus path rewrites `__TranslateUnitNum_veneer` so `GETVOLINFO` / SmartPort medium-type work (volume name visible, boot can proceed).
+
 ## Environment
 
 | Variable | Default | Meaning |

@@ -11,6 +11,15 @@ _(none)_
 
 ---
 
+## 2026-07-28 — (pending) — TranslateUnitNum veneer for A2.DESKTOP boot
+
+| Change | Reason |
+|--------|--------|
+| Rewrite `__TranslateUnitNum_veneer` (flash→SRAM) on a2bus | `GETVOLINFO`/`GetMediumType` HardFaulted; volume name / SmartPort boot from flash unit 1 broken |
+| Document flash volume 1 = `A2.DESKTOP` boot source (no MAME HD) | MAME must boot via MegaFlash SmartPort, not a separate disk image |
+
+---
+
 ## 2026-07-28 — `233ebe4` — host-side DATA/PARAM for LOAD_CPANEL
 
 | Change | Reason |
