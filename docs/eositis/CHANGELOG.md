@@ -11,7 +11,7 @@ _(none)_
 
 ---
 
-## 2026-07-28 — pending — SmartPort units + LOAD_CPANEL copy
+## 2026-07-28 — `132d61b` — SmartPort units + LOAD_CPANEL copy
 
 | Change | Reason |
 |--------|--------|

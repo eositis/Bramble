@@ -471,7 +471,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Request** | After flash stubs: GETDEVSTATUS units=4 but GETUNITSTATUS `$45`; PR#4 not available; option 7 never starts |
 | **Cause** | (1) RAM `IsValidUnitNum` saw native unit count 0; (2) `CopyMemoryAligned` DMA no-op / wrote `cpu.ram` instead of RP2350 SRAM so LOAD_CPANEL data stayed empty |
 | **Actions** | Stub IsValidUnitNum/GetBlockCount; intercept CopyMemoryAligned veneer; guest copy via mem_read8/write8; validated unit `$FFFF` blocks + cpanel data `$A2…` |
-| **Commit** | _(pending)_ |
+| **Commit** | `132d61b` — fix(mame): SmartPort unit status and LOAD_CPANEL copy |
 
 <!--
 
