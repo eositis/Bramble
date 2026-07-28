@@ -409,6 +409,15 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Outcome** | `apple2c4` romset verifies good against Ample path |
 | **Commit** | `98be297` — fix(mame): use Ample romset and overlay iic.bin in Lua |
 
+## 2026-07-28 — MegaFlash ROM not active in MAME
+
+| Field | Detail |
+|-------|--------|
+| **Request** | PR#4 “unable to start from memory card”; Closed-Apple+Ctrl+Reset no control panel |
+| **Cause** | Rompath included Ample; MAME selected CRC-correct stock `3410445b.256` over staged `iic.bin` |
+| **Actions** | Stage self-contained `./roms` (CHR/kbd/speech from Ample + `iic.bin` as maincpu); rompath local-only; expect CRC warn |
+| **Commit** | `61993d3` — fix(mame): load MegaFlash iic.bin instead of stock ROM4 |
+
 <!--
 
 | Field | Detail |
