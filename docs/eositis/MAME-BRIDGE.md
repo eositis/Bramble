@@ -37,6 +37,8 @@ The Lua plugin must open the bridge socket with **READ|WRITE only** (no CREATE).
 
 Bramble must keep running for the whole MAME session: with `-a2bus-bridge` the usual 1B-instruction safety exit is disabled (same idea as stdin/GDB interactive mode). If you see `Instruction limit reached (1B)` then MegaFlash dies under MAME.
 
+SPI flash for MAME uses the same `-spi-flash1` / `-spi-flash2` backing files as the USB console (`flash/spi-flash*.bin`). Without those stubs, detect signatures still pass but `CMD_GETDEVSTATUS` returns **MFERR_NOFLASH** and the boot menu shows **MegaFlash Not Found**.
+
 ## Environment
 
 | Variable | Default | Meaning |

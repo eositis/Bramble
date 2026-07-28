@@ -455,6 +455,15 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Actions** | Skip 1B limit when `a2bus_bridge_active()`; plugin v0.1.5 installs taps via periodic if reset missed; validated MAGIC→`$88 $74` and 20s post-BusLoop survival |
 | **Commit** | `afd9efb` — fix(megaflash): keep a2bus bridge running past 1B steps |
 
+## 2026-07-28 — MegaFlash found by signature but NOFLASH / hang
+
+| Field | Detail |
+|-------|--------|
+| **Request** | PR#4 “MegaFlash Not Found”; control panel blank hang; tap log shows `$88 $74` then status `$41`/`$45` |
+| **Cause** | `$41`=`MFERR_NOFLASH`, `$45`=`MFERR_INVALIDUNIT` — SPI flash/config stubs only ran under `-usb-console`, so unit count was 0 after COLDSTART |
+| **Actions** | Surgical a2bus flash stubs (InitFlash/configs/blocks/JEDEC) without full USB hook set; validated GETDEVSTATUS → 4 units, no error |
+| **Commit** | _(pending)_ |
+
 <!--
 
 | Field | Detail |

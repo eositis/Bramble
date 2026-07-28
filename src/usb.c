@@ -234,6 +234,27 @@ static int guest_megaflash_hook_active(void) {
     return usb_console_bridge_mode() || net_bridge_any_active();
 }
 
+/* Pico RAM veneers use ldr.w pc,[pc]; Thumb decode treats that as reg-offset LDR. */
+static int a2bus_fix_picoram_veneer(void) {
+    if (!a2bus_bridge_active()) {
+        return 0;
+    }
+    uint32_t pc = cpu.r[15] & ~1u;
+    if (pc < 0x20000120u || pc >= 0x20005174u) {
+        return 0;
+    }
+    uint16_t hi = mem_read16(pc);
+    uint16_t lo = mem_read16(pc + 2u);
+    if (hi != 0xF85Fu || lo != 0xF000u) {
+        return 0;
+    }
+    uint32_t target = mem_read32(pc + 4u);
+    cpu.r[15] = target & ~1u;
+    return 1;
+}
+
+static int a2bus_spi_flash_hooks(void); /* defined after flash stub helpers */
+
 static void usb_guest_drain_host_pty(void) {
     if (!usb_console_bridge_mode() || usb_guest_host_rx_throttled) {
         return;
@@ -1667,6 +1688,59 @@ static void usb_guest_stub_write_block(void) {
     cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
 }
 
+/*
+ * MAME a2bus: stub flash bring-up + block I/O only. Do not enable the full
+ * USB-console hook set (InitSpi/multicore skips HardFault early boot).
+ */
+static int a2bus_spi_flash_hooks(void) {
+    if (!a2bus_bridge_active()) {
+        return 0;
+    }
+    uint32_t pc = cpu.r[15] & ~1u;
+    if (pc == USB_GUEST_LOAD_ALL_CONFIGS) {
+        usb_guest_init_default_config();
+        /* Show ROM disk in SmartPort (ROMDISKFLAG) while keeping USB defaults. */
+        mem_write8(USB_GUEST_CONFIG_BUFFER + 4u,
+                   mem_read8(USB_GUEST_CONFIG_BUFFER + 4u) | 0x04u);
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return 1;
+    }
+    if (pc == USB_GUEST_INIT_FLASH) {
+        usb_guest_init_flash_stub();
+        return 1;
+    }
+    if (pc == USB_GUEST_SETUP_FLASH_MAP) {
+        usb_guest_setup_flash_unit_mapping_stub();
+        return 1;
+    }
+    if (pc == USB_GUEST_GET_TOTAL_UNIT_COUNT) {
+        usb_guest_stub_get_total_unit_count();
+        return 1;
+    }
+    if (pc == USB_GUEST_GET_VOLUME_INFO) {
+        usb_guest_stub_get_volume_info();
+        return 1;
+    }
+    if (pc == USB_GUEST_READ_BLOCK_VENEER) {
+        usb_guest_stub_read_block();
+        return 1;
+    }
+    if (pc == USB_GUEST_WRITE_BLOCK_VENEER) {
+        usb_guest_stub_write_block();
+        return 1;
+    }
+    if (pc == USB_GUEST_TS_READ_JEDECID) {
+        cpu.r[0] = USB_GUEST_WINBOND_JEDEC24;
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return 1;
+    }
+    if (pc == USB_GUEST_SET_FLASH_DRIVE_STR || pc == USB_GUEST_ENABLE_4BYTE_ADDR) {
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return 1;
+    }
+    return 0;
+}
+
 static void usb_guest_stub_write_block_for_image_transfer(void) {
     uint32_t unit = cpu.r[0];
     uint32_t block = cpu.r[1];
@@ -1939,20 +2013,10 @@ void usb_console_guest_stdio_hook(void) {
     int usb_mode = usb_console_bridge_mode();
 
     if (!guest_megaflash_hook_active()) {
-        /* MAME a2bus: Pico `ldr.w pc,[pc]` veneers (F85F F000) are misdecoded as
-         * reg-offset LDR and HardFault. Jump to the literal target instead. */
-        if (a2bus_bridge_active()) {
-            uint32_t pc = cpu.r[15] & ~1u;
-            if (pc >= 0x20000120u && pc < 0x20005174u) {
-                uint16_t hi = mem_read16(pc);
-                uint16_t lo = mem_read16(pc + 2u);
-                if (hi == 0xF85Fu && lo == 0xF000u) {
-                    uint32_t target = mem_read32(pc + 4u);
-                    cpu.r[15] = target & ~1u;
-                    return;
-                }
-            }
+        if (a2bus_fix_picoram_veneer()) {
+            return;
         }
+        (void)a2bus_spi_flash_hooks();
         return;
     }
 

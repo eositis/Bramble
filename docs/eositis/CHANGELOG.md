@@ -11,6 +11,14 @@ _(none)_
 
 ---
 
+## 2026-07-28 — pending — a2bus SPI flash stubs for MAME
+
+| Change | Reason |
+|--------|--------|
+| a2bus path stubs InitFlash / configs / GetTotalUnitCount / ReadBlock against `flash/spi-flash*.bin` | Detect worked but GETDEVSTATUS returned `MFERR_NOFLASH` ($41); PR#4 / control panel saw MegaFlash as missing |
+
+---
+
 ## 2026-07-28 — `afd9efb` — keep a2bus bridge alive for MAME
 
 | Change | Reason |
