@@ -37,8 +37,20 @@ static a2bus_bridge_t br = {
     .handling = 0,
     .regs_addr = A2BUS_REGS_DEFAULT,
     .pump = NULL,
-    .pump_steps = 65536u, /* keep RPC latency low; busy-wait must stay killable */
+    /* Cap for command completion (BUSY clear). Idle DATA/PARAM use host-side path. */
+    .pump_steps = 200000u,
 };
+
+/* MegaFlash BSS (pico2_debug) — keep in sync with megaflash.elf */
+#define MF_DATA_BUF   0x2000caccu
+#define MF_DATA_IDX   0x2000ccccu
+#define MF_DATA_MODE  0x2006160au
+#define MF_PARAM_BUF  0x20016fc8u
+#define MF_PARAM_IDX  0x20016fe8u
+#define MF_BUSYFLAG   0x80u
+#define MF_MODE_LINEAR 0u
+#define MF_DATA_MASK  0x1ffu
+#define MF_PARAM_MASK 0x1fu
 
 static void set_nonblock(int fd)
 {
@@ -290,23 +302,6 @@ static int client_readable(int fd)
     return r > 0 && FD_ISSET(fd, &rfds);
 }
 
-static void pump_guest(void)
-{
-    if (br.pump) {
-        br.pump(br.pump_steps);
-    } else {
-        /* Only step core1 (Apple BusLoop). Core0 sits in newlib printf/locale
-         * under MegaFlash debug builds; pumping it hits blx of a bad locale
-         * function pointer and HardFaults both cores, leaving STATUS BUSY. */
-        for (unsigned i = 0; i < br.pump_steps; i++) {
-            if (!cpu_is_halted_core(CORE1)) {
-                cpu_step_core(CORE1);
-            }
-            pio_step();
-        }
-    }
-}
-
 static uint8_t peek_reg(uint8_t nibble)
 {
     uint32_t addr = br.regs_addr + (uint32_t)(nibble & 0xFu);
@@ -314,6 +309,130 @@ static uint8_t peek_reg(uint8_t nibble)
         return rp2350_sram_ptr[addr - 0x20000000u];
     }
     return mem_read8(addr);
+}
+
+static void poke_reg(uint8_t nibble, uint8_t val)
+{
+    uint32_t addr = br.regs_addr + (uint32_t)(nibble & 0xFu);
+    if (rp2350_sram_ptr && addr >= 0x20000000u && addr < 0x20000000u + 520u * 1024u) {
+        rp2350_sram_ptr[addr - 0x20000000u] = val;
+    } else {
+        mem_write8(addr, val);
+    }
+}
+
+/*
+ * When STATUS is idle, mirror BusLoop DATA/PARAM/ID side-effects in host SRAM
+ * so LOAD_CPANEL (58 pages × 256 data reads) does not need a guest pump per byte.
+ * Returns 1 if handled (skip inject+pump).
+ */
+static int mf_native_mode(void)
+{
+    /* Slinky activation uses $C0C0–$C0C3 differently; only accelerate after ID is live. */
+    uint8_t id = peek_reg(3);
+    return id == 0x96u || id == 0x69u;
+}
+
+static int host_fast_read(uint8_t nibble, uint8_t *out)
+{
+    nibble &= 0xFu;
+    if (!mf_native_mode() || (peek_reg(0) & MF_BUSYFLAG) != 0) {
+        return 0;
+    }
+    if (nibble == 0u) {
+        *out = peek_reg(0);
+        return 1;
+    }
+    if (nibble == 2u) { /* DATA */
+        *out = peek_reg(2);
+        uint32_t idx = mem_read32(MF_DATA_IDX);
+        uint32_t mode = mem_read32(MF_DATA_MODE);
+        if (mode == MF_MODE_LINEAR) {
+            idx = (idx + 1u) & MF_DATA_MASK;
+        } else {
+            idx = (idx & 0x100u) ? (idx + 1u) & 0xffu : (idx | 0x100u);
+        }
+        mem_write32(MF_DATA_IDX, idx);
+        poke_reg(2, mem_read8(MF_DATA_BUF + (idx & MF_DATA_MASK)));
+        return 1;
+    }
+    if (nibble == 1u) { /* PARAM */
+        *out = peek_reg(1);
+        uint32_t idx = mem_read32(MF_PARAM_IDX);
+        idx = (idx + 1u) & MF_PARAM_MASK;
+        mem_write32(MF_PARAM_IDX, idx);
+        poke_reg(1, mem_read8(MF_PARAM_BUF + (idx & MF_PARAM_MASK)));
+        return 1;
+    }
+    if (nibble == 3u) { /* ID toggle */
+        *out = peek_reg(3);
+        poke_reg(3, (uint8_t)(~(*out)));
+        return 1;
+    }
+    return 0;
+}
+
+static int host_fast_write(uint8_t nibble, uint8_t wdata)
+{
+    nibble &= 0xFu;
+    if (!mf_native_mode() || (peek_reg(0) & MF_BUSYFLAG) != 0) {
+        return 0;
+    }
+    if (nibble == 0u) {
+        return 0; /* CMD — must run guest DoCommand */
+    }
+    if (nibble == 2u) { /* DATA */
+        uint32_t idx = mem_read32(MF_DATA_IDX);
+        mem_write8(MF_DATA_BUF + (idx & MF_DATA_MASK), wdata);
+        uint32_t mode = mem_read32(MF_DATA_MODE);
+        if (mode == MF_MODE_LINEAR) {
+            idx = (idx + 1u) & MF_DATA_MASK;
+        } else {
+            idx = (idx & 0x100u) ? (idx + 1u) & 0xffu : (idx | 0x100u);
+        }
+        mem_write32(MF_DATA_IDX, idx);
+        poke_reg(2, mem_read8(MF_DATA_BUF + (idx & MF_DATA_MASK)));
+        return 1;
+    }
+    if (nibble == 1u) { /* PARAM */
+        uint32_t idx = mem_read32(MF_PARAM_IDX);
+        mem_write8(MF_PARAM_BUF + (idx & MF_PARAM_MASK), wdata);
+        idx = (idx + 1u) & MF_PARAM_MASK;
+        mem_write32(MF_PARAM_IDX, idx);
+        poke_reg(1, mem_read8(MF_PARAM_BUF + (idx & MF_PARAM_MASK)));
+        return 1;
+    }
+    if (nibble == 3u) {
+        return 1; /* ID not writable */
+    }
+    return 0;
+}
+
+static void pump_guest(void)
+{
+    if (br.pump) {
+        br.pump(br.pump_steps);
+        return;
+    }
+    /* Core1 only. Stop when BUSY clears after a command. */
+    uint8_t status0 = peek_reg(0);
+    int wait_busy = (status0 & MF_BUSYFLAG) != 0;
+    for (unsigned i = 0; i < br.pump_steps; i++) {
+        if (!cpu_is_halted_core(CORE1)) {
+            cpu_step_core(CORE1);
+        }
+        pio_step();
+        uint8_t s = peek_reg(0);
+        if (wait_busy) {
+            if ((s & MF_BUSYFLAG) == 0) {
+                break;
+            }
+        } else if ((s & MF_BUSYFLAG) != 0) {
+            wait_busy = 1;
+        } else if (i >= 512u) {
+            break;
+        }
+    }
 }
 
 static void handle_one(void)
@@ -346,13 +465,12 @@ static void handle_one(void)
             br.client_fd = -1;
             return;
         }
-        /* Hardware presents the *current* shadow byte on the bus, then BusLoop
-         * side-effects (PARAM/DATA advance, ID toggle). Peek first so MAME/Apple
-         * sees SIGNATURE1 ($88) on the first $C0C1 read after GETDEVINFO — peek
-         * after pump returned the *next* byte and broke detect. */
-        data = peek_reg(nibble);
-        a2bus_inject_read(nibble & 0xFu);
-        pump_guest();
+        /* Idle DATA/PARAM/ID/STATUS: host-side side effects (LOAD_CPANEL hot path). */
+        if (!host_fast_read(nibble, &data)) {
+            data = peek_reg(nibble);
+            a2bus_inject_read(nibble & 0xFu);
+            pump_guest();
+        }
         break;
     }
     case A2BUS_BRIDGE_OP_WRITE: {
@@ -364,8 +482,10 @@ static void handle_one(void)
             br.client_fd = -1;
             return;
         }
-        a2bus_inject_write(nibble & 0xFu, wdata);
-        pump_guest();
+        if (!host_fast_write(nibble, wdata)) {
+            a2bus_inject_write(nibble & 0xFu, wdata);
+            pump_guest();
+        }
         data = peek_reg(nibble);
         break;
     }

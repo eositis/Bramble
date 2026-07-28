@@ -482,6 +482,16 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Actions** | Stub RAM ReadBlock/WriteBlock; cut pump_steps to 65536; validated READBLOCK status 0 + ProDOS block `01 38…` |
 | **Commit** | `3f26e1a` — fix(mame): stub RAM ReadBlock so PR#4 does not hang BUSY |
 
+## 2026-07-28 — Control panel hang (LOAD_CPANEL byte storm)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Still hangs when running control panel; tap log reaches GETTIMESTR `$19` then endless `$C0C1` `$A0` / stalls |
+| **Cause** | LOAD_CPANEL ≈58 pages × 256 DATA reads; each RPC inject+pumped core1 — glacial under MAME. Ungated host fast path also broke Slinky MAGIC detect |
+| **Actions** | Host-side DATA/PARAM/ID/STATUS mirror when ID `$96`/`$69` and not BUSY; adaptive BUSY-clear pump; gate fast path off during Slinky |
+| **Validate** | Detect `$88 $74`; 58-page LOAD_CPANEL in ~1.5s (~10 KB/s); `bramble_tests` 322/322 |
+| **Commit** | _(pending)_ |
+
 <!--
 
 | Field | Detail |

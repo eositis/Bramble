@@ -11,6 +11,16 @@ _(none)_
 
 ---
 
+## 2026-07-28 — (pending) — host-side DATA/PARAM for LOAD_CPANEL
+
+| Change | Reason |
+|--------|--------|
+| Host-side idle DATA/PARAM/ID/STATUS RPC path (gated on ID `$96`/`$69`) | Control panel hung: 58×256 `$C0C2` reads each did inject+pump |
+| Adaptive pump: stop when BUSY clears (or early if never busy) | CMD RPCs need enough steps without glacial idle pumps |
+| Document fast path in `MAME-BRIDGE.md` | Operators need to know BSS is pico2_debug-tied |
+
+---
+
 ## 2026-07-28 — `3f26e1a` — a2bus ReadBlock + lower RPC pump
 
 | Change | Reason |
