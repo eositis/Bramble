@@ -515,10 +515,20 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | Field | Detail |
 |-------|--------|
 | **Request** | Disable MAME no-slot clock (time from MegaFlash); control panel option 7 still hangs |
-| **Cause** | (1) `apple2c4` hardwires DS1216E; (2) `__CheckWriteEnableKey_veneer` `ldr.w pc,[pc]` misdecoded → `PC=0x5F200004` when `CheckWriteEnableKey(1)` during DriveMapping |
-| **Actions** | Fix Thumb-2 LDR literal; rewrite all flash→SRAM F85F veneers; mute NSC on `$C100–$CFFF` in Lua; seed MegaFlash RTC from host; removed local `nvram/apple2c4/nsc` |
-| **Validate** | `bramble_tests` 323/323 (incl. LDR-literal veneer) |
-| **Commit** | `c0e80a1` — fix(mame): mute NSC and repair ldr.w veneers for option 7 |
+| **Cause** | (1) `apple2c4` hardwires DS1216E; (2) `__CheckWriteEnableKey_veneer` + `r0=1` → `PC=0x5F200004` |
+| **Actions** | Mute NSC in Lua; seed MegaFlash RTC; a2bus rewrite CheckWriteEnableKey veneer. Reverted unsafe global Thumb `F85F` literal decode that left guest in bootrom so MAME never launched |
+| **Validate** | `bramble_tests` 322/322; PING + BusLoopSlinky ready |
+| **Commit** | `c0e80a1` (+ follow-up revert/fix) |
+
+## 2026-07-28 — Launch stuck after NSC/veneer commit
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Launcher dies before MAME; Bramble exits ~50 steps / bootrom spin |
+| **Cause** | Global Thumb-2 `F85F`/`F8DF` literal handler (and briefly `upper_hi>>8`) broke early boot |
+| **Actions** | Revert thumb32 changes; keep targeted `__CheckWriteEnableKey_veneer` rewrite + NSC mute + RTC seed on calendar read |
+| **Validate** | BusLoopSlinky OK; core1 launches |
+| **Commit** | _(pending)_ |
 
 <!--
 

@@ -7,7 +7,9 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
-_(none)_
+| Change | Reason |
+|--------|--------|
+| Revert Thumb-2 global `F85F` literal handler; keep a2bus rewrite of `__CheckWriteEnableKey_veneer` only | Broad LDR-literal decode parked MegaFlash in bootrom (~50 steps / no MAME); option 7 still needs the targeted veneer rewrite |
 
 ---
 
@@ -15,7 +17,7 @@ _(none)_
 
 | Change | Reason |
 |--------|--------|
-| Fix Thumb-2 `ldr.w` PC-literal (`F85F F000`); rewrite all flash→SRAM veneers on a2bus | Option 7 / DriveMapping HardFaulted at `0x5F200004` via `__CheckWriteEnableKey_veneer` when `r0=1` |
+| a2bus rewrite `__CheckWriteEnableKey_veneer` (not global Thumb LDR-literal) | Option 7 / DriveMapping HardFaulted at `0x5F200004` when `r0=1`; global F85F decode broke boot |
 | Mute MAME DS1216E NSC on `$C100–$CFFF` in `megaflash_bridge` | Built-in no-slot clock must not own ProDOS time; MegaFlash supplies clock |
 | Seed MegaFlash `rtcRunning` + stub `aon_timer_get_time_calendar` on a2bus | No NTP under MAME; `CMD_GETTIMESTR` otherwise returns spaces |
 

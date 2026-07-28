@@ -41,9 +41,9 @@ SPI flash for MAME uses the same `-spi-flash1` / `-spi-flash2` backing files as 
 
 MAME is started **without** a floppy/hard-disk image. The //c is expected to boot through MegaFlash SmartPort (PR#4 / “Boot MegaFlash”) from **flash volume 1** (first 32 MB of `flash/spi-flash1.bin`). That volume currently holds ProDOS **`A2.DESKTOP`** (same contents as `A2DeskTop.hdv`). Upload/replace via the USB console XMODEM path if needed.
 
-Flash-resident `ldr.w pc,[pc]` (`F85F F000`) veneers are handled by Thumb-2 LDR-literal decode (and an a2bus rewrite fallback). Without that, `CheckWriteEnableKey(1)` during control-panel `DriveMapping` HardFaults at `PC=0x5F200004`.
+Flash-resident `ldr.w pc,[pc]` veneers to SRAM are Thumb-broken in Bramble when `r0≠0`. The a2bus path rewrites `__TranslateUnitNum_veneer` and `__CheckWriteEnableKey_veneer` (option 7 / DriveMapping) so those calls reach SRAM.
 
-`apple2c4` always includes a Dallas DS1216E no-slot clock. The Lua plugin mutes it on `$C100–$CFFF` so ProDOS/time come from MegaFlash (`CMD_GETTIMESTR` / clockdriver). On the a2bus path Bramble also seeds MegaFlash `rtcRunning` from the host clock (no NTP).
+`apple2c4` always includes a Dallas DS1216E no-slot clock. The Lua plugin mutes it on `$C100–$CFFF` so ProDOS/time come from MegaFlash (`CMD_GETTIMESTR` / clockdriver). On the a2bus path Bramble also seeds MegaFlash `rtcRunning` from the host clock when time is read (no NTP).
 
 `CMD_COLDSTART` must finish before the Apple reads `configbyte1`. The bridge pump waits for a full STATUS **BUSY→idle** cycle (no early exit if BUSY was never seen). A premature return left `configbyte1=0`, which clears `AUTOBOOTFLAG` and makes the IIc firmware skip slot 4 (`NEXTBOOTSLOT=$C6`).
 

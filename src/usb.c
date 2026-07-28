@@ -238,13 +238,11 @@ static int guest_megaflash_hook_active(void) {
 static void usb_guest_stub_copy_memory_entry(void);
 static void usb_guest_stub_read_block(void);
 static void usb_guest_stub_write_block(void);
-static void a2bus_seed_megaflash_rtc(void);
 static int a2bus_rtc_hooks(void);
 static int a2bus_fix_picoram_veneer(void) {
     if (!a2bus_bridge_active()) {
         return 0;
     }
-    a2bus_seed_megaflash_rtc();
     uint32_t pc = cpu.r[15] & ~1u;
     uint16_t hi = mem_read16(pc);
     uint16_t lo = mem_read16(pc + 2u);
@@ -264,12 +262,22 @@ static int a2bus_fix_picoram_veneer(void) {
         usb_guest_stub_write_block();
         return 1;
     }
-    /* Any flash/RAM `ldr.w pc,[pc]` veneer → literal Thumb target. */
-    if (target >= 0x20000000u && target < 0x20080000u) {
+    /* TranslateUnitNum: flash veneer → SRAM; needed by GetMediumType / GETVOLINFO. */
+    if (pc == 0x10034dc0u && target == 0x200011fcu) {
         cpu.r[15] = target | 1u;
         return 1;
     }
-    return 0;
+    /* CheckWriteEnableKey: same class; DriveMapping uses index 1. */
+    if (pc == 0x10034cd8u && target == 0x2000045cu) {
+        cpu.r[15] = target | 1u;
+        return 1;
+    }
+    /* Other veneers: only rewrite when the insn itself lives in Pico RAM. */
+    if (pc < 0x20000120u || pc >= 0x20005174u) {
+        return 0;
+    }
+    cpu.r[15] = target | 1u;
+    return 1;
 }
 
 static int a2bus_spi_flash_hooks(void); /* defined after flash stub helpers */
@@ -1747,12 +1755,14 @@ static void usb_guest_stub_write_block(void) {
 
 /* MegaFlash RTC normally starts via NTP; on a2bus seed from host clock. */
 static void a2bus_seed_megaflash_rtc(void) {
-    static int seeded;
-    if (seeded || !a2bus_bridge_active()) {
+    if (!a2bus_bridge_active()) {
+        return;
+    }
+    /* Re-apply after crt0 BSS zero; skip if firmware already started RTC. */
+    if (mem_read8(USB_GUEST_RTC_RUNNING_BSS)) {
         return;
     }
     mem_write8(USB_GUEST_RTC_RUNNING_BSS, 1u);
-    seeded = 1;
     fprintf(stderr, "[A2Bus] MegaFlash RTC seeded from host (rtcRunning=1)\n");
 }
 
@@ -1781,9 +1791,9 @@ static int a2bus_rtc_hooks(void) {
     if (!a2bus_bridge_active()) {
         return 0;
     }
-    a2bus_seed_megaflash_rtc();
     uint32_t pc = cpu.r[15] & ~1u;
     if (pc == USB_GUEST_AON_TIMER_GET_CAL) {
+        a2bus_seed_megaflash_rtc();
         usb_guest_stub_aon_timer_get_time_calendar();
         return 1;
     }
