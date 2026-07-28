@@ -234,22 +234,28 @@ static int guest_megaflash_hook_active(void) {
     return usb_console_bridge_mode() || net_bridge_any_active();
 }
 
-/* Pico RAM veneers use ldr.w pc,[pc]; Thumb decode treats that as reg-offset LDR. */
+/* Pico `ldr.w pc,[pc]` veneers; Thumb decode mishandles them. */
+static void usb_guest_stub_copy_memory_entry(void);
 static int a2bus_fix_picoram_veneer(void) {
     if (!a2bus_bridge_active()) {
         return 0;
     }
     uint32_t pc = cpu.r[15] & ~1u;
-    if (pc < 0x20000120u || pc >= 0x20005174u) {
-        return 0;
-    }
     uint16_t hi = mem_read16(pc);
     uint16_t lo = mem_read16(pc + 2u);
     if (hi != 0xF85Fu || lo != 0xF000u) {
         return 0;
     }
-    uint32_t target = mem_read32(pc + 4u);
-    cpu.r[15] = target & ~1u;
+    uint32_t target = mem_read32(pc + 4u) & ~1u;
+    if (target == 0x2000147cu) {
+        usb_guest_stub_copy_memory_entry();
+        return 1;
+    }
+    /* Other veneers: only rewrite when the insn itself lives in Pico RAM. */
+    if (pc < 0x20000120u || pc >= 0x20005174u) {
+        return 0;
+    }
+    cpu.r[15] = target | 1u;
     return 1;
 }
 
@@ -825,6 +831,14 @@ static void usb_log_cdc_active_once(void) {
 #define USB_GUEST_SETUP_FLASH_MAP     0x10003430u /* SetupFlashUnitMapping */
 #define USB_GUEST_GET_VOLUME_INFO     0x10004fa0u /* GetVolumeInfo */
 #define USB_GUEST_GET_TOTAL_UNIT_COUNT 0x100034c0u /* GetTotalUnitCount */
+#define USB_GUEST_GET_TOTAL_UNIT_COUNT_V 0x20004600u /* __GetTotalUnitCount_veneer (RAM) */
+#define USB_GUEST_IS_VALID_UNIT_NUM   0x200011e4u /* IsValidUnitNum (RAM) */
+#define USB_GUEST_IS_VALID_UNIT_NUM_V 0x10034db8u /* __IsValidUnitNum_veneer */
+#define USB_GUEST_GET_BLOCK_COUNT     0x20001310u /* GetBlockCount (RAM) */
+#define USB_GUEST_GET_BLOCK_COUNT_V   0x10034cc8u /* __GetBlockCount_veneer */
+#define USB_GUEST_GET_UNIT_COUNT_FLASH_EN 0x20001194u /* GetUnitCountFlashEnabled (RAM) */
+#define USB_GUEST_GET_UNIT_COUNT_FLASH_EN_V 0x10034e58u /* __GetUnitCountFlashEnabled_veneer */
+#define USB_GUEST_GET_UNIT_COUNT_FLASH_ACT 0x100032f8u /* GetUnitCountFlashActual */
 #define USB_GUEST_SET_FLASH_DRIVE_STR 0x10002d90u /* SetFlashDriveStrength */
 #define USB_GUEST_ENABLE_4BYTE_ADDR   0x10002afcu /* Enable4BytesAddressing */
 #define USB_GUEST_FLASH_MAP_ENABLED   0x20061616u
@@ -1167,10 +1181,7 @@ static void usb_guest_read_bytes(uint32_t addr, uint8_t *dest, uint32_t len) {
     if (len == 0u || dest == NULL) {
         return;
     }
-    if (addr >= RAM_BASE && addr + len <= RAM_BASE + RAM_SIZE) {
-        memcpy(dest, cpu.ram + (addr - RAM_BASE), len);
-        return;
-    }
+    /* Prefer mem_read8 so RP2350 expanded SRAM (rp2350_sram_ptr) is used. */
     for (uint32_t i = 0; i < len; i++) {
         dest[i] = mem_read8(addr + i);
     }
@@ -1178,10 +1189,6 @@ static void usb_guest_read_bytes(uint32_t addr, uint8_t *dest, uint32_t len) {
 
 static void usb_guest_write_bytes(uint32_t addr, const uint8_t *src, uint32_t len) {
     if (len == 0u || src == NULL) {
-        return;
-    }
-    if (addr >= RAM_BASE && addr + len <= RAM_BASE + RAM_SIZE) {
-        memcpy(cpu.ram + (addr - RAM_BASE), src, len);
         return;
     }
     for (uint32_t i = 0; i < len; i++) {
@@ -1578,6 +1585,7 @@ static void usb_guest_setup_flash_unit_mapping_stub(void) {
         }
         enable >>= 1u;
     }
+    mem_write8(USB_GUEST_FLASH_MAP_ENABLED, 1u);
     cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
 }
 
@@ -1589,6 +1597,19 @@ static uint32_t usb_guest_flash_unit_total(void) {
 
 static void usb_guest_stub_get_total_unit_count(void) {
     cpu.r[0] = usb_guest_flash_unit_total();
+    cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+}
+
+static void usb_guest_stub_is_valid_unit_num(void) {
+    uint32_t unit = cpu.r[0];
+    uint32_t total = usb_guest_flash_unit_total();
+    cpu.r[0] = (unit != 0u && unit <= total) ? 1u : 0u;
+    cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+}
+
+static void usb_guest_stub_get_block_count(void) {
+    /* ProDOS 8 reports 65535 blocks per MegaFlash unit. */
+    cpu.r[0] = 0xffffu;
     cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
 }
 
@@ -1707,14 +1728,34 @@ static int a2bus_spi_flash_hooks(void) {
     }
     if (pc == USB_GUEST_INIT_FLASH) {
         usb_guest_init_flash_stub();
+        /* init_flash_stub sets LR return; rebuild mapping + mappingEnabled. */
+        usb_guest_setup_flash_unit_mapping_stub();
         return 1;
     }
     if (pc == USB_GUEST_SETUP_FLASH_MAP) {
         usb_guest_setup_flash_unit_mapping_stub();
         return 1;
     }
-    if (pc == USB_GUEST_GET_TOTAL_UNIT_COUNT) {
+    if (pc == USB_GUEST_GET_TOTAL_UNIT_COUNT ||
+        pc == USB_GUEST_GET_TOTAL_UNIT_COUNT_V) {
         usb_guest_stub_get_total_unit_count();
+        return 1;
+    }
+    if (pc == USB_GUEST_IS_VALID_UNIT_NUM ||
+        pc == USB_GUEST_IS_VALID_UNIT_NUM_V) {
+        usb_guest_stub_is_valid_unit_num();
+        return 1;
+    }
+    if (pc == USB_GUEST_GET_BLOCK_COUNT ||
+        pc == USB_GUEST_GET_BLOCK_COUNT_V) {
+        usb_guest_stub_get_block_count();
+        return 1;
+    }
+    if (pc == USB_GUEST_GET_UNIT_COUNT_FLASH_EN ||
+        pc == USB_GUEST_GET_UNIT_COUNT_FLASH_EN_V ||
+        pc == USB_GUEST_GET_UNIT_COUNT_FLASH_ACT) {
+        cpu.r[0] = usb_guest_flash_unit_total();
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
         return 1;
     }
     if (pc == USB_GUEST_GET_VOLUME_INFO) {
@@ -1727,6 +1768,12 @@ static int a2bus_spi_flash_hooks(void) {
     }
     if (pc == USB_GUEST_WRITE_BLOCK_VENEER) {
         usb_guest_stub_write_block();
+        return 1;
+    }
+    if (pc == USB_GUEST_COPY_MEMORY_ALIGNED ||
+        pc == USB_GUEST_COPY_MEMORY_ALIGNED_V) {
+        /* CMD_LOAD_CPANEL copies cpanel pages via DMA; stub host memcpy. */
+        usb_guest_stub_copy_memory_entry();
         return 1;
     }
     if (pc == USB_GUEST_TS_READ_JEDECID) {
@@ -1834,19 +1881,14 @@ static void usb_guest_stub_copy_memory(uint32_t dest, uint32_t src, uint32_t len
             len = room;
         }
     }
-    if (src >= RAM_BASE && src + len <= RAM_BASE + RAM_SIZE &&
-        dest >= RAM_BASE && dest + len <= RAM_BASE + RAM_SIZE) {
-        memcpy(cpu.ram + (dest - RAM_BASE), cpu.ram + (src - RAM_BASE), len);
-    } else {
-        uint8_t chunk[256];
-        while (len > 0u) {
-            uint32_t n = len > sizeof(chunk) ? (uint32_t)sizeof(chunk) : len;
-            usb_guest_read_bytes(src, chunk, n);
-            usb_guest_write_bytes(dest, chunk, n);
-            src += n;
-            dest += n;
-            len -= n;
-        }
+    uint8_t chunk[256];
+    while (len > 0u) {
+        uint32_t n = len > sizeof(chunk) ? (uint32_t)sizeof(chunk) : len;
+        usb_guest_read_bytes(src, chunk, n);
+        usb_guest_write_bytes(dest, chunk, n);
+        src += n;
+        dest += n;
+        len -= n;
     }
     cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
 }

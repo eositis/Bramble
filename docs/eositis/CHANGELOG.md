@@ -11,6 +11,15 @@ _(none)_
 
 ---
 
+## 2026-07-28 — pending — SmartPort units + LOAD_CPANEL copy
+
+| Change | Reason |
+|--------|--------|
+| Stub RAM `IsValidUnitNum` / `GetBlockCount` on a2bus | GETDEVSTATUS showed 4 units but GETUNITSTATUS returned `$45` (inlined/RAM path) |
+| Intercept `CopyMemoryAligned` veneer; copy via `mem_read8`/`mem_write8` | Control panel LOAD hung/empty — DMA no-op; `cpu.ram` write missed RP2350 SRAM |
+
+---
+
 ## 2026-07-28 — `79f0ca3` — a2bus SPI flash stubs for MAME
 
 | Change | Reason |
