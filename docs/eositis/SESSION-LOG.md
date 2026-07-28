@@ -490,7 +490,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | LOAD_CPANEL ≈58 pages × 256 DATA reads; each RPC inject+pumped core1 — glacial under MAME. Ungated host fast path also broke Slinky MAGIC detect |
 | **Actions** | Host-side DATA/PARAM/ID/STATUS mirror when ID `$96`/`$69` and not BUSY; adaptive BUSY-clear pump; gate fast path off during Slinky |
 | **Validate** | Detect `$88 $74`; 58-page LOAD_CPANEL in ~1.5s (~10 KB/s); `bramble_tests` 322/322 |
-| **Commit** | _(pending)_ |
+| **Commit** | `233ebe4` — fix(mame): host-side DATA/PARAM path so LOAD_CPANEL is interactive |
 
 <!--
 
