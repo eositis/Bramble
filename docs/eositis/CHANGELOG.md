@@ -5,13 +5,7 @@ Scope: local commits on `main` after clone.
 
 ---
 
-## Unreleased
-
-_(none)_
-
----
-
-## 2026-07-29 — RP2350 DMA + real CYW43 gSPI test-pattern
+## 2026-07-29 — `26fece6` — RP2350 DMA + real CYW43 gSPI test-pattern
 
 | Change | Reason |
 |--------|--------|
@@ -20,6 +14,12 @@ _(none)_
 | PIO: arm gSPI pre-DMA skip on SM disable; ignore bit-count TXF; don't abort READ on dummy TX | X/Y countdown words were decoded as gSPI |
 | a2bus: drop InitCyw43/ConnectWifi/synthetic TestWifi; empty SSID still SSIDNOTSET | Real `cyw43_arch_init` path (FEEDBEAD + FW version string) |
 | core1 script SP → StackOneTop `0x20081000`; richer HardFault regs | Cushion vs HeapLimit; debug BusLoopSlinky fault during CLM |
+
+---
+
+## Unreleased
+
+_(none)_
 
 ---
 
