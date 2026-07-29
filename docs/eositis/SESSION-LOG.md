@@ -566,9 +566,19 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 |-------|--------|
 | **Request** | Vol1 ProDOS boots; Save works; Test Wifi → Unexpected Error; vol3 a2osx after disabling vol1/2 |
 | **Cause** | `CMD_TESTWIFI` needs CYW43 + core0 `NetworkPump` IPC; under a2bus that fails as `NETERR_UNKNOWN` / NOTPICOW → CP “Unexpected Error.” |
-| **Actions** | Stub `DoTestWifi` → `SSIDNOTSET` (no SSID) or `WIFINOTCONN` (SSID present); extend probe; doc note |
-| **Validate** | `bramble_tests` 322/322; probe TESTWIFI err=3 in ~0ms |
+| **Actions** | Stub `DoTestWifi` → `SSIDNOTSET` / `WIFINOTCONN` (interim); later superseded by real CYW43 path |
+| **Validate** | `bramble_tests` 322/322; probe TESTWIFI err=3 in ~0ms (stub) |
 | **Commit** | `0b6d0b5` — fix(mame): stub DoTestWifi so CP Test Wifi is usable under a2bus |
+
+## 2026-07-29 — Test Wifi via Bramble CYW43 (not stub)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | WiFi is a Bramble feature; MegaFlash should use CYW43 under Bramble |
+| **Actions** | Remove DoTestWifi stub; `-wifi` in `run-megaflash-mame.sh`; a2bus stubs so core0 reaches `InitPicoLed` (skip USB stdio, host printf, hw_claim, check_alloc, multicore skip, CheckPicoW force) |
+| **Outcome** | Core0 prints WIFI Supported=Yes and enters InitPicoLed; `cyw43_arch_init` still HardFaults (`PC=0xFFFFFFFF`) before TESTWIFI IPC completes |
+| **Validate** | `bramble_tests` 322/322 |
+| **Commit** | _(pending)_ |
 
 <!--
 

@@ -134,6 +134,13 @@ if [[ -z "${NO_SPI_FLASH:-}" ]]; then
   SPI_FLASH_ARGS+=(-spi-flash1 -spi-flash2)
 fi
 
+# MegaFlash Test Wifi / NTP use Pico SDK cyw43_arch against Bramble's CYW43
+# emulation (fake AP + DHCP without TAP). Pass NO_WIFI=1 to disable.
+WIFI_ARGS=()
+if [[ -z "${NO_WIFI:-}" ]]; then
+  WIFI_ARGS+=(-wifi)
+fi
+
 echo "[mame] starting Bramble MegaFlash bridge on 127.0.0.1:$PORT"
 "$BRAMBLE" "$UF2" \
   -arch m33 \
@@ -142,6 +149,7 @@ echo "[mame] starting Bramble MegaFlash bridge on 127.0.0.1:$PORT"
   -a2bus-bridge "$PORT" \
   -script "$STUB" \
   "${SPI_FLASH_ARGS[@]}" \
+  "${WIFI_ARGS[@]}" \
   ${TIMEOUT:+-timeout "$TIMEOUT"} \
   "${REGS_ARGS[@]}" \
   "$@" &

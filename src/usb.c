@@ -38,6 +38,7 @@
 #include "devtools.h"
 #include "emulator.h"
 #include "a2bus_bridge.h"
+#include "cyw43.h"
 
 /*
  * TinyUSB device globals for MegaFlash pico2_debug (megaflash.uf2).
@@ -239,7 +240,6 @@ static void usb_guest_stub_copy_memory_entry(void);
 static void usb_guest_stub_read_block(void);
 static void usb_guest_stub_write_block(void);
 static int a2bus_rtc_hooks(void);
-static void a2bus_stub_do_test_wifi(void);
 static int a2bus_fix_picoram_veneer(void) {
     if (!a2bus_bridge_active()) {
         return 0;
@@ -273,9 +273,9 @@ static int a2bus_fix_picoram_veneer(void) {
         cpu.r[15] = target | 1u;
         return 1;
     }
-    /* DoTestWifi veneer → stub (no CYW43 / core0 IPC under a2bus). */
-    if (pc == 0x20004548u && target == 0x10001d1cu) {
-        a2bus_stub_do_test_wifi();
+    /* core0Loop: Thumb ldr.w pc veneer → SRAM; needed for TestWifi IPC. */
+    if (pc == 0x10034cf8u && target == 0x20000140u) {
+        cpu.r[15] = target | 1u;
         return 1;
     }
     /* Other veneers: only rewrite when the insn itself lives in Pico RAM. */
@@ -803,16 +803,6 @@ static void usb_log_cdc_active_once(void) {
 #define USB_GUEST_ENCRYPT_WRITE_CFG     0x10005294u /* EncryptWriteConfigToFlash */
 #define USB_GUEST_TS_WRITE_SEC_REG      0x10002f1cu /* tsWriteSecurityRegister */
 #define USB_GUEST_TS_READ_SEC_REG       0x10002e68u /* tsReadSecurityRegister */
-#define USB_GUEST_DO_TEST_WIFI          0x10001d1cu /* DoTestWifi */
-#define USB_GUEST_DO_TEST_WIFI_VENEER   0x20004548u /* __DoTestWifi_veneer */
-#define USB_GUEST_PARAMETER_BUFFER      0x20016fc8u
-#define USB_GUEST_PARAMETER_BUF_IDX     0x20016fe8u
-#define USB_GUEST_DATA_BUFFER_INDEX     0x2000ccccu
-#define USB_GUEST_DATA_XFER_MODE        0x2006160au
-#define USB_GUEST_REGISTERS             0x20057038u
-#define USB_GUEST_WIFI_SSID             0x2000bf4eu /* pConfig->wifi_ssid */
-#define USB_GUEST_NETERR_SSIDNOTSET     3u
-#define USB_GUEST_NETERR_WIFINOTCONN    5u
 #define USB_GUEST_GET_CONFIG_BYTE1      0x100054b8u /* GetConfigByte1 */
 #define USB_GUEST_GET_CONFIG_BYTE2      0x100054d4u /* GetConfigByte2 */
 #define USB_GUEST_SAVE_CONFIGS_CALL     0x10000348u /* main: bl SaveConfigs */
@@ -986,6 +976,10 @@ static void usb_guest_uart_tx_byte(uint8_t ch) {
     if (net_bridge_mirror_stdio) {
         fputc((int)ch, stderr);
     }
+}
+
+static void usb_guest_a2bus_tx_byte(uint8_t ch) {
+    fputc((int)ch, stderr);
 }
 
 static void usb_guest_usb_tx_byte(uint8_t ch) {
@@ -1654,24 +1648,6 @@ static void usb_guest_stub_save_user_settings(void) {
     cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
 }
 
-/* a2bus has no CYW43 / core0 IPC network pump; CP Test Wifi otherwise returns
- * NETERR_UNKNOWN ("Unexpected Error.") or hangs up to 90s on FIFO timeout. */
-static void a2bus_stub_do_test_wifi(void) {
-    uint8_t err = USB_GUEST_NETERR_SSIDNOTSET;
-    uint8_t ssid0 = mem_read8(USB_GUEST_WIFI_SSID);
-    if (ssid0 != 0u) {
-        err = USB_GUEST_NETERR_WIFINOTCONN;
-    }
-    mem_write8(USB_GUEST_PARAMETER_BUFFER, err);
-    mem_write8(USB_GUEST_DATA_XFER_MODE, 0u); /* MODE_LINEAR */
-    mem_write32(USB_GUEST_DATA_BUFFER_INDEX, 0u);
-    mem_write32(USB_GUEST_PARAMETER_BUF_IDX, 0u);
-    /* Next PARAM read serves parameterBuffer[0] via host fast-path. */
-    mem_write8(USB_GUEST_REGISTERS + 1u, err);
-    fprintf(stderr, "[A2Bus] DoTestWifi: stubbed (no CYW43) -> err=%u\n", err);
-    cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
-}
-
 static void usb_guest_stub_get_config_byte1(void) {
     /* Ensure full UserSettings defaults exist (LoadAllConfigs may have been missed). */
     if (mem_read8(USB_GUEST_CONFIG_BUFFER + 6u) != 1u) {
@@ -1945,12 +1921,57 @@ static int a2bus_spi_flash_hooks(void) {
     }
     uint32_t pc = cpu.r[15] & ~1u;
 
+    static int hw_claim_ready;
+    if (!hw_claim_ready++) {
+        usb_guest_hw_claim_bootstrap();
+    }
+
+    if (pc == USB_GUEST_HW_CLAIM_LOCK) {
+        mem_write8(USB_GUEST_HW_CLAIM_LOCK_BYTE, 0);
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return 1;
+    }
+    if (pc == USB_GUEST_HW_CLAIM_OR_ASSERT) {
+        uint32_t base = cpu.r[0];
+        uint32_t bit = cpu.r[1];
+        uint32_t byte = bit >> 3;
+        uint8_t mask = (uint8_t)(1u << (bit & 7u));
+        uint8_t v = mem_read8(base + byte);
+        mem_write8(base + byte, v | mask);
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return 1;
+    }
+    if (pc == USB_GUEST_HW_CLAIM_UNUSED) {
+        uint32_t base = cpu.r[0];
+        uint32_t start = cpu.r[2];
+        uint32_t end = cpu.r[3];
+        if (start <= end) {
+            uint32_t byte = start >> 3;
+            uint8_t mask = (uint8_t)(1u << (start & 7u));
+            uint8_t v = mem_read8(base + byte);
+            mem_write8(base + byte, v | mask);
+            cpu.r[0] = start;
+        } else {
+            cpu.r[0] = 0xffffffffu;
+        }
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return 1;
+    }
+    if (pc == USB_GUEST_HW_CLAIM_CLEAR_FAIL) {
+        cpu.r[15] = 0x1000af84u | 1u;
+        return 1;
+    }
+
     /*
      * main calls U2_Init before LoadAllConfigs. Under a2bus, U2_Net_Init can
      * stall core0 forever while script-launched core1 already serves the bus —
      * configBuffer stays BSS-zero → CP Unexpected Error:0. Skip U2 like USB mode.
      */
     if (pc == USB_GUEST_U2_INIT || pc == USB_GUEST_U2_INIT_CALL) {
+        static int u2_logged;
+        if (!u2_logged++) {
+            fprintf(stderr, "[A2Bus] skip U2_Init\n");
+        }
         if (pc == USB_GUEST_U2_INIT_CALL) {
             cpu.r[15] = 0x1000032cu | 1u; /* next: bl LoadAllConfigs */
         } else {
@@ -1961,6 +1982,10 @@ static int a2bus_spi_flash_hooks(void) {
 
     /* InitSpi can stall core0 before LoadAllConfigs; skip call and function. */
     if (pc == USB_GUEST_INIT_SPI_CALL) {
+        static int spi_logged;
+        if (!spi_logged++) {
+            fprintf(stderr, "[A2Bus] skip InitSpi\n");
+        }
         cpu.r[15] = 0x100002e6u | 1u;
         return 1;
     }
@@ -1970,9 +1995,86 @@ static int a2bus_spi_flash_hooks(void) {
     }
 
     if (pc == USB_GUEST_LOAD_ALL_CONFIGS) {
+        static int load_logged;
+        if (!load_logged++) {
+            fprintf(stderr, "[A2Bus] stub LoadAllConfigs\n");
+        }
         /* DEFCFGBYTE1 = AUTOBOOT only; do not force ROMDISKFLAG (extra unit). */
         usb_guest_init_default_config();
         cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return 1;
+    }
+    /* Script already launched core1; firmware multicore_launch would stall. */
+    if (pc == USB_GUEST_MULTICORE_LAUNCH) {
+        static int mc_logged;
+        if (!mc_logged++) {
+            fprintf(stderr, "[A2Bus] skip multicore_launch_core1\n");
+        }
+        cpu.r[15] = 0x1000034cu | 1u; /* skip SaveConfigs too */
+        return 1;
+    }
+    if (pc == USB_GUEST_CLOCK_GET_HZ) {
+        cpu.r[0] = 150000000u;
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return 1;
+    }
+    if (pc == USB_GUEST_SPI_GET_BAUDRATE) {
+        cpu.r[0] = USB_GUEST_SPI_BAUDRATE_HZ;
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return 1;
+    }
+    if (pc == USB_GUEST_CHECK_ALLOC) {
+        /* Same as USB console: skip newlib heap ceiling checks under emu. */
+        usb_guest_return_to_lr(cpu.r[0]);
+        return 1;
+    }
+    /* Host-format guest printf — newlib _vfprintf_r is too slow on a2bus. */
+    if (pc == USB_GUEST_WRAP_PRINTF) {
+        static int printf_logged;
+        if (!printf_logged++) {
+            fprintf(stderr, "[A2Bus] host __wrap_printf active\n");
+        }
+        usb_guest_vprintf_tx = usb_guest_a2bus_tx_byte;
+        int n = usb_guest_host_vprintf(cpu.r[0],
+                                       usb_guest_uart_make_ap(cpu.r[13]));
+        fflush(stderr);
+        usb_guest_return_to_lr((uint32_t)n);
+        return 1;
+    }
+    if (pc == USB_GUEST_WRAP_PUTS) {
+        uint32_t str = cpu.r[0];
+        for (uint32_t i = 0; i < 8192u; i++) {
+            uint8_t ch = mem_read8(str + i);
+            if (ch == 0) {
+                break;
+            }
+            fputc((int)ch, stderr);
+        }
+        fputc('\n', stderr);
+        fflush(stderr);
+        cpu.r[0] = 0;
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return 1;
+    }
+    if (pc == USB_GUEST_PANIC) {
+        static int panic_logged;
+        uint32_t msg = cpu.r[0];
+        if (!panic_logged++) {
+            fprintf(stderr, "[A2Bus] guest panic: ");
+            if (msg) {
+                for (uint32_t i = 0; i < 200u; i++) {
+                    uint8_t ch = mem_read8(msg + i);
+                    if (ch == 0) {
+                        break;
+                    }
+                    fputc((int)ch, stderr);
+                }
+            }
+            fprintf(stderr, " (sio_core=%u lr=0x%08X)\n",
+                    (unsigned)sio_get_core_id(), cpu.r[14]);
+        }
+        /* Park on panic entry — do not resume a failing malloc path. */
+        cpu.r[15] = USB_GUEST_PANIC | 1u;
         return 1;
     }
     /* Belt-and-suspenders: core0 may still be stuck pre-main while core1
@@ -1988,8 +2090,38 @@ static int a2bus_spi_flash_hooks(void) {
         usb_guest_stub_save_user_settings();
         return 1;
     }
-    if (pc == USB_GUEST_DO_TEST_WIFI) {
-        a2bus_stub_do_test_wifi();
+    /*
+     * With Bramble -wifi, MegaFlash must see Pico W so core0 enters core0Loop
+     * (NTP / TestWifi IPC / cyw43_arch_poll). Force when CYW43 emulation is on.
+     */
+    if (cyw43.enabled && pc == USB_GUEST_CHECK_PICOW_FN) {
+        static int picow_logged;
+        if (!picow_logged++) {
+            fprintf(stderr, "[A2Bus] CheckPicoW forced true (-wifi)\n");
+        }
+        cpu.r[0] = 1u;
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return 1;
+    }
+    /*
+     * stdio_usb_init blocks forever without a USB host. Skip so core0 reaches
+     * InitPicoLed (cyw43_arch_init) and PicoW_ServiceCore0IpcAndNetwork /
+     * core0Loop — required for CMD_TESTWIFI IPC from BusLoop on core1.
+     */
+    if (pc == USB_GUEST_STDIO_USB_INIT_CALL1) {
+        static int usb_skip_logged;
+        if (!usb_skip_logged++) {
+            fprintf(stderr, "[A2Bus] skip stdio_usb_init → InitPicoLed/cyw43\n");
+        }
+        cpu.r[15] = 0x100003ceu | 1u; /* next: bl InitPicoLed */
+        return 1;
+    }
+    if (pc == USB_GUEST_STDIO_USB_INIT_CALL2) {
+        cpu.r[15] = 0x1000048eu | 1u;
+        return 1;
+    }
+    if (pc == USB_GUEST_STDIO_USB_INIT_FN) {
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
         return 1;
     }
     /* Security-register SPI program hangs under a2bus; config kept in SRAM (+ host file). */
