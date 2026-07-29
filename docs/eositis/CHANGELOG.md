@@ -11,7 +11,7 @@ _(none)_
 
 ---
 
-## 2026-07-29 — linear DATA mode + flash unit map
+## 2026-07-29 — `7569508` — linear DATA mode + flash unit map
 
 | Change | Reason |
 |--------|--------|
