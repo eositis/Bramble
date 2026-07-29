@@ -5,13 +5,7 @@ Scope: local commits on `main` after clone.
 
 ---
 
-## Unreleased
-
-_(none)_
-
----
-
-## 2026-07-29 — stub CP Test Wifi under a2bus
+## 2026-07-29 — `0b6d0b5` — stub CP Test Wifi under a2bus
 
 | Change | Reason |
 |--------|--------|

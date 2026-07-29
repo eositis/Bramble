@@ -568,7 +568,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | `CMD_TESTWIFI` needs CYW43 + core0 `NetworkPump` IPC; under a2bus that fails as `NETERR_UNKNOWN` / NOTPICOW → CP “Unexpected Error.” |
 | **Actions** | Stub `DoTestWifi` → `SSIDNOTSET` (no SSID) or `WIFINOTCONN` (SSID present); extend probe; doc note |
 | **Validate** | `bramble_tests` 322/322; probe TESTWIFI err=3 in ~0ms |
-| **Commit** | _(pending)_ |
+| **Commit** | `0b6d0b5` — fix(mame): stub DoTestWifi so CP Test Wifi is usable under a2bus |
 
 <!--
 
