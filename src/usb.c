@@ -1575,10 +1575,10 @@ static void usb_guest_init_default_config(void) {
 }
 
 static void usb_guest_stub_get_config_byte1(void) {
-    /* AUTOBOOT|ROMDISK — match LoadAllConfigs stub defaults. */
+    /* AUTOBOOTFLAG — match DEFCFGBYTE1 / LoadAllConfigs stub defaults. */
     uint8_t b = mem_read8(USB_GUEST_CONFIG_BUFFER + 4u);
     if (b == 0u) {
-        b = 0x44u; /* AUTOBOOTFLAG|ROMDISKFLAG */
+        b = 0x40u; /* AUTOBOOTFLAG */
         mem_write8(USB_GUEST_CONFIG_BUFFER + 4u, b);
     }
     cpu.r[0] = b;
@@ -1657,6 +1657,14 @@ static void usb_guest_stub_get_block_count(void) {
     cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
 }
 
+static uint32_t usb_guest_map_flash_medium_unit(uint32_t logical) {
+    if (logical == 0u || logical > 8u) {
+        return logical;
+    }
+    uint8_t medium = mem_read8(USB_GUEST_FLASH_UNIT_MAP + logical);
+    return medium != 0u ? (uint32_t)medium : logical;
+}
+
 static void usb_guest_stub_get_volume_info(void) {
     uint32_t unit = cpu.r[0];
     uint32_t info = cpu.r[1];
@@ -1665,11 +1673,12 @@ static void usb_guest_stub_get_volume_info(void) {
     if (unit == 0u || unit > total) {
         cpu.r[0] = 0u;
     } else {
+        uint32_t medium = usb_guest_map_flash_medium_unit(unit);
         uint8_t buffer[USB_GUEST_FLASH_BLOCK_BYTES];
         bool is_empty = true;
 
         for (uint32_t block = 0; block <= 1u; block++) {
-            usb_guest_flash_read_block_data(unit, block, buffer);
+            usb_guest_flash_read_block_data(medium, block, buffer);
             for (uint32_t i = 0; i < USB_GUEST_FLASH_BLOCK_BYTES / 4u; i++) {
                 uint32_t w;
                 memcpy(&w, buffer + i * 4u, sizeof(w));
@@ -1691,7 +1700,7 @@ static void usb_guest_stub_get_volume_info(void) {
             mem_write8(info + 21u, 1u); /* TYPE_EMPTY */
             mem_write32(info + 0u, 65535u);
         } else {
-            usb_guest_flash_read_block_data(unit, 2u, buffer);
+            usb_guest_flash_read_block_data(medium, 2u, buffer);
             bool prodos = (*(uint32_t *)buffer == 0x00030000u) &&
                           ((buffer[4] & 0xf0u) == 0xf0u);
             if (prodos) {
@@ -1718,7 +1727,7 @@ static void usb_guest_stub_get_volume_info(void) {
 }
 
 static void usb_guest_stub_read_block(void) {
-    uint32_t unit = cpu.r[0];
+    uint32_t unit = usb_guest_map_flash_medium_unit(cpu.r[0]);
     uint32_t block = cpu.r[1];
     uint32_t dest = cpu.r[2];
     uint32_t sp_err = cpu.r[3];
@@ -1736,7 +1745,7 @@ static void usb_guest_stub_read_block(void) {
 }
 
 static void usb_guest_stub_write_block(void) {
-    uint32_t unit = cpu.r[0];
+    uint32_t unit = usb_guest_map_flash_medium_unit(cpu.r[0]);
     uint32_t block = cpu.r[1];
     uint32_t src = cpu.r[2];
     uint32_t sp_err = cpu.r[3];
@@ -1810,10 +1819,8 @@ static int a2bus_spi_flash_hooks(void) {
     }
     uint32_t pc = cpu.r[15] & ~1u;
     if (pc == USB_GUEST_LOAD_ALL_CONFIGS) {
+        /* DEFCFGBYTE1 = AUTOBOOT only; do not force ROMDISKFLAG (extra unit). */
         usb_guest_init_default_config();
-        /* Show ROM disk in SmartPort (ROMDISKFLAG) while keeping USB defaults. */
-        mem_write8(USB_GUEST_CONFIG_BUFFER + 4u,
-                   mem_read8(USB_GUEST_CONFIG_BUFFER + 4u) | 0x04u);
         cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
         return 1;
     }

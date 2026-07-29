@@ -346,7 +346,8 @@ static int host_fast_read(uint8_t nibble, uint8_t *out)
     if (nibble == 2u) { /* DATA */
         *out = peek_reg(2);
         uint32_t idx = mem_read32(MF_DATA_IDX);
-        uint32_t mode = mem_read32(MF_DATA_MODE);
+        /* dataBufferTransferMode is 1 byte; read32 pulls dhcp_pcb_refcount etc. */
+        uint32_t mode = mem_read8(MF_DATA_MODE);
         if (mode == MF_MODE_LINEAR) {
             idx = (idx + 1u) & MF_DATA_MASK;
         } else {
@@ -384,7 +385,8 @@ static int host_fast_write(uint8_t nibble, uint8_t wdata)
     if (nibble == 2u) { /* DATA */
         uint32_t idx = mem_read32(MF_DATA_IDX);
         mem_write8(MF_DATA_BUF + (idx & MF_DATA_MASK), wdata);
-        uint32_t mode = mem_read32(MF_DATA_MODE);
+        /* Must be read8 — see host_fast_read. */
+        uint32_t mode = mem_read8(MF_DATA_MODE);
         if (mode == MF_MODE_LINEAR) {
             idx = (idx + 1u) & MF_DATA_MASK;
         } else {

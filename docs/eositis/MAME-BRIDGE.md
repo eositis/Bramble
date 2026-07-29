@@ -79,6 +79,9 @@ Firmware boots in **Slinky** mode (`registers[2] == 0xf0`). MegaFlash ROM (or th
 
 After ID is live (`$96`/`$69`) and STATUS is idle, Bramble mirrors BusLoop DATA/PARAM/ID side-effects in host SRAM **without** a guest pump per RPC. That keeps `CMD_LOAD_CPANEL` (~58×256 `$C0C2` reads) interactive. CMD writes and BUSY cycles still inject+pump core1. BSS addresses are tied to `pico2_debug/megaflash.elf`.
 
+Host-side DATA pointer advance must read `dataBufferTransferMode` as an **8-bit** BSS field. A 32-bit load pulled adjacent flags (`dhcp_pcb_refcount`, …) and treated `MODE_LINEAR` as interleaved, which corrupted `CMD_GETUSERSETTINGS` (control panel **Unexpected Error:0**) and any other linear transfer.
+
+
 ## Smoke test
 
 1. Launcher reaches “BusLoopSlinky ready”.

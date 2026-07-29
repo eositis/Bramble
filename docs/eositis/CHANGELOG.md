@@ -11,6 +11,16 @@ _(none)_
 
 ---
 
+## 2026-07-29 — linear DATA mode + flash unit map
+
+| Change | Reason |
+|--------|--------|
+| `host_fast_read`/`write` use `mem_read8(dataBufferTransferMode)` | 32-bit load saw adjacent BSS → LINEAR treated as interleaved → CP option 7 **Unexpected Error:0** (`ERR_CONFIG_INVALID`) |
+| a2bus `LoadAllConfigs` keeps `DEFCFGBYTE1` (AUTOBOOT only) | Forced `ROMDISKFLAG` added an extra SmartPort unit; not needed for flash boot |
+| ReadBlock/WriteBlock/GetVolumeInfo honor `FLASH_UNIT_MAP` | Match firmware `MapFlashUnitNum` so logical units hit the right medium |
+
+---
+
 ## 2026-07-28 — `4e5a21f` — restore boot after unsafe F85F decode
 
 | Change | Reason |
