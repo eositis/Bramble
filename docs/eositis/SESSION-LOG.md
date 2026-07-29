@@ -581,6 +581,16 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | `bramble_tests` 322/322; a2bus+wifi timeout run |
 | **Commit** | `406f0d9` — fix(m33): stop cyw43_arch_init HardFault under MegaFlash a2bus |
 
+## 2026-07-29 — Test Wifi hung on “Testing…”
+
+| Field | Detail |
+|-------|--------|
+| **Request** | After HardFault fix, CP Test Wifi hangs waiting for completion |
+| **Causes** | (1) Core1-reset FIFO pushes `0`; Bramble ROM MSP at 0 was 0 → false `TestWifi` IPC; (2) empty-SSID path uses `__cxa_throw` — missing `LDA`, broken `CLZ` Rm mask → hang/HardFault; (3) `DoTestWifi` sleep wait never sees done under dual-core |
+| **Actions** | Nonzero bootrom MSP; script-launch FIFO drain; implement `LDA`/`STL`; fix `CLZ`/`RBIT`; a2bus empty-SSID fast-fail on `DoTestWifi` veneer |
+| **Validate** | Probe `TESTWIFI err=3` in ~0ms; `bramble_tests` 322/322 |
+| **Commit** | `611411a` — fix(mame): stop Test Wifi hang on empty SSID under a2bus |
+
 <!--
 
 | Field | Detail |

@@ -47,6 +47,8 @@ Flash-resident `ldr.w pc,[pc]` veneers to SRAM are Thumb-broken in Bramble when 
 
 **Test Wifi / NTP** use MegaFlash’s real `cyw43_arch` stack against Bramble’s **`-wifi`** CYW43 emulation (fake scan APs + built-in DHCP; no TAP required for a basic join). The launcher passes `-wifi` by default (`NO_WIFI=1` to disable).
 
+With an **empty SSID**, a2bus fails fast with `NETERR_SSIDNOTSET` (3) so the control panel does not hang: empty-SSID paths throw C++ exceptions that Bramble’s EH still cannot unwind. A configured SSID still uses the real join/DHCP path.
+
 Bring-up notes (a2bus):
 
 - Skip `stdio_usb_init` so core0 reaches `InitPicoLed` → `cyw43_arch_init`.

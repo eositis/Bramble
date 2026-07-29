@@ -2282,6 +2282,16 @@ void sio_force_core1_launch(uint32_t entry_pc, uint32_t stack_sp, uint32_t vtor)
     cores[CORE1].is_halted = 0;
     core1_bootrom.waiting_for_launch = 0;
     core1_bootrom.launch_count = 0;
+    /* Drop bootrom handshake ack(s) so guest IPC never sees a dangling 0. */
+    {
+        uint32_t drained;
+        while (fifo_try_pop(CORE0, &drained)) {
+            if (multicore_trace_enabled) {
+                fprintf(stderr, "[MC-trace] script launch drained core0 fifo: 0x%08X\n",
+                        drained);
+            }
+        }
+    }
 
     {
         uint16_t probe = mem_read16(0x200002C6u);

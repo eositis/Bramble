@@ -114,8 +114,8 @@ def main() -> int:
     blk_ok = head == expect
     print(f"block0 match={'OK' if blk_ok else 'FAIL'}")
 
-    # TESTWIFI (0x09): real DoTestWifi via core0 IPC + Bramble -wifi CYW43.
-    # Empty SSID → NETERR_SSIDNOTSET(3). core0 may be in GetNetworkTime / cyw43 init.
+    # TESTWIFI (0x09): empty SSID → NETERR_SSIDNOTSET(3) via a2bus fast-fail
+    # (avoids C++ throw/EH hang). Configured SSID uses real CYW43 join.
     cmd(s, 0x00)
     write_param(s, 0x71)
     t0 = time.time()
@@ -136,10 +136,10 @@ def main() -> int:
         print(f"TESTWIFI still BUSY after {elapsed:.3f}s (cyw43 bring-up WIP)")
     else:
         print(f"TESTWIFI err={tw} status={st:#x} in {elapsed:.3f}s")
-    # Real CYW43 path: SSIDNOTSET(3) when empty. TIMEOUT/BUSY = core0 cyw43 WIP.
+    # Empty SSID: SSIDNOTSET(3). Non-empty: join/DHCP against Bramble -wifi.
     wifi_ok = tw == 3 and (st & 0x80) == 0
     print(f"testwifi={'OK' if wifi_ok else 'WIP'} "
-          f"(err={tw}; expect 3=SSIDNOTSET via Bramble -wifi CYW43)")
+          f"(err={tw}; expect 3=SSIDNOTSET when SSID empty)")
 
     return 0 if (ok and save_ok and blk_ok) else 1
 

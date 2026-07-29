@@ -1911,6 +1911,71 @@ static int a2bus_rtc_hooks(void) {
     return 0;
 }
 
+/* MegaFlash WiFi settings live in configBuffer; SSID at +0x5A. */
+#define USB_GUEST_WIFI_SSID           (USB_GUEST_CONFIG_BUFFER + 0x5Au)
+#define USB_GUEST_TEST_WIFI           0x100085f4u /* TestWifi */
+#define USB_GUEST_DO_TEST_WIFI        0x10001d1cu /* DoTestWifi (core1) */
+#define USB_GUEST_GET_NETWORK_TIME    0x1000859cu /* GetNetworkTime */
+#define USB_GUEST_NETERR_SSIDNOTSET   3u
+#define USB_GUEST_TESTWIFI_ERRBYTE    0x20016fc8u
+#define USB_GUEST_TESTWIFI_FLAG_A     0x2006160au
+#define USB_GUEST_TESTWIFI_FLAG_B     0x2000ccccu
+#define USB_GUEST_TESTWIFI_PARAM      0x2000caccu
+#define USB_GUEST_REGISTERS           0x20057038u
+#define USB_GUEST_TESTWIFI_MISC       0x20016fe8u
+
+/*
+ * Empty-SSID TestWifi/NTP uses C++ exceptions (__cxa_throw). Bramble's EH path
+ * still faults. Fail fast with SSIDNOTSET on core1 DoTestWifi (no IPC/sleep)
+ * and skip GetNetworkTime's RunNTP so core0Loop stays responsive.
+ */
+static int a2bus_wifi_hooks(void) {
+    if (!a2bus_bridge_active() || !cyw43.enabled) {
+        return 0;
+    }
+    uint32_t pc = cpu.r[15] & ~1u;
+    if (pc != USB_GUEST_DO_TEST_WIFI && pc != USB_GUEST_GET_NETWORK_TIME &&
+        pc != USB_GUEST_TEST_WIFI && pc != 0x20004548u /* __DoTestWifi_veneer */) {
+        return 0;
+    }
+    if (mem_read8(USB_GUEST_WIFI_SSID) != 0u) {
+        return 0; /* configured SSID — real ConnectWifi / cyw43 */
+    }
+
+    if (pc == USB_GUEST_DO_TEST_WIFI || pc == 0x20004548u) {
+        /* Mirror DoTestWifi !PicoW epilogue with NETERR_SSIDNOTSET. */
+        fprintf(stderr, "[A2Bus] DoTestWifi: SSID not set → NETERR_SSIDNOTSET\n");
+        fflush(stderr);
+        mem_write8(USB_GUEST_TESTWIFI_ERRBYTE, (uint8_t)USB_GUEST_NETERR_SSIDNOTSET);
+        mem_write8(USB_GUEST_TESTWIFI_FLAG_A, 0);
+        mem_write32(USB_GUEST_TESTWIFI_FLAG_B, 0);
+        mem_write8(USB_GUEST_REGISTERS + 2u, mem_read8(USB_GUEST_TESTWIFI_PARAM));
+        mem_write32(USB_GUEST_TESTWIFI_MISC, 0);
+        mem_write8(USB_GUEST_REGISTERS + 1u, (uint8_t)USB_GUEST_NETERR_SSIDNOTSET);
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return 1;
+    }
+
+    if (pc == USB_GUEST_TEST_WIFI) {
+        /* Belt-and-suspenders if IPC already in flight. */
+        uint32_t result = cpu.r[0];
+        fprintf(stderr, "TestWifi()\nSSID not set\n");
+        fflush(stderr);
+        if (result != 0u) {
+            mem_write32(result + 16u, USB_GUEST_NETERR_SSIDNOTSET);
+            mem_write8(result + 20u, 1u);
+        }
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return 1;
+    }
+
+    fprintf(stderr, "GetNetworkTime()\nSSID not set\n");
+    fflush(stderr);
+    cpu.r[0] = USB_GUEST_NETERR_SSIDNOTSET;
+    cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+    return 1;
+}
+
 /*
  * MAME a2bus: stub flash bring-up + block I/O only. Do not enable the full
  * USB-console hook set (InitSpi/multicore skips HardFault early boot).
@@ -2478,6 +2543,11 @@ void usb_console_guest_stdio_hook(void) {
      * version/checkbyte only (timezoneidver=0 → CP Unexpected Error:0).
      */
     if (a2bus_bridge_active()) {
+        /* WiFi empty-SSID stubs before veneer rewrite so DoTestWifi is caught
+         * on the SRAM ldr.w pc veneer as well as the flash entry. */
+        if (a2bus_wifi_hooks()) {
+            return;
+        }
         if (a2bus_fix_picoram_veneer()) {
             return;
         }

@@ -502,6 +502,32 @@ static void t32_halfword_acqrel(uint32_t pc, uint16_t upper, uint16_t lower) {
     }
 }
 
+/* LDA/STL (word acquire/release) — suffix 0xAF.
+ * Used by libstdc++ atomics (e.g. std::get_new_handler). Mis-decode as LDRD
+ * leaves PC on the LDA forever under dual-core TestWifi / __cxa_throw. */
+static int t32_is_word_acqrel(uint16_t upper, uint16_t lower) {
+    /* E8Cx = STL, E8Dx = LDA (both mask to 0xE8C0 with 0xFFE0). */
+    if ((upper & 0xFFE0) != 0xE8C0) {
+        return 0;
+    }
+    return (lower & 0x0FFF) == 0x0FAF;
+}
+
+static void t32_word_acqrel(uint32_t pc, uint16_t upper, uint16_t lower) {
+    (void)pc;
+    uint32_t insn = ((uint32_t)upper << 16) | lower;
+    int      Rn   = upper & 0xF;
+    int      Rt   = (insn >> 12) & 0xF;
+    int      L    = (upper >> 4) & 1;
+    uint32_t addr = cpu.r[Rn];
+
+    if (L) {
+        cpu.r[Rt] = mem_read32(addr);
+    } else {
+        mem_write32(addr, cpu.r[Rt]);
+    }
+}
+
 static void t32_exclusive_ldst(uint32_t pc, uint16_t upper, uint16_t lower) {
     (void)pc;
     uint32_t insn = ((uint32_t)upper << 16) | lower;
@@ -884,15 +910,16 @@ static int t32_misc(uint32_t pc, uint16_t upper, uint16_t lower) {
         cpu.r[RdHi] = (uint32_t)((uint64_t)result >> 32);
         return 1;
     }
-    /* CLZ T1: upper = 1111 1010 1011 Rm, lower = 1111 Rd 1000 Rm */
-    if ((upper & 0xFFF0) == 0xFAB0 && (lower & 0xF0FF) == 0xF080) {
+    /* CLZ T1: upper = 1111 1010 1011 Rm, lower = 1111 Rd 1000 Rm
+     * Mask must allow Rm in bits[3:0] (was F0FF, which only matched Rm=0). */
+    if ((upper & 0xFFF0) == 0xFAB0 && (lower & 0xF0F0) == 0xF080) {
         int Rd = (lower >> 8) & 0xF;
         int Rm = lower & 0xF;
-        cpu.r[Rd] = cpu.r[Rm] ? __builtin_clz(cpu.r[Rm]) : 32;
+        cpu.r[Rd] = cpu.r[Rm] ? (uint32_t)__builtin_clz(cpu.r[Rm]) : 32u;
         return 1;
     }
     /* RBIT T1: upper = 1111 1010 1001 Rm, lower = 1111 Rd 1010 Rm */
-    if ((upper & 0xFFF0) == 0xFA90 && (lower & 0xF0FF) == 0xF0A0) {
+    if ((upper & 0xFFF0) == 0xFA90 && (lower & 0xF0F0) == 0xF0A0) {
         int Rd = (lower >> 8) & 0xF;
         int Rm = lower & 0xF;
         uint32_t v = cpu.r[Rm], r = 0;
@@ -1164,6 +1191,8 @@ int thumb32_step(uint32_t pc, uint16_t upper, uint16_t lower) {
                     t32_exclusive_ldst(pc, upper, lower);
                 } else if (t32_is_halfword_acqrel(upper, lower)) {
                     t32_halfword_acqrel(pc, upper, lower);
+                } else if (t32_is_word_acqrel(upper, lower)) {
+                    t32_word_acqrel(pc, upper, lower);
                 } else if (t32_is_ldm_stm_reglist(upper, lower)) {
                     t32_ldst_multiple(pc, upper, lower);
                 } else {

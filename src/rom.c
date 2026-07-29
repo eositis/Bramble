@@ -11,6 +11,8 @@ uint8_t rom_image[ROM_SIZE];
 
 /*
  * ROM Layout:
+ *   0x0000: Initial MSP (nonzero — see rom_init)
+ *   0x0004: Reset handler (Thumb)
  *   0x0010: Magic ('M', 'u', 0x01)
  *   0x0014: 16-bit pointer to function table (0x0100)
  *   0x0016: 16-bit pointer to data table (0x0180)
@@ -240,6 +242,21 @@ static void rom_build_data_table(void) {
 /* Initialize ROM image */
 void rom_init(void) {
     memset(rom_image, 0, ROM_SIZE);
+
+    /*
+     * Bootrom vector table (ARM): word0 = initial MSP, word1 = Reset.
+     * Must be nonzero — MegaFlash PicoW_DispatchIpc treats a FIFO word as a
+     * pointer; the core1-reset handshake pushes 0, and opcode=*(uint32_t*)0.
+     * Real bootrom MSP is in SRAM; a zero MSP looks like IPC opcode TestWifi.
+     */
+    rom_image[0] = 0x00;
+    rom_image[1] = 0x20;
+    rom_image[2] = 0x08;
+    rom_image[3] = 0x20; /* MSP = 0x20082000 */
+    rom_image[4] = (uint8_t)((ROM_NOP_STUB_ADDR | 1u) & 0xFF);
+    rom_image[5] = (uint8_t)(((ROM_NOP_STUB_ADDR | 1u) >> 8) & 0xFF);
+    rom_image[6] = 0;
+    rom_image[7] = 0;
 
     /* Magic at offset 0x10: 'M', 'u', version=1 */
     rom_image[0x10] = 'M';

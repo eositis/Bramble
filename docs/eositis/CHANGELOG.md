@@ -5,6 +5,16 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-07-29 — `611411a` — stop Test Wifi hang on empty SSID
+
+| Change | Reason |
+|--------|--------|
+| Bootrom MSP at ROM+0 nonzero; drain handshake FIFO on script core1 launch | Core1-reset FIFO ack `0` was read as IPC ptr; `*(uint32_t*)0==0` looked like TestWifi |
+| Emulate word `LDA`/`STL`; fix `CLZ`/`RBIT` Rm mask | libstdc++ atomics + demangle during `__cxa_throw` hung/HardFaulted |
+| a2bus empty-SSID fast-fail on `DoTestWifi` / `GetNetworkTime` | Empty SSID throws; EH still broken — CP Test Wifi hung on “Testing…” |
+
+---
+
 ## 2026-07-29 — `406f0d9` — fix cyw43_arch_init HardFault on a2bus
 
 | Change | Reason |
