@@ -579,7 +579,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Actions** | ROM SR/SS + nop-on-miss; implement TT; fix STREXB Rd; early core1launch; HardFault logging |
 | **Outcome** | Past InitPicoLed; `TestWifi()`/`NETPUMP` start; core1 Script launch; no HardFault in 20s run |
 | **Validate** | `bramble_tests` 322/322; a2bus+wifi timeout run |
-| **Commit** |  — fix(m33): stop cyw43_arch_init HardFault under MegaFlash a2bus |
+| **Commit** | `406f0d9` — fix(m33): stop cyw43_arch_init HardFault under MegaFlash a2bus |
 
 <!--
 
