@@ -601,6 +601,16 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | Seeded TESTWIFI err=11 in ~20ms; empty err=3; `bramble_tests` 322/322 |
 | **Commit** | `2a27b9e` — fix(mame): make CP Test Wifi complete with configured SSID under a2bus |
 
+## 2026-07-29 — Fix Test Wifi display strings; clarify TAP/NAT
+
+| Field | Detail |
+|-------|--------|
+| **Request** | CP shows wrong netmask/gw/DNS; ask if NAT exists for real host link |
+| **Cause** | Synthetic TestWifi filled `TestResult_t` only; guest `FormatIPAddr` mangled follow-on strings. No live link: join stubbed; `-tap`/`-net` Linux-only and not used by MAME launcher |
+| **Actions** | DoTestWifi stub writes four C strings + BE param IPs; docs note macOS has no TAP/NAT |
+| **Validate** | Probe strings `192.168.4.2` / `255.255.255.0` / `192.168.4.1`×2; err=11 |
+| **Commit** | _(pending)_ |
+
 <!--
 
 | Field | Detail |
