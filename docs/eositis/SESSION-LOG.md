@@ -538,7 +538,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | Host DATA fast-path used `mem_read32` on 1-byte `dataBufferTransferMode`; adjacent BSS made LINEAR look non-linear → corrupted 7-byte `GETUSERSETTINGS` → `ERR_CONFIG_INVALID` (0). Also forced `ROMDISKFLAG` on a2bus config |
 | **Actions** | `mem_read8` for transfer mode; AUTOBOOT-only default config; map flash units via `FLASH_UNIT_MAP` in block I/O stubs |
 | **Validate** | `bramble_tests` 322/322 |
-| **Commit** | _(pending)_ |
+| **Commit** | `7569508` — fix(mame): read DATA transfer mode as a byte for linear transfers |
 
 <!--
 
