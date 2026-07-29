@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Probe MegaFlash GETUSERSETTINGS + READBLOCK over a2bus TCP (Bramble already running)."""
+"""Probe MegaFlash GETUSERSETTINGS / SAVEUSERSETTINGS / READBLOCK over a2bus."""
 import argparse
 import socket
-import struct
 import sys
 import time
 
@@ -39,13 +38,11 @@ def cmd(s: socket.socket, c: int) -> None:
 
 
 def activate(s: socket.socket) -> None:
-    # MegaFlash activation: C0C2, C0C0, C0C0, C0C3, C0C1
     rpc(s, OPS["READ"], 2)
     rpc(s, OPS["READ"], 0)
     rpc(s, OPS["READ"], 0)
     rpc(s, OPS["READ"], 3)
     rpc(s, OPS["READ"], 1)
-    # ID should become 0x96
     for _ in range(20):
         v = rpc(s, OPS["PEEK"], 3)
         if v in (0x96, 0x69):
@@ -67,6 +64,11 @@ def write_param(s: socket.socket, *vals: int) -> None:
         rpc(s, OPS["WRITE"], 1, v & 0xFF)
 
 
+def write_data(s: socket.socket, payload: bytes) -> None:
+    for b in payload:
+        rpc(s, OPS["WRITE"], 2, b)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=19765)
@@ -81,29 +83,38 @@ def main() -> int:
     print("GETUSERSETTINGS:", raw.hex(" "), list(raw))
     ver, chk, c1, c2, tzv, tzi, fd = raw
     ok = ver == 2 and chk == (2 ^ 0x5A) and tzv == 1
-    print(f"validate={'OK' if ok else 'FAIL'} checkbyte={chk:#x} expect={2^0x5A:#x}")
+    print(f"validate={'OK' if ok else 'FAIL'} checkbyte={chk:#x} expect={2 ^ 0x5A:#x}")
 
-    cmd(s, 0x00)  # reset ptrs
+    # SAVEUSERSETTINGS with FPU+NTP bits (as in CP UI)
+    cmd(s, 0x00)
+    write_param(s, 0x71)  # WE_KEY
+    new_c1 = c1 | 0x18  # NTPCLIENTFLAG|FPUFLAG
+    payload = bytes([2, 2 ^ 0x5A, new_c1, c2, 1, tzi, fd])
+    cmd(s, 0x03)  # MODELINEAR
+    write_data(s, payload)
+    t0 = time.time()
+    cmd(s, 0x20)  # SAVEUSERSETTINGS
+    elapsed = time.time() - t0
+    st = rpc(s, OPS["PEEK"], 0)
+    print(f"SAVEUSERSETTINGS done in {elapsed:.3f}s status={st:#x}")
+
+    cmd(s, 0x21)
+    raw2 = read_data(s, 7)
+    print("GET after SAVE:", raw2.hex(" "), list(raw2))
+    save_ok = raw2[2] == new_c1 and raw2[4] == 1 and elapsed < 2.0 and (st & 0x80) == 0
+    print(f"save_roundtrip={'OK' if save_ok else 'FAIL'}")
+
+    cmd(s, 0x00)
     write_param(s, 1, 0, 0, 0)
-    cmd(s, 0x15)  # READBLOCK unit1 blk0
-    cmd(s, 0x04)  # MODEINTERLEAVED
+    cmd(s, 0x15)
+    cmd(s, 0x04)
     head = read_data(s, 8)
     print("READBLOCK0 interleaved head:", head.hex(" "))
     expect = bytes([0x01, 0x91, 0x38, 0x60, 0xB0, 0xC8, 0x03, 0xD0])
-    print(f"block0 match={'OK' if head == expect else 'FAIL'} expect={expect.hex(' ')}")
+    blk_ok = head == expect
+    print(f"block0 match={'OK' if blk_ok else 'FAIL'}")
 
-    # Probe unit status for units 1..6
-    for u in range(1, 7):
-        cmd(s, 0x00)
-        write_param(s, u)
-        cmd(s, 0x12)
-        b0 = rpc(s, OPS["READ"], 1)
-        b1 = rpc(s, OPS["READ"], 1)
-        b2 = rpc(s, OPS["READ"], 1)
-        st = rpc(s, OPS["PEEK"], 0)
-        print(f"UNITSTATUS {u}: blocks={b0:02x}{b1:02x}{b2:02x} status={st:#x}")
-
-    return 0 if ok else 1
+    return 0 if (ok and save_ok and blk_ok) else 1
 
 
 if __name__ == "__main__":

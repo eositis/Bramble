@@ -550,6 +550,16 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | Probe GETUSERSETTINGS `02 58 40 00 01 0e ff` OK; interleaved blocks match `spi-flash1.bin`; `bramble_tests` 322/322 |
 | **Commit** | `e8a125a` — fix(mame): seed MegaFlash user settings when core0 lags BusLoop |
 
+## 2026-07-29 — CP Save hang on Saving...; ProDOS still no boot
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Option 7 works; Save+reboot stuck on Saving...; ProDOS still fails |
+| **Cause** | `SaveUserSettings` → `EncryptWriteConfigToFlash` → `tsWriteSecurityRegister` SPI hang (BUSY never clears). Spurious WriteBlock unit 5 also logged |
+| **Actions** | Stub save/security-reg writes on a2bus; persist settings to host file; reject out-of-range WriteBlock units; probe SAVE round-trip OK (~2ms) |
+| **Validate** | Probe GET/SAVE/GET + block0; `bramble_tests` 322/322 |
+| **Commit** | _(pending)_ |
+
 <!--
 
 | Field | Detail |

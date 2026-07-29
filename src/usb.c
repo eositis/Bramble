@@ -793,6 +793,10 @@ static void usb_log_cdc_active_once(void) {
 #define USB_GUEST_INIT_SPI_CALL         0x100002e2u /* main: bl InitSpi */
 #define USB_GUEST_U2_INIT_CALL          0x10000328u /* main: bl U2_Init */
 #define USB_GUEST_LOAD_ALL_CONFIGS      0x10005354u /* LoadAllConfigs */
+#define USB_GUEST_SAVE_USER_SETTINGS    0x10005420u /* SaveUserSettings */
+#define USB_GUEST_ENCRYPT_WRITE_CFG     0x10005294u /* EncryptWriteConfigToFlash */
+#define USB_GUEST_TS_WRITE_SEC_REG      0x10002f1cu /* tsWriteSecurityRegister */
+#define USB_GUEST_TS_READ_SEC_REG       0x10002e68u /* tsReadSecurityRegister */
 #define USB_GUEST_GET_CONFIG_BYTE1      0x100054b8u /* GetConfigByte1 */
 #define USB_GUEST_GET_CONFIG_BYTE2      0x100054d4u /* GetConfigByte2 */
 #define USB_GUEST_SAVE_CONFIGS_CALL     0x10000348u /* main: bl SaveConfigs */
@@ -1572,6 +1576,66 @@ static void usb_guest_init_default_config(void) {
     mem_write8(USB_GUEST_CONFIG_BUFFER + 7u, 0x0eu);
     mem_write8(USB_GUEST_CONFIG_BUFFER + USB_GUEST_CONFIG_FD_FLAGS_OFF, 0xffu);
     mem_write8(USB_GUEST_SETTINGS_NOT_FLASH, 0u);
+
+    /* Restore prior a2bus SaveUserSettings if present. */
+    FILE *fp = fopen("flash/megaflash-user-config.bin", "rb");
+    if (fp != NULL) {
+        uint8_t u[7];
+        if (fread(u, 1, sizeof(u), fp) == sizeof(u) &&
+            u[0] == 2u && u[4] == 1u && (uint8_t)(u[0] ^ 0x5Au) == u[1]) {
+            mem_write8(USB_GUEST_CONFIG_BUFFER + 4u, u[2]);
+            mem_write8(USB_GUEST_CONFIG_BUFFER + 5u, u[3]);
+            mem_write8(USB_GUEST_CONFIG_BUFFER + 6u, u[4]);
+            mem_write8(USB_GUEST_CONFIG_BUFFER + 7u, u[5]);
+            mem_write8(USB_GUEST_CONFIG_BUFFER + USB_GUEST_CONFIG_FD_FLAGS_OFF, u[6]);
+        }
+        fclose(fp);
+    }
+}
+
+/* Apply UserSettings_t at src into configBuffer; optionally persist for a2bus. */
+static int usb_guest_apply_user_settings_from(uint32_t src, int persist) {
+    if (src == 0u) {
+        return 0;
+    }
+    uint8_t ver = mem_read8(src);
+    uint8_t chk = mem_read8(src + 1u);
+    uint8_t tzv = mem_read8(src + 4u);
+    if (ver != 2u || tzv != 1u || (uint8_t)(ver ^ 0x5Au) != chk) {
+        return 0;
+    }
+    uint8_t c1 = mem_read8(src + 2u);
+    uint8_t c2 = mem_read8(src + 3u);
+    uint8_t tzi = mem_read8(src + 5u);
+    uint8_t fd = mem_read8(src + 6u);
+    mem_write32(USB_GUEST_CONFIG_BUFFER, USB_GUEST_CONFIG_MAGIC);
+    mem_write8(USB_GUEST_CONFIG_BUFFER + 4u, c1);
+    mem_write8(USB_GUEST_CONFIG_BUFFER + 5u, c2);
+    mem_write8(USB_GUEST_CONFIG_BUFFER + 6u, tzv);
+    mem_write8(USB_GUEST_CONFIG_BUFFER + 7u, tzi);
+    mem_write8(USB_GUEST_CONFIG_BUFFER + USB_GUEST_CONFIG_FD_FLAGS_OFF, fd);
+    mem_write8(USB_GUEST_SETTINGS_NOT_FLASH, 0u);
+    if (persist) {
+        uint8_t u[7] = { ver, chk, c1, c2, tzv, tzi, fd };
+        FILE *fp = fopen("flash/megaflash-user-config.bin", "wb");
+        if (fp != NULL) {
+            (void)fwrite(u, 1, sizeof(u), fp);
+            fclose(fp);
+        }
+    }
+    return 1;
+}
+
+static void usb_guest_stub_save_user_settings(void) {
+    /* Skip SPI security-register program; hang there freezes CP "Saving...". */
+    int ok = usb_guest_apply_user_settings_from(cpu.r[0], 1);
+    if (ok) {
+        fprintf(stderr,
+                "[A2Bus] SaveUserSettings: cfg1=0x%02X NTP/FPU bits applied (no SPI)\n",
+                mem_read8(USB_GUEST_CONFIG_BUFFER + 4u));
+    }
+    cpu.r[0] = ok ? 1u : 0u;
+    cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
 }
 
 static void usb_guest_stub_get_config_byte1(void) {
@@ -1748,15 +1812,40 @@ static void usb_guest_stub_read_block(void) {
 }
 
 static void usb_guest_stub_write_block(void) {
-    uint32_t unit = usb_guest_map_flash_medium_unit(cpu.r[0]);
+    uint32_t logical = cpu.r[0];
+    uint32_t unit = usb_guest_map_flash_medium_unit(logical);
     uint32_t block = cpu.r[1];
     uint32_t src = cpu.r[2];
     uint32_t sp_err = cpu.r[3];
+    uint32_t total = usb_guest_flash_unit_total();
+    static uint32_t write_log;
+
+    if (logical == 0u || logical > total) {
+        if (write_log < 8u) {
+            fprintf(stderr,
+                    "[A2Bus] WriteBlock rejected logical unit %u (total=%u) block %u\n",
+                    logical, total, block);
+            write_log++;
+        }
+        if (sp_err != 0) {
+            mem_write8(sp_err, 0x27u); /* SP_IOERR */
+        }
+        cpu.r[0] = 0x05u; /* MFERR_INVALIDUNIT */
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return;
+    }
 
     if (src != 0) {
         uint8_t buffer[USB_GUEST_FLASH_BLOCK_BYTES];
         usb_guest_read_bytes(src, buffer, USB_GUEST_FLASH_BLOCK_BYTES);
-        usb_guest_flash_write_block_data(unit, block, buffer);
+        if (!usb_guest_flash_write_block_data(unit, block, buffer)) {
+            if (sp_err != 0) {
+                mem_write8(sp_err, 0x27u);
+            }
+            cpu.r[0] = 0x07u; /* MFERR_RWERROR */
+            cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+            return;
+        }
     }
     if (sp_err != 0) {
         mem_write8(sp_err, 0u);
@@ -1860,6 +1949,21 @@ static int a2bus_spi_flash_hooks(void) {
             fprintf(stderr, "[A2Bus] GetUserSettings: late-seeded configBuffer\n");
         }
         return 0; /* continue into real function */
+    }
+    if (pc == USB_GUEST_SAVE_USER_SETTINGS) {
+        usb_guest_stub_save_user_settings();
+        return 1;
+    }
+    /* Security-register SPI program hangs under a2bus; config kept in SRAM (+ host file). */
+    if (pc == USB_GUEST_ENCRYPT_WRITE_CFG ||
+        pc == USB_GUEST_TS_WRITE_SEC_REG) {
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return 1;
+    }
+    if (pc == USB_GUEST_TS_READ_SEC_REG) {
+        /* Leave dest unchanged / zeros; callers validate magic. */
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return 1;
     }
     if (pc == USB_GUEST_GET_CONFIG_BYTE1) {
         usb_guest_stub_get_config_byte1();

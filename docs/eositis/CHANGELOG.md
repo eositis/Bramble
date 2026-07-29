@@ -7,7 +7,10 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
-_(none)_
+| Change | Reason |
+|--------|--------|
+| a2bus stub `SaveUserSettings` / security-register SPI; persist to `flash/megaflash-user-config.bin` | CP Save hung on **Saving...** — `EncryptWriteConfigToFlash` never finished under a2bus |
+| Reject WriteBlock for logical unit > flash unit count | Log showed writes to unit 5 with no backing (only 4 flash units) |
 
 ---
 

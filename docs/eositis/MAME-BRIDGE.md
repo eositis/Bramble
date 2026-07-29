@@ -83,6 +83,8 @@ Host-side DATA pointer advance must read `dataBufferTransferMode` as an **8-bit*
 
 Script `core1launch` starts BusLoop on core1 while core0 may still be in crt0/`InitSpi`. a2bus hooks late-seed `configBuffer` on `GetUserSettings` so option 7 validation sees `timezoneidver=1` even when `LoadAllConfigs` never ran on core0.
 
+Control-panel **Save** must not run real SPI security-register programming under a2bus (`EncryptWriteConfigToFlash` would leave STATUS BUSY and freeze on **Saving...**). Settings are applied in SRAM and mirrored to `flash/megaflash-user-config.bin`.
+
 
 ## Smoke test
 
