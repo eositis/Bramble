@@ -7,6 +7,12 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+_(none)_
+
+---
+
+## 2026-07-29 — `2a27b9e` — configured-SSID Test Wifi under a2bus
+
 | Change | Reason |
 |--------|--------|
 | a2bus: jump `stdio_usb_init` skip to `bl InitPicoLed` (not past it) | Wrong PC skipped `cyw43_arch_init`; TestWifi asserted in `cyw43_ensure_up` |

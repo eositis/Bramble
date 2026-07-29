@@ -599,7 +599,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Causes** | (1) `stdio_usb_init` skip jumped past `InitPicoLed`; (2) `_sw_spin_locks` LDAEXB base stale; (3) WFE/`sleep_until` starved TIMER0; (4) gSPI test-pattern still fails (`Failed to read test pattern`) |
 | **Actions** | Fix InitPicoLed jump; spinlock range; sleep stubs + malloc_mutex; synthetic TestWifi success when SSID set (`NETERR_NONE`/`192.168.4.2`); empty SSID still `SSIDNOTSET` |
 | **Validate** | Seeded TESTWIFI err=11 in ~20ms; empty err=3; `bramble_tests` 322/322 |
-| **Commit** | _(pending)_ |
+| **Commit** | `2a27b9e` — fix(mame): make CP Test Wifi complete with configured SSID under a2bus |
 
 <!--
 
