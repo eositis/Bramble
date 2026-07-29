@@ -7,13 +7,11 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
-| Change | Reason |
-|--------|--------|
-| a2bus hooks always run when bridge active; late-seed `configBuffer` on `GetUserSettings`; skip `InitSpi`/`U2_Init` | Core1 served the bus before core0 finished `LoadAllConfigs` → GETUSERSETTINGS had `timezoneidver=0` → CP **Unexpected Error:0** |
-| Delay `core1launch` to 2s in `megaflash-mame.stub` | Give core0 more wall time past crt0 before BusLoop |
-| `scripts/a2bus-probe-settings.py` | Host-side GETUSERSETTINGS / READBLOCK check without MAME |
+_(none)_
 
 ---
+
+## 2026-07-29 — `e8a125a` — seed config when core0 lags BusLoop
 
 ## 2026-07-29 — `7569508` — linear DATA mode + flash unit map
 

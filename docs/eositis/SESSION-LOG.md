@@ -548,7 +548,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | Script-launched core1 runs BusLoop while core0 still pre-`LoadAllConfigs`; a2bus stubs only ran on `!guest_megaflash_hook_active` path historically; GETUSERSETTINGS returned `02 58 00 00 00 00 00` (`timezoneidver=0`) |
 | **Actions** | Always run a2bus stubs when bridge active; late-seed on `GetUserSettings`; skip InitSpi/U2; delay core1launch 2s; probe script confirms settings + block0/2/22/23 |
 | **Validate** | Probe GETUSERSETTINGS `02 58 40 00 01 0e ff` OK; interleaved blocks match `spi-flash1.bin`; `bramble_tests` 322/322 |
-| **Commit** | _(pending)_ |
+| **Commit** | `e8a125a` — fix(mame): seed MegaFlash user settings when core0 lags BusLoop |
 
 <!--
 
