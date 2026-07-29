@@ -558,7 +558,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | `SaveUserSettings` → `EncryptWriteConfigToFlash` → `tsWriteSecurityRegister` SPI hang (BUSY never clears). Spurious WriteBlock unit 5 also logged |
 | **Actions** | Stub save/security-reg writes on a2bus; persist settings to host file; reject out-of-range WriteBlock units; probe SAVE round-trip OK (~2ms) |
 | **Validate** | Probe GET/SAVE/GET + block0; `bramble_tests` 322/322 |
-| **Commit** | _(pending)_ |
+| **Commit** | `c11f059` — fix(mame): stub SaveUserSettings so control-panel Save cannot hang |
 
 <!--
 

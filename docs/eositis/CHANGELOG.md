@@ -7,6 +7,12 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+_(none)_
+
+---
+
+## 2026-07-29 — `c11f059` — stub CP Save under a2bus
+
 | Change | Reason |
 |--------|--------|
 | a2bus stub `SaveUserSettings` / security-register SPI; persist to `flash/megaflash-user-config.bin` | CP Save hung on **Saving...** — `EncryptWriteConfigToFlash` never finished under a2bus |
