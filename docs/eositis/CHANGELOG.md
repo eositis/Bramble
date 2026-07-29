@@ -5,7 +5,7 @@ Scope: local commits on `main` after clone.
 
 ---
 
-## 2026-07-29 — `611411a` — stop Test Wifi hang on empty SSID
+## 2026-07-29 — `0c04ab9` — stop Test Wifi hang on empty SSID
 
 | Change | Reason |
 |--------|--------|
