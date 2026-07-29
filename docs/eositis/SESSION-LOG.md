@@ -578,7 +578,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Actions** | Remove DoTestWifi stub; `-wifi` in `run-megaflash-mame.sh`; a2bus stubs so core0 reaches `InitPicoLed` (skip USB stdio, host printf, hw_claim, check_alloc, multicore skip, CheckPicoW force) |
 | **Outcome** | Core0 prints WIFI Supported=Yes and enters InitPicoLed; `cyw43_arch_init` still HardFaults (`PC=0xFFFFFFFF`) before TESTWIFI IPC completes |
 | **Validate** | `bramble_tests` 322/322 |
-| **Commit** | _(pending)_ |
+| **Commit** | `040f44d` — fix(mame): drive MegaFlash Test Wifi through Bramble -wifi CYW43 |
 
 <!--
 
