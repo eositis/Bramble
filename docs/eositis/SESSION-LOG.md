@@ -601,6 +601,17 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | Seeded TESTWIFI err=11 in ~20ms; empty err=3; `bramble_tests` 322/322 |
 | **Commit** | `2a27b9e` — fix(mame): make CP Test Wifi complete with configured SSID under a2bus |
 
+## 2026-07-29 — Fix CYW43 gSPI test-pattern (RP2350 DMA)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Get the network working (real join / TestWifi, not synthetic) |
+| **Cause** | RP2350 DMA CTRL: BSWAP is bit 24 (BUSY on RP2040). Emulator stripped BSWAP → gSPI decode garbage → `Failed to read test pattern`. Also bit-count `pio_sm_put` words mishandled as commands |
+| **Actions** | Mode-aware DMA layout/offsets/16ch; PIO skip/READ fix; remove synthetic wifi stubs; M33 dma re-init + 520KB PC range; core1 SP cushion |
+| **Outcome** | `SPI_READ_TEST_REGISTER → 0xFEEDBEAD`; chip FW version string prints. Core1 still HardFaults in BusLoopSlinky @ CLM `clmload_status` (blocks a2bus TestWifi IPC). Host TAP/NAT still Linux-only |
+| **Validate** | `bramble_tests` 322/322; seeded a2bus `-wifi` run shows FEEDBEAD + Version line |
+| **Commit** | _(pending)_ |
+
 ## 2026-07-29 — Fix Test Wifi display strings; clarify TAP/NAT
 
 | Field | Detail |

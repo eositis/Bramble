@@ -1220,6 +1220,8 @@ skip_fuse:
         m33_init_overlay();
         /* Enable RP2350 mode in shared membus */
         membus_rp2350_mode = 1;
+        /* Re-init DMA so CHAIN_TO/N_CHANNELS match RP2350 CTRL layout */
+        dma_init();
         rom_apply_rp2350_header();
         /* Set up 520KB SRAM: allocate static buffer and redirect ARM membus */
         static uint8_t m33_sram[520 * 1024];
@@ -1239,6 +1241,7 @@ skip_fuse:
     /* RV32 mode also enables RP2350 in shared membus (for fallthrough reads) */
     if (arch == ARCH_RV32) {
         membus_rp2350_mode = 1;
+        dma_init();
     }
 
     /* ========================================================================

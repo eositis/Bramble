@@ -768,6 +768,7 @@ void pio_write32(int pio_num, uint32_t offset, uint32_t val) {
 
     switch (offset) {
     case PIO_CTRL: {
+        uint32_t prev_ctrl = p->ctrl;
         /* SM_ENABLE bits [3:0] */
         p->ctrl = val & PIO_CTRL_SM_ENABLE_MASK;
 
@@ -792,6 +793,14 @@ void pio_write32(int pio_num, uint32_t offset, uint32_t val) {
                 if (cyw43.enabled && pio_num == cyw43.pio_num && sm == cyw43.pio_sm)
                     cyw43_pio_sm_restart();
             }
+        }
+
+        /* cyw43_spi_transfer disables the SM then pio_sm_put(X/Y) before DMA.
+         * Arm pre-DMA skip on enable falling edge too (covers missed RESTART). */
+        if (cyw43.enabled && pio_num == cyw43.pio_num && cyw43.pio_sm >= 0) {
+            int sm = cyw43.pio_sm;
+            if ((prev_ctrl & (1u << sm)) && !(p->ctrl & (1u << sm)))
+                cyw43_pio_sm_restart();
         }
 
         /* CLKDIV_RESTART [11:8]: restart clock dividers (strobe, self-clearing) */

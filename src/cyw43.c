@@ -300,6 +300,9 @@ static void cyw43_handle_ioctl(const uint8_t *buf, int len) {
     case WLC_GET_VAR: {
         /* payload is null-terminated iovar name */
         const char *varname = (const char *)payload;
+        fprintf(stderr, "[CYW43] GET_VAR '%s' (payload_len=%d)\n",
+                varname[0] ? varname : "(empty)", payload_len);
+        fflush(stderr);
 
         if (strcmp(varname, "cur_etheraddr") == 0) {
             cyw43_queue_ioctl_response(cmd, ioctl_id, cyw43.mac_addr, 6, 0);
@@ -1010,6 +1013,11 @@ void cyw43_pio_tx_write(uint32_t val) {
         return;
     }
 
+    /* Belt-and-suspenders: direct pio_sm_put bit-counts are always small
+     * (< 8 * max_transfer). Real gSPI command words after DMA bswap are not. */
+    if (pio_cyw43_phase == PIO_CYW43_IDLE && val < 0x10000u)
+        return;
+
     switch (pio_cyw43_phase) {
     case PIO_CYW43_IDLE: {
         /* Determine encoding: first 2 commands at boot use SWAP32 (rev16+bswap),
@@ -1053,6 +1061,8 @@ void cyw43_pio_tx_write(uint32_t val) {
             switch (pio_cmd_function) {
             case CYW43_FUNC_BUS: {
                 uint32_t resp = cyw43_bus_read(pio_cmd_address);
+                if (pio_cmd_address == 0x14)
+                    fprintf(stderr, "[CYW43] SPI_READ_TEST_REGISTER → 0x%08X\n", resp);
                 pio_resp_buf[0] = cyw43_encode_resp(resp, pio_cmd_is_swap);
                 pio_resp_count = total_words;
                 break;
@@ -1131,8 +1141,9 @@ void cyw43_pio_tx_write(uint32_t val) {
     }
 
     case PIO_CYW43_READ:
-        pio_cyw43_phase = PIO_CYW43_IDLE;
-        cyw43_pio_tx_write(val);
+        /* Full-duplex / countdown dummy TX during an outstanding read.
+         * Do not abort the response — firmware may still clock TXF while
+         * DMA drains RXF (or after Y is loaded). */
         break;
     }
 }

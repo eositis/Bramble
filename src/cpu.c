@@ -27,6 +27,13 @@
 #include "rp2350_rv/rp2350_periph.h"
 #include "rp2350_rv/rp2350_memmap.h"
 
+/* RP2350 has 520KB SRAM; RP2040 PC checks still use 264KB RAM_TOP. */
+static uint32_t cpu_ram_top(void) {
+    return (membus_rp2350_mode && rp2350_sram_ptr)
+               ? (RAM_BASE + 520u * 1024u)
+               : (uint32_t)RAM_TOP;
+}
+
 
 /* ========================================================================
  * Single-Core Global State
@@ -865,8 +872,8 @@ int cpu_is_halted(void) {
         return 0;
     }
 
-    /* Execute from RAM */
-    if (pc >= RAM_BASE && pc < RAM_TOP) {
+    /* Execute from RAM (RP2350: 520KB) */
+    if (pc >= RAM_BASE && pc < cpu_ram_top()) {
         return 0;
     }
 
@@ -884,8 +891,11 @@ void cpu_exception_entry(uint32_t vector_num) {
     if (vector_num == EXC_HARDFAULT && ac == CORE1) {
         static int hf_logged;
         if (!hf_logged++) {
-            fprintf(stderr, "[CORE1] HardFault at PC=0x%08X SP=0x%08X\n",
-                    cpu.r[15], cpu.r[13]);
+            fprintf(stderr,
+                    "[CORE1] HardFault at PC=0x%08X SP=0x%08X LR=0x%08X "
+                    "r0=%08X r1=%08X r2=%08X r3=%08X\n",
+                    cpu.r[15], cpu.r[13], cpu.r[14],
+                    cpu.r[0], cpu.r[1], cpu.r[2], cpu.r[3]);
         }
     }
     if (vector_num == EXC_HARDFAULT && ac == CORE0) {
@@ -1460,7 +1470,7 @@ __attribute__((hot)) void cpu_step(void) {
         }
         goto pc_valid;
     }
-    if (pc >= RAM_BASE && pc < RAM_TOP) goto pc_valid;
+    if (pc >= RAM_BASE && pc < cpu_ram_top()) goto pc_valid;
     if (pc == 0xFFFFFFFF) return;
 
     /* HardFault: PC out of executable range */
@@ -2258,7 +2268,9 @@ void sio_force_core1_launch(uint32_t entry_pc, uint32_t stack_sp, uint32_t vtor)
         entry_pc = 0x20000120u;
     }
     if (stack_sp == 0) {
-        stack_sp = 0x20080800u;
+        /* Top of StackOne (0x20081000): keep 0x20080000..0x20080800 free so a
+         * slightly-over-HeapLimit cyw43 alloc cannot clobber the live frame. */
+        stack_sp = 0x20081000u;
     }
     if (vtor == 0) {
         /* Prefer core0's live VTOR (ram_vector_table @ 0x20000000 after SDK init).
