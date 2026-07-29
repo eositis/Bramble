@@ -7,6 +7,12 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+_(none)_
+
+---
+
+## 2026-07-29 — `c36e139` — Test Wifi CP strings + TAP/NAT note
+
 | Change | Reason |
 |--------|--------|
 | a2bus configured TestWifi writes four C strings into `dataBuffer` (+ BE param IPs) | CP showed netmask `4.2` / blank gw/DNS — guest `FormatIPAddr`/`ip4addr_ntoa` after synthetic fill was wrong |
