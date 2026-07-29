@@ -5,6 +5,16 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-07-29 — `040f44d` — route CP Test Wifi through Bramble `-wifi` CYW43
+
+| Change | Reason |
+|--------|--------|
+| Remove a2bus `DoTestWifi` stub; launcher passes `-wifi` | Test Wifi is Bramble CYW43, not a fake SSID error |
+| a2bus: skip `stdio_usb_init`, host printf, `hw_claim`/`check_alloc`, multicore skip; force `CheckPicoW` when `-wifi` | Let core0 reach `InitPicoLed`/`cyw43_arch_init` and IPC |
+| Docs note: `cyw43_arch_init` HardFault still blocks full TESTWIFI | Next gap after bring-up stubs |
+
+---
+
 ## 2026-07-29 — `0b6d0b5` — stub CP Test Wifi under a2bus
 
 | Change | Reason |
