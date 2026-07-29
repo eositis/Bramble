@@ -560,6 +560,16 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | Probe GET/SAVE/GET + block0; `bramble_tests` 322/322 |
 | **Commit** | `c11f059` — fix(mame): stub SaveUserSettings so control-panel Save cannot hang |
 
+## 2026-07-29 — Test Wifi Unexpected Error; vol1 boot + Save OK
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Vol1 ProDOS boots; Save works; Test Wifi → Unexpected Error; vol3 a2osx after disabling vol1/2 |
+| **Cause** | `CMD_TESTWIFI` needs CYW43 + core0 `NetworkPump` IPC; under a2bus that fails as `NETERR_UNKNOWN` / NOTPICOW → CP “Unexpected Error.” |
+| **Actions** | Stub `DoTestWifi` → `SSIDNOTSET` (no SSID) or `WIFINOTCONN` (SSID present); extend probe; doc note |
+| **Validate** | `bramble_tests` 322/322; probe TESTWIFI err=3 in ~0ms |
+| **Commit** | _(pending)_ |
+
 <!--
 
 | Field | Detail |

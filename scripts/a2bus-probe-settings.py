@@ -114,7 +114,18 @@ def main() -> int:
     blk_ok = head == expect
     print(f"block0 match={'OK' if blk_ok else 'FAIL'}")
 
-    return 0 if (ok and save_ok and blk_ok) else 1
+    # TESTWIFI (0x09): WE_KEY then command; expect SSIDNOTSET(3) or WIFINOTCONN(5)
+    cmd(s, 0x00)
+    write_param(s, 0x71)
+    t0 = time.time()
+    cmd(s, 0x09)
+    elapsed = time.time() - t0
+    tw = rpc(s, OPS["READ"], 1)
+    print(f"TESTWIFI err={tw} in {elapsed:.3f}s")
+    wifi_ok = tw in (3, 5) and elapsed < 2.0
+    print(f"testwifi={'OK' if wifi_ok else 'FAIL'} (3=SSIDNOTSET 5=WIFINOTCONN)")
+
+    return 0 if (ok and save_ok and blk_ok and wifi_ok) else 1
 
 
 if __name__ == "__main__":

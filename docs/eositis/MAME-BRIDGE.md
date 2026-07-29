@@ -45,6 +45,8 @@ Flash-resident `ldr.w pc,[pc]` veneers to SRAM are Thumb-broken in Bramble when 
 
 `apple2c4` always includes a Dallas DS1216E no-slot clock. The Lua plugin mutes it on `$C100–$CFFF` so ProDOS/time come from MegaFlash (`CMD_GETTIMESTR` / clockdriver). On the a2bus path Bramble also seeds MegaFlash `rtcRunning` from the host clock when time is read (no NTP).
 
+**Test Wifi** (`CMD_TESTWIFI`) needs CYW43 + core0 IPC (`NetworkPump`). Under a2bus that path is stubbed: empty SSID → control-panel message “Wifi has not been setup”; if SSID was saved → “WIFI not connected…”. Real RF/TAP WiFi is not wired on this path yet.
+
 `CMD_COLDSTART` must finish before the Apple reads `configbyte1`. The bridge pump waits for a full STATUS **BUSY→idle** cycle (no early exit if BUSY was never seen). A premature return left `configbyte1=0`, which clears `AUTOBOOTFLAG` and makes the IIc firmware skip slot 4 (`NEXTBOOTSLOT=$C6`).
 
 ## Environment

@@ -239,6 +239,7 @@ static void usb_guest_stub_copy_memory_entry(void);
 static void usb_guest_stub_read_block(void);
 static void usb_guest_stub_write_block(void);
 static int a2bus_rtc_hooks(void);
+static void a2bus_stub_do_test_wifi(void);
 static int a2bus_fix_picoram_veneer(void) {
     if (!a2bus_bridge_active()) {
         return 0;
@@ -270,6 +271,11 @@ static int a2bus_fix_picoram_veneer(void) {
     /* CheckWriteEnableKey: same class; DriveMapping uses index 1. */
     if (pc == 0x10034cd8u && target == 0x2000045cu) {
         cpu.r[15] = target | 1u;
+        return 1;
+    }
+    /* DoTestWifi veneer → stub (no CYW43 / core0 IPC under a2bus). */
+    if (pc == 0x20004548u && target == 0x10001d1cu) {
+        a2bus_stub_do_test_wifi();
         return 1;
     }
     /* Other veneers: only rewrite when the insn itself lives in Pico RAM. */
@@ -797,6 +803,16 @@ static void usb_log_cdc_active_once(void) {
 #define USB_GUEST_ENCRYPT_WRITE_CFG     0x10005294u /* EncryptWriteConfigToFlash */
 #define USB_GUEST_TS_WRITE_SEC_REG      0x10002f1cu /* tsWriteSecurityRegister */
 #define USB_GUEST_TS_READ_SEC_REG       0x10002e68u /* tsReadSecurityRegister */
+#define USB_GUEST_DO_TEST_WIFI          0x10001d1cu /* DoTestWifi */
+#define USB_GUEST_DO_TEST_WIFI_VENEER   0x20004548u /* __DoTestWifi_veneer */
+#define USB_GUEST_PARAMETER_BUFFER      0x20016fc8u
+#define USB_GUEST_PARAMETER_BUF_IDX     0x20016fe8u
+#define USB_GUEST_DATA_BUFFER_INDEX     0x2000ccccu
+#define USB_GUEST_DATA_XFER_MODE        0x2006160au
+#define USB_GUEST_REGISTERS             0x20057038u
+#define USB_GUEST_WIFI_SSID             0x2000bf4eu /* pConfig->wifi_ssid */
+#define USB_GUEST_NETERR_SSIDNOTSET     3u
+#define USB_GUEST_NETERR_WIFINOTCONN    5u
 #define USB_GUEST_GET_CONFIG_BYTE1      0x100054b8u /* GetConfigByte1 */
 #define USB_GUEST_GET_CONFIG_BYTE2      0x100054d4u /* GetConfigByte2 */
 #define USB_GUEST_SAVE_CONFIGS_CALL     0x10000348u /* main: bl SaveConfigs */
@@ -1638,6 +1654,24 @@ static void usb_guest_stub_save_user_settings(void) {
     cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
 }
 
+/* a2bus has no CYW43 / core0 IPC network pump; CP Test Wifi otherwise returns
+ * NETERR_UNKNOWN ("Unexpected Error.") or hangs up to 90s on FIFO timeout. */
+static void a2bus_stub_do_test_wifi(void) {
+    uint8_t err = USB_GUEST_NETERR_SSIDNOTSET;
+    uint8_t ssid0 = mem_read8(USB_GUEST_WIFI_SSID);
+    if (ssid0 != 0u) {
+        err = USB_GUEST_NETERR_WIFINOTCONN;
+    }
+    mem_write8(USB_GUEST_PARAMETER_BUFFER, err);
+    mem_write8(USB_GUEST_DATA_XFER_MODE, 0u); /* MODE_LINEAR */
+    mem_write32(USB_GUEST_DATA_BUFFER_INDEX, 0u);
+    mem_write32(USB_GUEST_PARAMETER_BUF_IDX, 0u);
+    /* Next PARAM read serves parameterBuffer[0] via host fast-path. */
+    mem_write8(USB_GUEST_REGISTERS + 1u, err);
+    fprintf(stderr, "[A2Bus] DoTestWifi: stubbed (no CYW43) -> err=%u\n", err);
+    cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+}
+
 static void usb_guest_stub_get_config_byte1(void) {
     /* Ensure full UserSettings defaults exist (LoadAllConfigs may have been missed). */
     if (mem_read8(USB_GUEST_CONFIG_BUFFER + 6u) != 1u) {
@@ -1952,6 +1986,10 @@ static int a2bus_spi_flash_hooks(void) {
     }
     if (pc == USB_GUEST_SAVE_USER_SETTINGS) {
         usb_guest_stub_save_user_settings();
+        return 1;
+    }
+    if (pc == USB_GUEST_DO_TEST_WIFI) {
+        a2bus_stub_do_test_wifi();
         return 1;
     }
     /* Security-register SPI program hangs under a2bus; config kept in SRAM (+ host file). */

@@ -11,6 +11,15 @@ _(none)_
 
 ---
 
+## 2026-07-29 — stub CP Test Wifi under a2bus
+
+| Change | Reason |
+|--------|--------|
+| a2bus stub `DoTestWifi` (veneer + flash entry); return `SSIDNOTSET` / `WIFINOTCONN` | CP **Test Wifi** → **Unexpected Error.** — no CYW43/core0 IPC under MAME bridge |
+| Probe `CMD_TESTWIFI` in `a2bus-probe-settings.py`; note in `MAME-BRIDGE.md` | Host-side check without MAME |
+
+---
+
 ## 2026-07-29 — `c11f059` — stub CP Save under a2bus
 
 | Change | Reason |
