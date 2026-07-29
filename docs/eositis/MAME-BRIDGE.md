@@ -52,8 +52,7 @@ Bring-up notes (a2bus):
 - Skip `stdio_usb_init` so core0 reaches `InitPicoLed` → `cyw43_arch_init`.
 - Host-format `__wrap_printf`, stub `hw_claim_*` / `check_alloc`, skip firmware `multicore_launch` when the script already started core1.
 - Force `CheckPicoW()==true` when `-wifi` is on.
-- **Current gap:** `cyw43_arch_init` under MAME a2bus can still HardFault (`PC=0xFFFFFFFF`) before `NetworkPump` services `CMD_TESTWIFI` IPC. Optional `-tap` / `-net` (via script `"$@"`) is for a real host network once init is stable.
-
+- Optional `-tap` / `-net` (via script `"$@"`) for a real host network once join works.
 
 `CMD_COLDSTART` must finish before the Apple reads `configbyte1`. The bridge pump waits for a full STATUS **BUSY→idle** cycle (no early exit if BUSY was never seen). A premature return left `configbyte1=0`, which clears `AUTOBOOTFLAG` and makes the IIc firmware skip slot 4 (`NEXTBOOTSLOT=$C6`).
 

@@ -5,7 +5,7 @@ Scope: local commits on `main` after clone.
 
 ---
 
-## Unreleased
+## 2026-07-29 — `406f0d9` — fix cyw43_arch_init HardFault on a2bus
 
 | Change | Reason |
 |--------|--------|
