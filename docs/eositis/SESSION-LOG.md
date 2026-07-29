@@ -610,7 +610,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Actions** | Mode-aware DMA layout/offsets/16ch; PIO skip/READ fix; remove synthetic wifi stubs; M33 dma re-init + 520KB PC range; core1 SP cushion |
 | **Outcome** | `SPI_READ_TEST_REGISTER → 0xFEEDBEAD`; chip FW version string prints. Core1 still HardFaults in BusLoopSlinky @ CLM `clmload_status` (blocks a2bus TestWifi IPC). Host TAP/NAT still Linux-only |
 | **Validate** | `bramble_tests` 322/322; seeded a2bus `-wifi` run shows FEEDBEAD + Version line |
-| **Commit** | _(pending)_ |
+| **Commit** | `26fece6` — fix(m33): decode MegaFlash CYW43 gSPI with RP2350 DMA BSWAP layout |
 
 ## 2026-07-29 — Fix Test Wifi display strings; clarify TAP/NAT
 
