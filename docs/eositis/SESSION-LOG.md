@@ -591,6 +591,16 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | Probe `TESTWIFI err=3` in ~0ms; `bramble_tests` 322/322 |
 | **Commit** | `0c04ab9` — fix(mame): stop Test Wifi hang on empty SSID under a2bus |
 
+## 2026-07-29 — Configured-SSID Test Wifi under a2bus
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Empty-SSID stub OK (settings not saved this session); entered WiFi data and retested; defer Save Settings |
+| **Causes** | (1) `stdio_usb_init` skip jumped past `InitPicoLed`; (2) `_sw_spin_locks` LDAEXB base stale; (3) WFE/`sleep_until` starved TIMER0; (4) gSPI test-pattern still fails (`Failed to read test pattern`) |
+| **Actions** | Fix InitPicoLed jump; spinlock range; sleep stubs + malloc_mutex; synthetic TestWifi success when SSID set (`NETERR_NONE`/`192.168.4.2`); empty SSID still `SSIDNOTSET` |
+| **Validate** | Seeded TESTWIFI err=11 in ~20ms; empty err=3; `bramble_tests` 322/322 |
+| **Commit** | _(pending)_ |
+
 <!--
 
 | Field | Detail |

@@ -5,7 +5,21 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## Unreleased
+
+| Change | Reason |
+|--------|--------|
+| a2bus: jump `stdio_usb_init` skip to `bl InitPicoLed` (not past it) | Wrong PC skipped `cyw43_arch_init`; TestWifi asserted in `cyw43_ensure_up` |
+| LDAEXB free-range includes `_sw_spin_locks` @ `0x2000b794` | Stale `0x20005e34` left `sleep_until` spinning during wifi init |
+| a2bus: stub `sleep_ms`/`sleep_us`/`sleep_until` (advance TIMER0) | Dual-core WFE starved guest time during `InitPicoLed` |
+| a2bus: unlock `malloc_mutex`; nop mutex enter/exit veneers | Zero owner deadlocked `wrap_malloc` before InitCyw43 |
+| a2bus: empty SSID → `SSIDNOTSET`; configured SSID → synthetic `NETERR_NONE` + `192.168.4.2` | CP Test Wifi usable; real gSPI test-pattern JOIN still WIP |
+| Optional `BRAMBLE_A2BUS_SEED_WIFI=1` seeds BrambleNet creds | Bring-up without CP Save Settings |
+
+---
+
 ## 2026-07-29 — `0c04ab9` — stop Test Wifi hang on empty SSID
+
 
 | Change | Reason |
 |--------|--------|

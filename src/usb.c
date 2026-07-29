@@ -38,6 +38,7 @@
 #include "devtools.h"
 #include "emulator.h"
 #include "a2bus_bridge.h"
+#include "timer.h"
 #include "cyw43.h"
 
 /*
@@ -1916,30 +1917,149 @@ static int a2bus_rtc_hooks(void) {
 #define USB_GUEST_TEST_WIFI           0x100085f4u /* TestWifi */
 #define USB_GUEST_DO_TEST_WIFI        0x10001d1cu /* DoTestWifi (core1) */
 #define USB_GUEST_GET_NETWORK_TIME    0x1000859cu /* GetNetworkTime */
+#define USB_GUEST_CONNECT_WIFI        0x10008bacu /* CUDPTask::ConnectWifi */
+#define USB_GUEST_INIT_CYW43          0x100088f4u /* CUDPTask::InitCyw43 */
 #define USB_GUEST_NETERR_SSIDNOTSET   3u
+#define USB_GUEST_NETERR_NONE         11u /* NetworkError_t: last enumerator */
 #define USB_GUEST_TESTWIFI_ERRBYTE    0x20016fc8u
 #define USB_GUEST_TESTWIFI_FLAG_A     0x2006160au
 #define USB_GUEST_TESTWIFI_FLAG_B     0x2000ccccu
 #define USB_GUEST_TESTWIFI_PARAM      0x2000caccu
 #define USB_GUEST_REGISTERS           0x20057038u
 #define USB_GUEST_TESTWIFI_MISC       0x20016fe8u
+#define USB_GUEST_MALLOC_MUTEX        0x20005164u /* malloc_mutex (.data, often still zero) */
+#define USB_GUEST_MUTEX_ENTER_VENEER  0x10034da0u /* __mutex_enter_blocking_veneer */
+#define USB_GUEST_MUTEX_EXIT_VENEER   0x10034d70u /* __mutex_exit_veneer */
+#define USB_GUEST_SLEEP_UNTIL         0x1000bdc4u
+#define USB_GUEST_SLEEP_US            0x1000be78u
+#define USB_GUEST_SLEEP_MS            0x1000be9cu
+
+/* Unlocked mutex owner = -1; spinlock slot in guest SRAM for [0]. */
+static uint32_t a2bus_mutex_spinlock_byte = 0x20061f00u;
+
+static void a2bus_guest_time_advance_us(uint64_t us) {
+    if (us == 0u) {
+        us = 1u;
+    }
+    if (us > 5000000ull) {
+        us = 5000000ull; /* cap per call — cyw43 init uses many short sleeps */
+    }
+    timer_tick((uint32_t)us);
+    /* Wake any WFE waiter that raced into sleep before this stub. */
+    for (int i = 0; i < NUM_CORES; i++) {
+        cores[i].is_wfi = 0;
+    }
+}
+
+/* lwIP ip4_addr_t on LE: host-order u32. Bramble DHCP pool uses 192.168.4.x. */
+static void a2bus_fill_testwifi_success(uint32_t result) {
+    /* 192.168.4.2 / 255.255.255.0 gw 192.168.4.1 dns 192.168.4.1 */
+    mem_write32(result + 0u, 0x0204a8c0u);
+    mem_write32(result + 4u, 0x00ffffffu);
+    mem_write32(result + 8u, 0x0104a8c0u);
+    mem_write32(result + 12u, 0x0104a8c0u);
+    mem_write32(result + 16u, USB_GUEST_NETERR_NONE);
+    mem_write8(result + 20u, 1u); /* testCompleted */
+}
+
+static void a2bus_ensure_malloc_mutex(void) {
+    static int ready;
+    if (ready++) {
+        return;
+    }
+    /* mutex_t: [0]=spin_lock*, [4]=int8 owner (-1 unlocked). Zero owner → forever WFE. */
+    if (mem_read32(USB_GUEST_MALLOC_MUTEX) == 0u) {
+        mem_write32(USB_GUEST_MALLOC_MUTEX, a2bus_mutex_spinlock_byte);
+        mem_write8(a2bus_mutex_spinlock_byte, 0);
+    }
+    mem_write8(USB_GUEST_MALLOC_MUTEX + 4u, 0xFFu);
+    mem_write8(USB_GUEST_STDIO_MUTEX + 4u, 0xFFu);
+    fprintf(stderr, "[A2Bus] malloc_mutex unlocked (owner=-1)\n");
+}
 
 /*
  * Empty-SSID TestWifi/NTP uses C++ exceptions (__cxa_throw). Bramble's EH path
  * still faults. Fail fast with SSIDNOTSET on core1 DoTestWifi (no IPC/sleep)
  * and skip GetNetworkTime's RunNTP so core0Loop stays responsive.
+ *
+ * Configured-SSID: full cyw43_arch_init still fails Bramble gSPI test-pattern
+ * under a2bus (PIO2). Complete TestWifi with synthetic STA IPs so CP can finish;
+ * real JOIN remains follow-up.
  */
 static int a2bus_wifi_hooks(void) {
     if (!a2bus_bridge_active() || !cyw43.enabled) {
         return 0;
     }
+    a2bus_ensure_malloc_mutex();
     uint32_t pc = cpu.r[15] & ~1u;
+
+    /*
+     * sleep_until/WFE + dual-core timer ownership stalls cyw43_arch_init for
+     * wall-minutes. Advance guest TIMER0 and return so InitPicoLed can progress.
+     */
+    if (pc == USB_GUEST_SLEEP_MS) {
+        a2bus_guest_time_advance_us((uint64_t)cpu.r[0] * 1000ull);
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return 1;
+    }
+    if (pc == USB_GUEST_SLEEP_US) {
+        uint64_t us = (uint64_t)cpu.r[0] | ((uint64_t)cpu.r[1] << 32);
+        a2bus_guest_time_advance_us(us);
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return 1;
+    }
+    if (pc == USB_GUEST_SLEEP_UNTIL) {
+        uint64_t target = (uint64_t)cpu.r[0] | ((uint64_t)cpu.r[1] << 32);
+        uint64_t now = timer_state.time_us;
+        if (target > now) {
+            a2bus_guest_time_advance_us(target - now);
+        } else {
+            a2bus_guest_time_advance_us(1u);
+        }
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return 1;
+    }
+
+    /* wrap_malloc takes malloc_mutex; zero owner deadlocks before InitCyw43. */
+    if (pc == USB_GUEST_MUTEX_ENTER_VENEER || pc == USB_GUEST_MUTEX_EXIT_VENEER ||
+        pc == USB_GUEST_MUTEX_ENTER_V || pc == USB_GUEST_MUTEX_EXIT_V) {
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return 1;
+    }
+
+    if (pc == USB_GUEST_INIT_CYW43) {
+        /* Avoid cyw43_spi_init re-entry assert after failed InitPicoLed start. */
+        mem_write8(0x200615fcu, 1u);
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return 1;
+    }
+    if (pc == USB_GUEST_CONNECT_WIFI) {
+        static int once;
+        if (!once++) {
+            fprintf(stderr, "[A2Bus] stub ConnectWifi (gSPI test-pattern still WIP)\n");
+            fflush(stderr);
+        }
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return 1;
+    }
+
     if (pc != USB_GUEST_DO_TEST_WIFI && pc != USB_GUEST_GET_NETWORK_TIME &&
         pc != USB_GUEST_TEST_WIFI && pc != 0x20004548u /* __DoTestWifi_veneer */) {
         return 0;
     }
+
     if (mem_read8(USB_GUEST_WIFI_SSID) != 0u) {
-        return 0; /* configured SSID — real ConnectWifi / cyw43 */
+        if (pc == USB_GUEST_TEST_WIFI) {
+            uint32_t result = cpu.r[0];
+            fprintf(stderr, "TestWifi()\n[A2Bus] configured SSID → synthetic OK (192.168.4.2)\n");
+            fflush(stderr);
+            if (result != 0u) {
+                a2bus_fill_testwifi_success(result);
+            }
+            cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+            return 1;
+        }
+        return 0; /* DoTestWifi IPC / GetNetworkTime — real or other hooks */
     }
 
     if (pc == USB_GUEST_DO_TEST_WIFI || pc == 0x20004548u) {
@@ -2066,6 +2186,21 @@ static int a2bus_spi_flash_hooks(void) {
         }
         /* DEFCFGBYTE1 = AUTOBOOT only; do not force ROMDISKFLAG (extra unit). */
         usb_guest_init_default_config();
+        /* Optional: seed WiFi creds for join-path bring-up (BRAMBLE_A2BUS_SEED_WIFI=1). */
+        if (getenv("BRAMBLE_A2BUS_SEED_WIFI") != NULL) {
+            const char *ssid = "BrambleNet";
+            const char *wpa = "password";
+            uint32_t i;
+            for (i = 0; ssid[i] && i < 32u; i++) {
+                mem_write8(USB_GUEST_WIFI_SSID + i, (uint8_t)ssid[i]);
+            }
+            mem_write8(USB_GUEST_WIFI_SSID + i, 0);
+            for (i = 0; wpa[i] && i < 64u; i++) {
+                mem_write8(USB_GUEST_CONFIG_BUFFER + 0x1au + i, (uint8_t)wpa[i]);
+            }
+            mem_write8(USB_GUEST_CONFIG_BUFFER + 0x1au + i, 0);
+            fprintf(stderr, "[A2Bus] seeded WiFi SSID='%s' (BRAMBLE_A2BUS_SEED_WIFI)\n", ssid);
+        }
         cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
         return 1;
     }
@@ -2169,20 +2304,21 @@ static int a2bus_spi_flash_hooks(void) {
         return 1;
     }
     /*
-     * stdio_usb_init blocks forever without a USB host. Skip so core0 reaches
-     * InitPicoLed (cyw43_arch_init) and PicoW_ServiceCore0IpcAndNetwork /
-     * core0Loop — required for CMD_TESTWIFI IPC from BusLoop on core1.
+     * stdio_usb_init blocks forever without a USB host. Skip the call but land
+     * on bl InitPicoLed (0x100003ca / 0x1000048a) — NOT the following insn.
+     * Jumping to 0x100003ce skipped cyw43_arch_init; TestWifi then asserted in
+     * cyw43_ensure_up (cyw43_is_initialized false).
      */
     if (pc == USB_GUEST_STDIO_USB_INIT_CALL1) {
         static int usb_skip_logged;
         if (!usb_skip_logged++) {
             fprintf(stderr, "[A2Bus] skip stdio_usb_init → InitPicoLed/cyw43\n");
         }
-        cpu.r[15] = 0x100003ceu | 1u; /* next: bl InitPicoLed */
+        cpu.r[15] = USB_GUEST_INIT_PICOLED_CALL1 | 1u; /* bl InitPicoLed */
         return 1;
     }
     if (pc == USB_GUEST_STDIO_USB_INIT_CALL2) {
-        cpu.r[15] = 0x1000048eu | 1u;
+        cpu.r[15] = USB_GUEST_INIT_PICOLED_CALL2 | 1u; /* bl InitPicoLed */
         return 1;
     }
     if (pc == USB_GUEST_STDIO_USB_INIT_FN) {

@@ -550,8 +550,13 @@ static void t32_exclusive_ldst(uint32_t pc, uint16_t upper, uint16_t lower) {
     if (sfx == 0xCF) {
         /* LDAEXB Rt, [Rn] */
         uint8_t val = mem_read8(addr);
-        /* Pico SDK spin_lock_hw[] — treat as free (single-core / bring-up) */
-        if (addr >= 0x20005e34u && addr < 0x20005e34u + 32u) {
+        /*
+         * MegaFlash pico2_debug: `_sw_spin_locks` at 0x2000b794 (32 bytes).
+         * Older builds used 0x20005e34 — wrong base left sleep_until spinning
+         * forever in spin_lock_blocking (PC≈0x1000BE2C) during cyw43_arch_init.
+         */
+        if ((addr >= 0x2000b794u && addr < 0x2000b794u + 32u) ||
+            (addr >= 0x20005e34u && addr < 0x20005e34u + 32u)) {
             val = 0;
         }
         cpu.r[Rt] = val;
