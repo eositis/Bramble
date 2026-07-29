@@ -1575,7 +1575,10 @@ static void usb_guest_init_default_config(void) {
 }
 
 static void usb_guest_stub_get_config_byte1(void) {
-    /* AUTOBOOTFLAG — match DEFCFGBYTE1 / LoadAllConfigs stub defaults. */
+    /* Ensure full UserSettings defaults exist (LoadAllConfigs may have been missed). */
+    if (mem_read8(USB_GUEST_CONFIG_BUFFER + 6u) != 1u) {
+        usb_guest_init_default_config();
+    }
     uint8_t b = mem_read8(USB_GUEST_CONFIG_BUFFER + 4u);
     if (b == 0u) {
         b = 0x40u; /* AUTOBOOTFLAG */
@@ -1818,11 +1821,45 @@ static int a2bus_spi_flash_hooks(void) {
         return 0;
     }
     uint32_t pc = cpu.r[15] & ~1u;
+
+    /*
+     * main calls U2_Init before LoadAllConfigs. Under a2bus, U2_Net_Init can
+     * stall core0 forever while script-launched core1 already serves the bus —
+     * configBuffer stays BSS-zero → CP Unexpected Error:0. Skip U2 like USB mode.
+     */
+    if (pc == USB_GUEST_U2_INIT || pc == USB_GUEST_U2_INIT_CALL) {
+        if (pc == USB_GUEST_U2_INIT_CALL) {
+            cpu.r[15] = 0x1000032cu | 1u; /* next: bl LoadAllConfigs */
+        } else {
+            cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        }
+        return 1;
+    }
+
+    /* InitSpi can stall core0 before LoadAllConfigs; skip call and function. */
+    if (pc == USB_GUEST_INIT_SPI_CALL) {
+        cpu.r[15] = 0x100002e6u | 1u;
+        return 1;
+    }
+    if (pc == 0x1000318cu) { /* InitSpi */
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return 1;
+    }
+
     if (pc == USB_GUEST_LOAD_ALL_CONFIGS) {
         /* DEFCFGBYTE1 = AUTOBOOT only; do not force ROMDISKFLAG (extra unit). */
         usb_guest_init_default_config();
         cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
         return 1;
+    }
+    /* Belt-and-suspenders: core0 may still be stuck pre-main while core1
+     * serves GETUSERSETTINGS; seed defaults then run real GetUserSettings. */
+    if (pc == 0x10005524u) { /* GetUserSettings */
+        if (mem_read8(USB_GUEST_CONFIG_BUFFER + 6u) != 1u) {
+            usb_guest_init_default_config();
+            fprintf(stderr, "[A2Bus] GetUserSettings: late-seeded configBuffer\n");
+        }
+        return 0; /* continue into real function */
     }
     if (pc == USB_GUEST_GET_CONFIG_BYTE1) {
         usb_guest_stub_get_config_byte1();
@@ -2160,14 +2197,25 @@ static void usb_guest_skip_get_device_info_string(void) {
 void usb_console_guest_stdio_hook(void) {
     int usb_mode = usb_console_bridge_mode();
 
-    if (!guest_megaflash_hook_active()) {
+    /*
+     * MAME a2bus must run even when USB/net hooks are "active" for other
+     * reasons. Previously a2bus stubs only ran when !guest_megaflash_hook_active(),
+     * so LoadAllConfigs never seeded configBuffer → GETUSERSETTINGS returned
+     * version/checkbyte only (timezoneidver=0 → CP Unexpected Error:0).
+     */
+    if (a2bus_bridge_active()) {
         if (a2bus_fix_picoram_veneer()) {
             return;
         }
         if (a2bus_rtc_hooks()) {
             return;
         }
-        (void)a2bus_spi_flash_hooks();
+        if (a2bus_spi_flash_hooks()) {
+            return;
+        }
+    }
+
+    if (!guest_megaflash_hook_active()) {
         return;
     }
 

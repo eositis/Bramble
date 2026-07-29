@@ -81,6 +81,8 @@ After ID is live (`$96`/`$69`) and STATUS is idle, Bramble mirrors BusLoop DATA/
 
 Host-side DATA pointer advance must read `dataBufferTransferMode` as an **8-bit** BSS field. A 32-bit load pulled adjacent flags (`dhcp_pcb_refcount`, …) and treated `MODE_LINEAR` as interleaved, which corrupted `CMD_GETUSERSETTINGS` (control panel **Unexpected Error:0**) and any other linear transfer.
 
+Script `core1launch` starts BusLoop on core1 while core0 may still be in crt0/`InitSpi`. a2bus hooks late-seed `configBuffer` on `GetUserSettings` so option 7 validation sees `timezoneidver=1` even when `LoadAllConfigs` never ran on core0.
+
 
 ## Smoke test
 
