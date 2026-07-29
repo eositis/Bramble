@@ -1,9 +1,9 @@
 # MegaFlash Apple-bus bring-up for MAME bridge (-a2bus-bridge).
 # PHI0 so IsAppleConnected(); core1launch for BusLoop. No USB console.
-# Cooperative guest-time is slow vs wall clock; wait for core0 past crt0/.data
-# before launching core1 so LoadAllConfigs can seed user settings.
+# Launch core1 early so BusLoop survives core0 cyw43_arch_init HardFaults.
+# Wall-time driven under a2bus (see main.c script_poll).
 
 10ms: gpio20 1
 10ms: gpio19 0
 50ms: a2phi
-2000ms: core1launch
+100ms: core1launch

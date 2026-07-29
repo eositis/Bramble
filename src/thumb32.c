@@ -507,7 +507,9 @@ static void t32_exclusive_ldst(uint32_t pc, uint16_t upper, uint16_t lower) {
     uint32_t insn = ((uint32_t)upper << 16) | lower;
     int      Rn   = upper & 0xF;
     int      Rt   = (insn >> 12) & 0xF;
-    int      Rd   = (insn >> 8) & 0xF;
+    /* STREXB/STLEXB: Rd is bits[3:0] of lower (not bits[11:8]).
+     * Using >>8 made Rd=15 on strexb 2f41 and wrote status into PC. */
+    int      Rd   = lower & 0xF;
     uint32_t addr = cpu.r[Rn];
     int      ac   = get_active_core();
     uint8_t  sfx  = (uint8_t)(lower & 0xFFu);
@@ -535,16 +537,43 @@ static void t32_exclusive_ldst(uint32_t pc, uint16_t upper, uint16_t lower) {
     if (sfx == 0xE0) {
         /* STLEXB Rd, Rt, [Rn] — release-ordered byte store */
         mem_write8(addr, (uint8_t)cpu.r[Rt]);
-        cpu.r[Rd] = 0;
+        if (Rd != 15) {
+            cpu.r[Rd] = 0;
+        }
         exclusive_monitor[ac].valid = 0;
         return;
     }
 
     /* STREXB Rd, Rt, [Rn] — always succeed under emu (SDK lock loops) */
-    (void)ac;
     mem_write8(addr, (uint8_t)cpu.r[Rt]);
-    cpu.r[Rd] = 0;
+    if (Rd != 15) {
+        cpu.r[Rd] = 0;
+    }
     exclusive_monitor[ac].valid = 0;
+}
+
+/* ========================================================================
+ * Test Target (ARMv8-M TT/TTT/TTA/TTAT)
+ * upper: 1110 1000 0100 Rn = 0xE84x
+ * lower: 1111 Rd A 0 0 0 0 0 0 T
+ * Mis-decoding as STRD writes r15/rN to [Rn] (seen corrupting ROM via tt r2,r2).
+ * ======================================================================== */
+static int t32_is_tt(uint16_t upper, uint16_t lower) {
+    return ((upper & 0xFFF0u) == 0xE840u) && ((lower & 0xF0FFu) == 0xF000u);
+}
+
+    static void t32_tt(uint32_t pc, uint16_t upper, uint16_t lower) {
+    (void)pc;
+    (void)upper;
+    int Rd = (lower >> 8) & 0xF;
+    /* Emulate Secure world: address is Secure (S), readable and writable.
+     * Pico SDK rom_func_lookup tests bit 22 (S) to choose RT_FLAG_FUNC_ARM_SEC. */
+    uint32_t resp = (1u << 22) | /* S */
+                    (1u << 19) | /* RW */
+                    (1u << 18);  /* R */
+    if (Rd != 15) {
+        cpu.r[Rd] = resp;
+    }
 }
 
 /* ========================================================================
@@ -1129,7 +1158,9 @@ int thumb32_step(uint32_t pc, uint16_t upper, uint16_t lower) {
             /* Simpler: upper[8]=is_DB, upper[7]=L */
             /* Check for LDRD/STRD: upper[6]=1 and upper[7:5] pattern */
             if (upper & 0x0040) {
-                if (t32_is_exclusive_ldst(upper, lower)) {
+                if (t32_is_tt(upper, lower)) {
+                    t32_tt(pc, upper, lower);
+                } else if (t32_is_exclusive_ldst(upper, lower)) {
                     t32_exclusive_ldst(pc, upper, lower);
                 } else if (t32_is_halfword_acqrel(upper, lower)) {
                     t32_halfword_acqrel(pc, upper, lower);

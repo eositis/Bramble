@@ -35,6 +35,9 @@
 cpu_state_t cpu = {0};
 int pc_updated = 0;
 
+/* Last PC observed at the start of cpu_step (for HardFault/lockup logs). */
+static uint32_t cpu_step_prev_pc;
+
 /* ========================================================================
  * Cycle-Accurate Timing
  * ======================================================================== */
@@ -885,11 +888,28 @@ void cpu_exception_entry(uint32_t vector_num) {
                     cpu.r[15], cpu.r[13]);
         }
     }
+    if (vector_num == EXC_HARDFAULT && ac == CORE0) {
+        static int hf0_logged;
+        if (!hf0_logged++) {
+            uint32_t sp = cpu.r[13];
+            fprintf(stderr,
+                    "[CORE0] HardFault at PC=0x%08X SP=0x%08X LR=0x%08X "
+                    "prev=0x%08X step=%u\n"
+                    "        R0=%08X R1=%08X R2=%08X R3=%08X\n"
+                    "        stack: %08X %08X %08X %08X %08X %08X %08X %08X\n",
+                    cpu.r[15], sp, cpu.r[14], cpu_step_prev_pc, cpu.step_count,
+                    cpu.r[0], cpu.r[1], cpu.r[2], cpu.r[3],
+                    mem_read32(sp), mem_read32(sp + 4), mem_read32(sp + 8),
+                    mem_read32(sp + 12), mem_read32(sp + 16), mem_read32(sp + 20),
+                    mem_read32(sp + 24), mem_read32(sp + 28));
+        }
+    }
+
     uint32_t *exception_stack = cores[ac].exception_stack;
     int *p_exception_depth = &cores[ac].exception_depth;
     uint32_t vector_offset = vector_num * 4;
     uint32_t handler_addr = mem_read32(cpu.vtor + vector_offset);
-    
+
     if (cpu.debug_enabled) {
         printf("[CPU] Exception %u: PC=0x%08X VTOR=0x%08X -> Handler=0x%08X (depth %d)\n",
                vector_num, cpu.r[15], cpu.vtor, handler_addr, *p_exception_depth);
@@ -899,9 +919,11 @@ void cpu_exception_entry(uint32_t vector_num) {
      * HardFault has fixed priority -1. If we're already in HardFault and another
      * fault occurs, the real Cortex-M0+ enters lockup (core halts). */
     if (vector_num == EXC_HARDFAULT && cpu.current_irq == EXC_HARDFAULT) {
-        if (cpu.debug_enabled) {
-            printf("[CPU] LOCKUP: double-fault (HardFault during HardFault) at PC=0x%08X\n",
-                   cpu.r[15]);
+        static int lockup_logged;
+        if (!lockup_logged++) {
+            fprintf(stderr,
+                    "[CPU] LOCKUP: double-fault at PC=0x%08X prev=0x%08X (core %d)\n",
+                    cpu.r[15], cpu_step_prev_pc, ac);
         }
         cores[ac].is_halted = 1;
         cpu.r[15] = 0xFFFFFFFF;
@@ -1339,18 +1361,18 @@ static int guest_megaflash_memset_accel(uint32_t pc) {
     return 0;
 }
 
-static uint32_t cpu_step_prev_pc;
-
 __attribute__((hot)) void cpu_step(void) {
     usb_console_guest_stdio_hook();
 
     uint32_t pc = cpu.r[15] & ~1u;
 
     if (guest_megaflash_crt0_accel(pc)) {
+        cpu_step_prev_pc = pc;
         timing_tick(4);
         return;
     }
     if (guest_megaflash_memset_accel(pc)) {
+        cpu_step_prev_pc = pc;
         timing_tick(4);
         return;
     }
@@ -1432,6 +1454,7 @@ __attribute__((hot)) void cpu_step(void) {
     if (pc < ROM_SIZE) {
         /* ROM function interception (float/double/flash) */
         if (rom_intercept(pc)) {
+            cpu_step_prev_pc = pc;
             timing_tick(4);
             return;
         }

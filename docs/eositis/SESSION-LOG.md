@@ -570,15 +570,16 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | `bramble_tests` 322/322; probe TESTWIFI err=3 in ~0ms (stub) |
 | **Commit** | `0b6d0b5` — fix(mame): stub DoTestWifi so CP Test Wifi is usable under a2bus |
 
-## 2026-07-29 — Test Wifi via Bramble CYW43 (not stub)
+## 2026-07-29 — Fix cyw43_arch_init HardFault (PC=FFFFFFFF)
 
 | Field | Detail |
 |-------|--------|
-| **Request** | WiFi is a Bramble feature; MegaFlash should use CYW43 under Bramble |
-| **Actions** | Remove DoTestWifi stub; `-wifi` in `run-megaflash-mame.sh`; a2bus stubs so core0 reaches `InitPicoLed` (skip USB stdio, host printf, hw_claim, check_alloc, multicore skip, CheckPicoW force) |
-| **Outcome** | Core0 prints WIFI Supported=Yes and enters InitPicoLed; `cyw43_arch_init` still HardFaults (`PC=0xFFFFFFFF`) before TESTWIFI IPC completes |
-| **Validate** | `bramble_tests` 322/322 |
-| **Commit** | `040f44d` — fix(mame): drive MegaFlash Test Wifi through Bramble -wifi CYW43 |
+| **Request** | Core0 HALTED PC=FFFFFFFF after InitPicoLed; core1 never launched; MAME session dies |
+| **Root causes** | (1) Missing ROM `SR` → `blx 0`; (2) `TT` misdecoded as STRD; (3) STREXB wrote status to r15 (Rd bits wrong) → PC=0 → stale LR return with unbalanced stack → pop into `default_alarm_pool` |
+| **Actions** | ROM SR/SS + nop-on-miss; implement TT; fix STREXB Rd; early core1launch; HardFault logging |
+| **Outcome** | Past InitPicoLed; `TestWifi()`/`NETPUMP` start; core1 Script launch; no HardFault in 20s run |
+| **Validate** | `bramble_tests` 322/322; a2bus+wifi timeout run |
+| **Commit** | *(pending)* |
 
 <!--
 

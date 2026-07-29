@@ -2634,7 +2634,8 @@ TEST(test_rom_lookup_not_found) {
         cpu_step();
         if (cpu.r[15] >= FLASH_BASE) break;
     }
-    ASSERT_EQ(0, cpu.r[0], "Lookup returns NULL for unknown code");
+    ASSERT_EQ(ROM_NOP_STUB_ADDR | 1u, cpu.r[0],
+              "Lookup returns nop stub (not NULL) for unknown code");
     PASS();
 }
 

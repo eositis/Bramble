@@ -34,10 +34,14 @@
 #define ROM_FUNC_FLASH_FLUSH_CACHE      ROM_TABLE_CODE('F', 'C')
 #define ROM_FUNC_FLASH_ENTER_CMD_XIP    ROM_TABLE_CODE('C', 'X')
 #define ROM_FUNC_GET_SYS_INFO           ROM_TABLE_CODE('G', 'S')
+/* RP2350 bootrom APIs used by Pico SDK runtime_init_* */
+#define ROM_FUNC_BOOTROM_STATE_RESET    ROM_TABLE_CODE('S', 'R')
+#define ROM_FUNC_SET_BOOTROM_STACK      ROM_TABLE_CODE('S', 'S')
 
 /* ROM get_sys_info stub address (Thumb, intercepted by rom_intercept) */
 #define ROM_GET_SYS_INFO_ADDR           0x03C8
 #define ROM_LOOKUP_FN_ADDR              0x0200
+#define ROM_NOP_STUB_ADDR               0x03CCu /* bx lr — safe blx target when lookup misses */
 #define ROM_SYS_INFO_CHIP_INFO          1u
 
 /* ROM data table codes */

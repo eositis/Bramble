@@ -5,6 +5,15 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## Unreleased
+
+| Change | Reason |
+|--------|--------|
+| ARMv8-M `TT` insn; STREXB `Rd` in bits[3:0]; ROM `SR`/`SS` + nop-on-miss | Fix core0 lockup before/during `cyw43_arch_init` (PC→`.data`, `PC=0xFFFFFFFF`) |
+| Early `core1launch` in `megaflash-mame.stub`; CORE0 HardFault diagnostics | BusLoop survives wifi bring-up; easier next faults |
+
+---
+
 ## 2026-07-29 — `040f44d` — route CP Test Wifi through Bramble `-wifi` CYW43
 
 | Change | Reason |

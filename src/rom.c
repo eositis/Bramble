@@ -160,6 +160,7 @@ static void rom_place_flash_stubs(void) {
         rom_write16(addr, 0x4770);  /* bx lr */
     }
     rom_write16(ROM_GET_SYS_INFO_ADDR, 0x4770);  /* get_sys_info: bx lr (intercepted) */
+    rom_write16(ROM_NOP_STUB_ADDR, 0x4770);      /* shared nop for unknown / RP2350 SR+SS */
 }
 
 /* ========================================================================
@@ -216,6 +217,10 @@ static void rom_build_func_table(void) {
     rom_write16(off, ROM_FUNC_FLASH_FLUSH_CACHE);      rom_write16(off + 2, 0x03C1); off += 4;
     rom_write16(off, ROM_FUNC_FLASH_ENTER_CMD_XIP);    rom_write16(off + 2, 0x03C5); off += 4;
     rom_write16(off, ROM_FUNC_GET_SYS_INFO);           rom_write16(off + 2, 0x03C9); off += 4;
+    /* RP2350: runtime_init_bootrom_reset looks up 'SR' and blx's the result.
+     * Returning 0 makes firmware jump to NULL and wander into ROM data. */
+    rom_write16(off, ROM_FUNC_BOOTROM_STATE_RESET);    rom_write16(off + 2, ROM_NOP_STUB_ADDR | 1); off += 4;
+    rom_write16(off, ROM_FUNC_SET_BOOTROM_STACK);      rom_write16(off + 2, ROM_NOP_STUB_ADDR | 1); off += 4;
     /* End marker */
     rom_write16(off, 0x0000);             rom_write16(off + 2, 0x0000);
 }
@@ -261,7 +266,7 @@ void rom_init(void) {
     rom_place_flash_stubs();
     rom_place_float_double_tables();
 
-    fprintf(stderr, "[ROM] Initialized function table with 15 entries + float/double tables\n");
+    fprintf(stderr, "[ROM] Initialized function table with 17 entries + float/double tables\n");
 }
 
 void rom_apply_rp2350_header(void) {
@@ -275,6 +280,8 @@ static int rom_intercept_lookup(void) {
     uint32_t arg1 = cpu.r[1];
     uint32_t code;
     uint32_t off = 0x0100;
+    /* Never return 0 — callers do blx r0 and would jump to NULL. */
+    const uint32_t miss = ROM_NOP_STUB_ADDR | 1u;
 
     if (arg0 == 0x0100u) {
         code = arg1;
@@ -286,7 +293,7 @@ static int rom_intercept_lookup(void) {
     while (off < 0x0200) {
         uint16_t entry_code = rom_read16(off);
         if (entry_code == 0) {
-            cpu.r[0] = 0;
+            cpu.r[0] = miss;
             return 1;
         }
         if (entry_code == (code & 0xFFFFu)) {
@@ -295,7 +302,7 @@ static int rom_intercept_lookup(void) {
         }
         off += 4;
     }
-    cpu.r[0] = 0;
+    cpu.r[0] = miss;
     return 1;
 }
 
@@ -529,6 +536,25 @@ static int rom_intercept_flash(uint32_t pc) {
 
 int rom_intercept(uint32_t pc) {
     if (pc == ROM_LOOKUP_FN_ADDR) {
+        /* Only treat as lookup when entered via a real BL/BLX (LR in flash/RAM
+         * code). Accidental fallthrough from executing ROM data must not
+         * "return" through a stale LR into .data (seen as time_us_64→malloc_av_). */
+        uint32_t lr = cpu.r[14] & ~1u;
+        int legit_call =
+            (lr >= 0x10000000u && lr < 0x11000000u) ||
+            (lr >= 0x20000120u && lr < 0x20004738u);
+        if (!legit_call) {
+            static int stray_logged;
+            if (!stray_logged++) {
+                fprintf(stderr,
+                        "[ROM] stray execute at lookup stub (LR=0x%08X) — ignoring\n",
+                        cpu.r[14]);
+            }
+            /* Advance past stub instead of returning through stale LR. */
+            cpu.r[15] = (pc + 2) | 1u;
+            cpu.step_count++;
+            return 1;
+        }
         if (rom_intercept_lookup()) {
             cpu.r[15] = cpu.r[14] & ~1u;
             cpu.step_count++;
