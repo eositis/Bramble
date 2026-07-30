@@ -826,6 +826,12 @@ static void usb_log_cdc_active_once(void) {
 #define USB_GUEST_CLOCK_GET_HZ        0x1000c398u
 #define USB_GUEST_SPI_GET_BAUDRATE    0x10011ff0u
 #define USB_GUEST_AON_TIMER_GET_CAL   0x100117ecu /* aon_timer_get_time_calendar */
+#define USB_GUEST_AON_TIMER_GET_TIME  0x100117dau /* aon_timer_get_time */
+#define USB_GUEST_AON_TIMER_START     0x10011804u /* aon_timer_start */
+#define USB_GUEST_AON_TIMER_START_CAL 0x10011838u /* aon_timer_start_calendar */
+#define USB_GUEST_DO_GET_TIME_STR     0x10002150u /* DoGetTimeString */
+#define USB_GUEST_GET_PRODOS_TIME     0x10004b44u /* GetProdosTimestamp */
+#define USB_GUEST_GET_PRODOS25_TIME   0x10004c74u /* GetProdos25Timestamp */
 #define USB_GUEST_RTC_RUNNING_BSS     0x2006161eu /* rtcRunning (bool) */
 #define USB_GUEST_UART_PUTC           0x1000e308u /* uart_putc — bridge to TCP under -uart-console */
 #define USB_GUEST_MAIN_USB_LOOP       0x10000414u /* bl UserTerminal (PicoW USB path) */
@@ -850,6 +856,9 @@ static void usb_log_cdc_active_once(void) {
 #define USB_GUEST_PACKET_ASSERT_BLOCK 0x10003f8eu /* partsAlreadyInBuffer>4 cleanup */
 #define USB_GUEST_DATA_BUFFER         0x2000caccu
 #define USB_GUEST_DATA_BUFFER_END     (USB_GUEST_DATA_BUFFER + USB_GUEST_FLASH_BLOCK_BYTES)
+#define USB_GUEST_PARAMETER_BUFFER    0x20016fc8u
+#define USB_GUEST_PARAM_BUFFER_INDEX  0x20016fe8u
+#define USB_GUEST_REGISTERS           0x20057038u
 #define USB_GUEST_BLOCK_NUM           0x2000beb8u
 #define USB_GUEST_PARTS_IN_BUFFER     0x20016fecu
 #define USB_GUEST_VERIFICATION_ERRORS 0x200615d8u
@@ -1911,15 +1920,16 @@ static void a2bus_seed_megaflash_rtc(void) {
 
 #define USB_GUEST_NTPCLIENTFLAG 0x10u /* configbyte1 — matches MegaFlash defines.h */
 
-static void usb_guest_stub_aon_timer_get_time_calendar(void) {
-    uint32_t tm_ptr = cpu.r[0];
+/* POWMAN AON timer is not emulated on the M33 membus path — always use host time. */
+static struct tm *a2bus_host_localtime(void) {
     time_t now = time(NULL);
-    struct tm *t = localtime(&now);
-    if (!t) {
-        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+    return localtime(&now);
+}
+
+static void a2bus_write_struct_tm(uint32_t tm_ptr, const struct tm *t) {
+    if (tm_ptr == 0u || !t) {
         return;
     }
-    /* newlib struct tm: 9x int fields. */
     mem_write32(tm_ptr + 0u,  (uint32_t)t->tm_sec);
     mem_write32(tm_ptr + 4u,  (uint32_t)t->tm_min);
     mem_write32(tm_ptr + 8u,  (uint32_t)t->tm_hour);
@@ -1929,6 +1939,131 @@ static void usb_guest_stub_aon_timer_get_time_calendar(void) {
     mem_write32(tm_ptr + 24u, (uint32_t)t->tm_wday);
     mem_write32(tm_ptr + 28u, (uint32_t)t->tm_yday);
     mem_write32(tm_ptr + 32u, (uint32_t)t->tm_isdst);
+}
+
+static void usb_guest_stub_aon_timer_get_time_calendar(void) {
+    uint32_t tm_ptr = cpu.r[0];
+    struct tm *t = a2bus_host_localtime();
+    if (t) {
+        a2bus_write_struct_tm(tm_ptr, t);
+    }
+    cpu.r[0] = 1u; /* SDK returns bool success */
+    cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+}
+
+/* timespec: tv_sec + tv_nsec. Store local wall time as seconds-since-1970 so
+ * pico_localtime_r/gmtime-style conversion yields the same civil time. */
+static void usb_guest_stub_aon_timer_get_time(void) {
+    uint32_t ts_ptr = cpu.r[0];
+    struct tm *t = a2bus_host_localtime();
+    time_t sec = 0;
+    if (t) {
+        struct tm tmp = *t;
+        tmp.tm_isdst = 0;
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
+        sec = timegm(&tmp);
+#else
+        /* Linux: timegm may need _GNU_SOURCE; fall back to time(NULL). */
+        sec = time(NULL);
+#endif
+    }
+    if (ts_ptr != 0u) {
+        mem_write32(ts_ptr + 0u, (uint32_t)sec);
+        mem_write32(ts_ptr + 4u, (uint32_t)((uint64_t)sec >> 32));
+        mem_write32(ts_ptr + 8u, 0u); /* tv_nsec */
+        mem_write32(ts_ptr + 12u, 0u);
+    }
+    cpu.r[0] = 1u;
+    cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+}
+
+static void usb_guest_stub_aon_timer_start(void) {
+    a2bus_seed_megaflash_rtc();
+    cpu.r[0] = 1u;
+    cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+}
+
+/* Match DoGetTimeString: "HH:MM AM"/PM with high bit, ResetParamPointer epilogue. */
+static void a2bus_finish_param_cmd(void) {
+    /* ClearError: clear ERROR bits on STATUS (registers[0]) */
+    uint8_t st = mem_read8(USB_GUEST_REGISTERS);
+    mem_write8(USB_GUEST_REGISTERS, (uint8_t)(st & (uint8_t)~0x5Fu));
+    mem_write32(USB_GUEST_PARAM_BUFFER_INDEX, 0u);
+    mem_write8(USB_GUEST_REGISTERS + 1u, mem_read8(USB_GUEST_PARAMETER_BUFFER));
+}
+
+static void usb_guest_stub_do_get_time_string(void) {
+    a2bus_seed_megaflash_rtc();
+    struct tm *t = a2bus_host_localtime();
+    char buf[16];
+    if (!t) {
+        memset(buf, ' ', 8);
+        buf[8] = '\0';
+    } else {
+        int h = t->tm_hour;
+        int h12 = h % 12;
+        if (h12 == 0) {
+            h12 = 12;
+        }
+        snprintf(buf, sizeof(buf), "%2d:%02d %cM", h12, t->tm_min, (h >= 12) ? 'P' : 'A');
+    }
+    for (uint32_t i = 0; i < 8u; i++) {
+        mem_write8(USB_GUEST_PARAMETER_BUFFER + i, (uint8_t)(buf[i] | 0x80));
+    }
+    mem_write8(USB_GUEST_PARAMETER_BUFFER + 8u, 0);
+    a2bus_finish_param_cmd();
+    static int once;
+    if (!once++) {
+        fprintf(stderr, "[A2Bus] DoGetTimeString → %.8s (host clock)\n", buf);
+        fflush(stderr);
+    }
+    cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+}
+
+static void usb_guest_stub_get_prodos_timestamp(void) {
+    a2bus_seed_megaflash_rtc();
+    uint32_t out = cpu.r[0];
+    struct tm *t = a2bus_host_localtime();
+    if (!t || out == 0u) {
+        if (out) {
+            mem_write8(out, 0); mem_write8(out + 1, 0);
+            mem_write8(out + 2, 0); mem_write8(out + 3, 0);
+        }
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return;
+    }
+    uint32_t year = (uint32_t)(t->tm_year % 100);
+    uint32_t date = (year << 9) | ((uint32_t)(t->tm_mon + 1) << 5) | (uint32_t)t->tm_mday;
+    mem_write8(out + 0u, (uint8_t)date);
+    mem_write8(out + 1u, (uint8_t)(date >> 8));
+    mem_write8(out + 2u, (uint8_t)t->tm_min);
+    mem_write8(out + 3u, (uint8_t)t->tm_hour);
+    cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+}
+
+static void usb_guest_stub_get_prodos25_timestamp(void) {
+    a2bus_seed_megaflash_rtc();
+    uint32_t out = cpu.r[0];
+    struct tm *t = a2bus_host_localtime();
+    if (!t || out == 0u) {
+        if (out) {
+            for (uint32_t i = 0; i < 6u; i++) {
+                mem_write8(out + i, 0);
+            }
+        }
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        return;
+    }
+    mem_write8(out + 0u, 0); /* 4ms ticks */
+    mem_write8(out + 1u, (uint8_t)t->tm_sec);
+    uint32_t time = ((uint32_t)t->tm_mday << 11) | ((uint32_t)t->tm_hour << 6) |
+                    (uint32_t)t->tm_min;
+    mem_write8(out + 2u, (uint8_t)time);
+    mem_write8(out + 3u, (uint8_t)(time >> 8));
+    uint32_t date = ((uint32_t)(t->tm_mon + 2) << 12) |
+                    ((uint32_t)(t->tm_year + 1900) & 0xfffu);
+    mem_write8(out + 4u, (uint8_t)date);
+    mem_write8(out + 5u, (uint8_t)(date >> 8));
     cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
 }
 
@@ -1937,9 +2072,33 @@ static int a2bus_rtc_hooks(void) {
         return 0;
     }
     uint32_t pc = cpu.r[15] & ~1u;
+
+    /* High-level first: CP clock + ProDOS clockdriver (avoid dead POWMAN AON). */
+    if (pc == USB_GUEST_DO_GET_TIME_STR || pc == 0x20004728u) {
+        usb_guest_stub_do_get_time_string();
+        return 1;
+    }
+    if (pc == USB_GUEST_GET_PRODOS_TIME || pc == 0x20004708u) {
+        usb_guest_stub_get_prodos_timestamp();
+        return 1;
+    }
+    if (pc == USB_GUEST_GET_PRODOS25_TIME || pc == 0x20004720u) {
+        usb_guest_stub_get_prodos25_timestamp();
+        return 1;
+    }
+
     if (pc == USB_GUEST_AON_TIMER_GET_CAL) {
         a2bus_seed_megaflash_rtc();
         usb_guest_stub_aon_timer_get_time_calendar();
+        return 1;
+    }
+    if (pc == USB_GUEST_AON_TIMER_GET_TIME) {
+        a2bus_seed_megaflash_rtc();
+        usb_guest_stub_aon_timer_get_time();
+        return 1;
+    }
+    if (pc == USB_GUEST_AON_TIMER_START || pc == USB_GUEST_AON_TIMER_START_CAL) {
+        usb_guest_stub_aon_timer_start();
         return 1;
     }
     return 0;
@@ -1956,11 +2115,8 @@ static int a2bus_rtc_hooks(void) {
 #define USB_GUEST_CYW43_GPIO_PUT      0x1001afa0u /* cyw43_arch_gpio_put */
 #define USB_GUEST_NETERR_SSIDNOTSET   3u
 #define USB_GUEST_NETERR_NONE         11u /* NetworkError_t: last enumerator */
-#define USB_GUEST_PARAMETER_BUFFER    0x20016fc8u
-#define USB_GUEST_PARAM_BUFFER_INDEX  0x20016fe8u
 #define USB_GUEST_DATA_XFER_MODE      0x2006160au /* dataBufferTransferMode */
 #define USB_GUEST_DATA_BUFFER_INDEX   0x2000ccccu
-#define USB_GUEST_REGISTERS           0x20057038u
 #define USB_GUEST_MALLOC_MUTEX        0x20005164u /* malloc_mutex (.data, often still zero) */
 #define USB_GUEST_MUTEX_ENTER_VENEER  0x10034da0u /* __mutex_enter_blocking_veneer */
 #define USB_GUEST_MUTEX_EXIT_VENEER   0x10034d70u /* __mutex_exit_veneer */

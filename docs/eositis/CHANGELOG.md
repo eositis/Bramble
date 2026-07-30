@@ -7,7 +7,9 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
-_(none)_
+| Change | Reason |
+|--------|--------|
+| a2bus: stub `DoGetTimeString` / ProDOS timestamps / full `aon_timer_*` from host clock | POWMAN AON not on M33 membus → real aon_timer returned epoch 0 (stuck 12:00) |
 
 ---
 
