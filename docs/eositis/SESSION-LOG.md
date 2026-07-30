@@ -679,7 +679,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Actions** | New sibling repo with plugin, launcher, stub, probe, MAME-BRIDGE docs; Bramble keeps `a2bus`/`-a2bus-bridge`; pointer in `docs/eositis/MAME-BRIDGE.md` |
 | **Boundary** | Inside pins → Bramble; outside pins → megaflash-vm |
 | **Outcome** | See commit below; megaflash-vm init commit separately |
-| **Commit** | _(pending)_ |
+| **Commit** | `92b6426` — chore: move MAME integration out to sibling megaflash-vm |
 
 <!--
 
