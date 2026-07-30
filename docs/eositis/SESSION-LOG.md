@@ -688,7 +688,9 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Request** | Machine did not boot from virtual MegaFlash storage after new launcher |
 | **Cause** | Launcher cwd = megaflash-vm; `-spi-flash1` created empty `flash/spi-flash1.bin` instead of Bramble’s A2.DESKTOP volume |
 | **Actions** | Seed/copy volumes into megaflash-vm/flash; launcher absolute paths + cd for user-config; docs |
-| **Commit** | megaflash-vm (see sibling); Bramble pointer note _(pending)_ |
+| **Commit** | megaflash-vm (see sibling); Bramble `[main 059641f] docs(eositis): note megaflash-vm flash seeding after split
+ 3 files changed, 16 insertions(+), 1 deletion(-)
+059641f`; megaflash-vm flash fix |
 
 
 <!--

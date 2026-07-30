@@ -7,8 +7,19 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+_(none)_
+
+---
+
+## 2026-07-30 — `[main 059641f] docs(eositis): note megaflash-vm flash seeding after split
+ 3 files changed, 16 insertions(+), 1 deletion(-)
+059641f` — megaflash-vm flash note
+
 | Change | Reason |
 |--------|--------|
+| Note megaflash-vm `flash/` seeding in MAME-BRIDGE pointer | Empty VM flash after split blocked SmartPort boot |
+
+|--------|
 | Note megaflash-vm `flash/` seeding in MAME-BRIDGE pointer | Empty VM flash after split blocked SmartPort boot |
 
 
