@@ -699,7 +699,10 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 |-------|--------|
 | **Request** | Move flash images and firmware loaded for the VM out of Bramble into megaflash-vm |
 | **Actions** | Moved uf2/elf/iic/hdv/flash; launcher + USB/UART/stub defaults; `flash/` → symlink; docs |
-| **Commit** | _(pending)_ |
+| **Commit** | `[main ad5c396] chore: point MegaFlash runtime assets at sibling megaflash-vm
+ 11 files changed, 43 insertions(+), 20 deletions(-)
+ create mode 120000 flash
+ad5c396` — chore: point MegaFlash runtime assets at sibling megaflash-vm |
 
 
 <!--

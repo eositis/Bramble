@@ -7,8 +7,20 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+_(none)_
+
+---
+
+## 2026-07-30 — `[main ad5c396] chore: point MegaFlash runtime assets at sibling megaflash-vm
+ 11 files changed, 43 insertions(+), 20 deletions(-)
+ create mode 120000 flash
+ad5c396` — assets in megaflash-vm
+
 | Change | Reason |
 |--------|--------|
+| Guest UF2/flash/iic live in megaflash-vm; `flash/` symlink; launchers retargeted | Runtime assets belong outside GPIO / Bramble tree |
+
+|--------|
 | Guest UF2/flash/iic live in megaflash-vm; `flash/` symlink; launchers retargeted | Runtime assets belong outside GPIO / Bramble tree |
 
 
