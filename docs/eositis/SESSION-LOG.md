@@ -662,6 +662,15 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | `make -C build bramble bramble_tests`; `./build/bramble_tests` 323/323 |
 | **Commit** | `ae349e5` — fix(m33): decode TBH before LDRD; stub DoGetTimeString veneer |
 
+## 2026-07-30 — Revert mistaken host-clock stub expansion
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Revert system clock changes (typo: meant “now updating”, not “not”) |
+| **Actions** | Restored pre-`4f3d7cd` RTC hooks (`aon_timer_get_time_calendar` + NTP seed only); kept TBH/`test_m33_thumb2_tbh` for Control-Reset |
+| **Validate** | `make -C build bramble bramble_tests`; `./build/bramble_tests` |
+| **Commit** | _(pending)_ |
+
 <!--
 
 | Field | Detail |
