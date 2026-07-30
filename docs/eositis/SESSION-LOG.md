@@ -630,7 +630,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | Enabling real `cyw43_arch_init` from InitPicoLed HardFaults core1 BusLoop during `clmload_status` (`PC=0x1FFF8F6C`); Slinky stuck → no native `$96` |
 | **Actions** | Default-stub `cyw43_arch_init`/`gpio_put`/`InitCyw43`/`ConnectWifi`; restore synthetic configured TestWifi; opt-in `BRAMBLE_A2BUS_REAL_WIFI=1`; docs |
 | **Validate** | `bramble_tests` 322/322; a2bus run shows stub + `BusLoopSlinky ready` and **no** HardFault |
-| **Commit** | *(pending)* |
+| **Commit** | `40e284c` — fix(mame): stub cyw43_arch_init under a2bus so BusLoop boots again |
 
 <!--
 

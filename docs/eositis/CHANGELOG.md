@@ -11,7 +11,7 @@ _(moved to commit section below)_
 
 ---
 
-## 2026-07-30 — restore a2bus boot (stub cyw43_arch_init)
+## 2026-07-30 — `40e284c` — restore a2bus boot (stub cyw43_arch_init)
 
 | Change | Reason |
 |--------|--------|
