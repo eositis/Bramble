@@ -7,7 +7,10 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
-_(none)_
+| Change | Reason |
+|--------|--------|
+| Note megaflash-vm `flash/` seeding in MAME-BRIDGE pointer | Empty VM flash after split blocked SmartPort boot |
+
 
 ---
 

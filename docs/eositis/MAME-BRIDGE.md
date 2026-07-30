@@ -14,3 +14,5 @@ Quick start from that repo:
 ```bash
 ../megaflash-vm/scripts/run-megaflash-mame.sh
 ```
+
+SPI volumes live under `megaflash-vm/flash/` (seeded from this tree’s `flash/` when empty).

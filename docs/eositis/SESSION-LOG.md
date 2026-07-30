@@ -681,6 +681,16 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Outcome** | See commit below; megaflash-vm init commit separately |
 | **Commit** | `92b6426` — chore: move MAME integration out to sibling megaflash-vm |
 
+## 2026-07-30 — Empty flash after megaflash-vm split
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Machine did not boot from virtual MegaFlash storage after new launcher |
+| **Cause** | Launcher cwd = megaflash-vm; `-spi-flash1` created empty `flash/spi-flash1.bin` instead of Bramble’s A2.DESKTOP volume |
+| **Actions** | Seed/copy volumes into megaflash-vm/flash; launcher absolute paths + cd for user-config; docs |
+| **Commit** | megaflash-vm (see sibling); Bramble pointer note _(pending)_ |
+
+
 <!--
 
 | Field | Detail |
