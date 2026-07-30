@@ -43,11 +43,15 @@ MAME is started **without** a floppy/hard-disk image. The //c is expected to boo
 
 Flash-resident `ldr.w pc,[pc]` veneers to SRAM are Thumb-broken in Bramble when `r0≠0`. The a2bus path rewrites `__TranslateUnitNum_veneer` and `__CheckWriteEnableKey_veneer` (option 7 / DriveMapping) so those calls reach SRAM.
 
-`apple2c4` always includes a Dallas DS1216E no-slot clock. The Lua plugin mutes it on `$C100–$CFFF` so ProDOS/time come from MegaFlash (`CMD_GETTIMESTR` / clockdriver). On the a2bus path Bramble also seeds MegaFlash `rtcRunning` from the host clock when time is read (no NTP).
+`apple2c4` always includes a Dallas DS1216E no-slot clock. The Lua plugin mutes it on `$C100–$CFFF` so ProDOS/time come from MegaFlash (`CMD_GETTIMESTR` / clockdriver).
 
-**Test Wifi / NTP** use MegaFlash’s real `cyw43_arch` stack against Bramble’s **`-wifi`** CYW43 emulation (fake scan APs + built-in DHCP; no TAP required for a basic join). The launcher passes `-wifi` by default (`NO_WIFI=1` to disable).
+**Test Wifi / NTP** under a2bus are synthetic by default (real gSPI JOIN still WIP). The launcher passes `-wifi` by default (`NO_WIFI=1` to disable).
 
-With an **empty SSID**, a2bus fails fast with `NETERR_SSIDNOTSET` (3) so the control panel does not hang: empty-SSID paths throw C++ exceptions that Bramble’s EH still cannot unwind. With a **configured SSID**, a2bus completes Test Wifi with synthetic `NETERR_NONE` and display strings `192.168.4.2` / `255.255.255.0` / `192.168.4.1` / `192.168.4.1` (gSPI JOIN still WIP). Optional `BRAMBLE_A2BUS_SEED_WIFI=1` seeds `BrambleNet`/`password` for bring-up without Save Settings.
+With an **empty SSID**, a2bus fails fast with `NETERR_SSIDNOTSET` (3) so the control panel does not hang: empty-SSID paths throw C++ exceptions that Bramble’s EH still cannot unwind. With a **configured SSID**, a2bus completes Test Wifi with synthetic `NETERR_NONE` and display strings `192.168.4.2` / `255.255.255.0` / `192.168.4.1` / `192.168.4.1`. When **NTP** is enabled in settings (`NTPCLIENTFLAG`), `GetNetworkTime` seeds MegaFlash `rtcRunning` from the host clock and `aon_timer_get_time_calendar` returns host local time — so the CP clock and ProDOS timestamps advance without a live NTP server. Optional `BRAMBLE_A2BUS_SEED_WIFI=1` seeds `BrambleNet`/`password` for bring-up without Save Settings.
+
+Firmware `[u2macraw]` telemetry from `U2_Net_Poll` is suppressed on a2bus stderr by default (`BRAMBLE_A2BUS_U2MACRAW=1` to show).
+
+When MAME exits, Bramble shuts down: the launcher no longer `exec`s MAME (so its EXIT trap can kill Bramble), and the bridge also requests exit after a client that issued READ/WRITE disconnects (preflight PING/PEEK alone does not).
 
 **Real `cyw43_arch_init` is off by default under a2bus.** Concurrent InitPicoLed gSPI + BusLoopSlinky HardFaults core1 (`PC≈0x1FFF8F6C` during `clmload_status`), which freezes Slinky registers and makes MAME report MegaFlash not found / no boot. Default stubs: `cyw43_arch_init`, `cyw43_arch_gpio_put`, `InitCyw43`, `ConnectWifi`. Set `BRAMBLE_A2BUS_REAL_WIFI=1` only to exercise real gSPI (FEEDBEAD works; BusLoop still dies — WIP).
 
@@ -77,6 +81,7 @@ Bring-up notes (a2bus):
 | `TIMEOUT` | unset (none) | Bramble `-timeout` seconds |
 | `BRAMBLE_A2BUS_REAL_WIFI` | unset | `1` = real `cyw43_arch_init` (breaks BusLoop until fixed) |
 | `BRAMBLE_A2BUS_SEED_WIFI` | unset | `1` = seed BrambleNet SSID/password in config |
+| `BRAMBLE_A2BUS_U2MACRAW` | unset | `1` = print firmware `[u2macraw]` poll telemetry |
 
 ## Protocol (Bramble `-a2bus-bridge`)
 

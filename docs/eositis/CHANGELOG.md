@@ -7,7 +7,11 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
-_(moved to commit section below)_
+| Change | Reason |
+|--------|--------|
+| a2bus: synthetic `GetNetworkTime` seeds `rtcRunning` + host calendar | NTP under MAME never ran (cyw43 stubbed); CP/OS clock stuck at 12:00 |
+| a2bus: suppress `[u2macraw]` printf spam (`BRAMBLE_A2BUS_U2MACRAW=1` to show) | `U2_Net_Poll` flooded logs every ~5 s with zero counters |
+| Launcher: do not `exec` MAME; bridge exits after MAME READ/WRITE disconnect | Bramble stayed running after MAME quit (`exec` dropped EXIT trap) |
 
 ---
 

@@ -1,5 +1,6 @@
 #include "a2bus_bridge.h"
 #include "a2bus.h"
+#include "devtools.h"
 #include "emulator.h"
 #include "pio.h"
 
@@ -24,6 +25,7 @@ typedef struct {
     int client_fd;
     int active;
     int handling;
+    int saw_bus_io; /* READ/WRITE from MAME (not preflight PING/PEEK) */
     uint32_t regs_addr;
     a2bus_bridge_pump_fn pump;
     unsigned pump_steps;
@@ -35,6 +37,7 @@ static a2bus_bridge_t br = {
     .client_fd = -1,
     .active = 0,
     .handling = 0,
+    .saw_bus_io = 0,
     .regs_addr = A2BUS_REGS_DEFAULT,
     .pump = NULL,
     /* Cap for command completion (BUSY clear). Idle DATA/PARAM use host-side path. */
@@ -51,6 +54,21 @@ static a2bus_bridge_t br = {
 #define MF_MODE_LINEAR 0u
 #define MF_DATA_MASK  0x1ffu
 #define MF_PARAM_MASK 0x1fu
+
+static void a2bus_drop_client(const char *why)
+{
+    if (br.client_fd >= 0) {
+        close(br.client_fd);
+        br.client_fd = -1;
+    }
+    fprintf(stderr, "[A2Bus] %s\n", why);
+    /* Preflight only PINGs/PEEKs; MAME does READ/WRITE. Exit after MAME leaves. */
+    if (br.saw_bus_io) {
+        fprintf(stderr, "[A2Bus] MAME session ended — shutting down Bramble\n");
+        semihost_exit_requested = 1;
+        semihost_exit_code = 0;
+    }
+}
 
 static void set_nonblock(int fd)
 {
@@ -442,8 +460,7 @@ static void handle_one(void)
 {
     uint8_t op = 0;
     if (recv_exact(br.client_fd, &op, 1) < 0) {
-        close(br.client_fd);
-        br.client_fd = -1;
+        a2bus_drop_client("bridge client recv error — dropped");
         return;
     }
 
@@ -464,10 +481,10 @@ static void handle_one(void)
         uint8_t nibble = 0;
         if (recv_exact(br.client_fd, &nibble, 1) < 0) {
             br.handling = 0;
-            close(br.client_fd);
-            br.client_fd = -1;
+            a2bus_drop_client("bridge client recv error — dropped");
             return;
         }
+        br.saw_bus_io = 1;
         /* Idle DATA/PARAM/ID/STATUS: host-side side effects (LOAD_CPANEL hot path). */
         if (!host_fast_read(nibble, &data)) {
             data = peek_reg(nibble);
@@ -481,10 +498,10 @@ static void handle_one(void)
         if (recv_exact(br.client_fd, &nibble, 1) < 0 ||
             recv_exact(br.client_fd, &wdata, 1) < 0) {
             br.handling = 0;
-            close(br.client_fd);
-            br.client_fd = -1;
+            a2bus_drop_client("bridge client recv error — dropped");
             return;
         }
+        br.saw_bus_io = 1;
         if (!host_fast_write(nibble, wdata)) {
             a2bus_inject_write(nibble & 0xFu, wdata);
             pump_guest();
@@ -496,8 +513,7 @@ static void handle_one(void)
         uint8_t nibble = 0;
         if (recv_exact(br.client_fd, &nibble, 1) < 0) {
             br.handling = 0;
-            close(br.client_fd);
-            br.client_fd = -1;
+            a2bus_drop_client("bridge client recv error — dropped");
             return;
         }
         data = peek_reg(nibble);
@@ -512,8 +528,7 @@ static void handle_one(void)
 
     uint8_t rsp[2] = { status, data };
     if (send_all(br.client_fd, rsp, 2) < 0) {
-        close(br.client_fd);
-        br.client_fd = -1;
+        a2bus_drop_client("bridge client send error — dropped");
     }
 }
 
@@ -551,9 +566,7 @@ void a2bus_bridge_poll(void)
         tv.tv_usec = 0;
         int r = select(br.client_fd + 1, &rfds, NULL, &efds, &tv);
         if (r > 0 && FD_ISSET(br.client_fd, &efds)) {
-            close(br.client_fd);
-            br.client_fd = -1;
-            fprintf(stderr, "[A2Bus] bridge client error — dropped\n");
+            a2bus_drop_client("bridge client error — dropped");
             return;
         }
         if (r > 0 && FD_ISSET(br.client_fd, &rfds)) {
@@ -561,15 +574,11 @@ void a2bus_bridge_poll(void)
             uint8_t b;
             ssize_t n = recv(br.client_fd, &b, 1, MSG_PEEK);
             if (n == 0) {
-                close(br.client_fd);
-                br.client_fd = -1;
-                fprintf(stderr, "[A2Bus] bridge client disconnected\n");
+                a2bus_drop_client("bridge client disconnected");
                 return;
             }
             if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
-                close(br.client_fd);
-                br.client_fd = -1;
-                fprintf(stderr, "[A2Bus] bridge client recv error — dropped\n");
+                a2bus_drop_client("bridge client recv error — dropped");
                 return;
             }
             if (n > 0) {

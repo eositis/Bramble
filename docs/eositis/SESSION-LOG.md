@@ -632,6 +632,16 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | `bramble_tests` 322/322; a2bus run shows stub + `BusLoopSlinky ready` and **no** HardFault |
 | **Commit** | `40e284c` — fix(mame): stub cyw43_arch_init under a2bus so BusLoop boots again |
 
+## 2026-07-30 — NTP / u2macraw spam / MAME exit shutdown
+
+| Field | Detail |
+|-------|--------|
+| **Request** | NTP stuck at 12:00; quiet `[u2macraw]` spam; shut down Bramble when MAME exits |
+| **Cause** | Configured-SSID `GetNetworkTime` fell through to real RunNTP while cyw43 stubbed (never set `rtcRunning`); firmware U2_Net_Poll printed every ~5 s; launcher `exec` MAME dropped EXIT trap that kills Bramble |
+| **Actions** | Synthetic NTP seeds RTC + host calendar stub; suppress `[u2macraw]` unless `BRAMBLE_A2BUS_U2MACRAW=1`; launcher waits for MAME; bridge exits after READ/WRITE client disconnect; docs |
+| **Validate** | `make -C build bramble bramble_tests`; `./build/bramble_tests` |
+| **Commit** | _(pending)_ |
+
 <!--
 
 | Field | Detail |

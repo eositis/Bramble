@@ -228,10 +228,15 @@ export BRAMBLE_IIC_BIN="$IIC_BIN"
 echo "[mame] launching apple2c4 (rompath=$ROMPATH; MegaFlash maincpu staged)"
 echo "[mame] expect WRONG CHECKSUM warning for 3410445b.256 — MegaFlash ROM, not stock"
 echo "[mame] pluginspath=$PLUGINPATH"
-exec "$MAME_BIN" apple2c4 \
+# Do not exec: the EXIT trap must kill Bramble when MAME exits.
+set +e
+"$MAME_BIN" apple2c4 \
   -rompath "$ROMPATH" \
   -pluginspath "$PLUGINPATH" \
   -plugins \
   -plugin megaflash_bridge \
   -skip_gameinfo \
   -window
+mame_rc=$?
+set -e
+exit "$mame_rc"

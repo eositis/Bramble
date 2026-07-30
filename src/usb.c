@@ -979,8 +979,39 @@ static void usb_guest_uart_tx_byte(uint8_t ch) {
     }
 }
 
+/* Line-buffer a2bus guest printf; drop noisy U2 MACRAW telemetry by default. */
 static void usb_guest_a2bus_tx_byte(uint8_t ch) {
-    fputc((int)ch, stderr);
+    static char line[192];
+    static size_t len;
+    static int suppress_logged;
+    static int show_u2macraw = -1;
+
+    if (show_u2macraw < 0) {
+        const char *e = getenv("BRAMBLE_A2BUS_U2MACRAW");
+        show_u2macraw = (e && e[0] == '1' && e[1] == '\0') ? 1 : 0;
+    }
+
+    if (ch == '\r') {
+        return;
+    }
+    if (ch != '\n' && len < sizeof(line) - 1u) {
+        line[len++] = (char)ch;
+        return;
+    }
+    line[len] = '\0';
+    if (len >= 9u && memcmp(line, "[u2macraw]", 9) == 0 && !show_u2macraw) {
+        if (!suppress_logged++) {
+            fprintf(stderr,
+                    "[A2Bus] suppressing [u2macraw] telemetry "
+                    "(BRAMBLE_A2BUS_U2MACRAW=1 to show)\n");
+        }
+    } else if (len > 0u) {
+        fputs(line, stderr);
+        fputc('\n', stderr);
+    } else {
+        fputc('\n', stderr);
+    }
+    len = 0;
 }
 
 static void usb_guest_usb_tx_byte(uint8_t ch) {
@@ -1878,6 +1909,8 @@ static void a2bus_seed_megaflash_rtc(void) {
     fprintf(stderr, "[A2Bus] MegaFlash RTC seeded from host (rtcRunning=1)\n");
 }
 
+#define USB_GUEST_NTPCLIENTFLAG 0x10u /* configbyte1 — matches MegaFlash defines.h */
+
 static void usb_guest_stub_aon_timer_get_time_calendar(void) {
     uint32_t tm_ptr = cpu.r[0];
     time_t now = time(NULL);
@@ -2098,7 +2131,8 @@ static int a2bus_wifi_hooks(void) {
     }
 
     if (pc != USB_GUEST_DO_TEST_WIFI && pc != USB_GUEST_GET_NETWORK_TIME &&
-        pc != USB_GUEST_TEST_WIFI && pc != 0x20004548u /* __DoTestWifi_veneer */) {
+        pc != USB_GUEST_TEST_WIFI && pc != 0x20004548u /* __DoTestWifi_veneer */ &&
+        pc != 0x200044b0u /* __GetNetworkTime_veneer */) {
         return 0;
     }
 
@@ -2121,6 +2155,25 @@ static int a2bus_wifi_hooks(void) {
                 mem_write32(result + 16u, USB_GUEST_NETERR_NONE);
                 mem_write8(result + 20u, 1u);
             }
+            cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+            return 1;
+        }
+        /* Synthetic NTP: seed rtcRunning; CMD_GETTIMESTR uses host calendar stub. */
+        if (pc == USB_GUEST_GET_NETWORK_TIME || pc == 0x200044b0u) {
+            uint8_t cfg1 = mem_read8(USB_GUEST_CONFIG_BUFFER + 4u);
+            if ((cfg1 & USB_GUEST_NTPCLIENTFLAG) == 0u) {
+                cpu.r[0] = USB_GUEST_NETERR_NONE;
+                cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+                return 1;
+            }
+            a2bus_seed_megaflash_rtc();
+            static int ntp_logged;
+            if (!ntp_logged++) {
+                fprintf(stderr,
+                        "[A2Bus] GetNetworkTime: synthetic NTP OK (host clock)\n");
+                fflush(stderr);
+            }
+            cpu.r[0] = USB_GUEST_NETERR_NONE;
             cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
             return 1;
         }
