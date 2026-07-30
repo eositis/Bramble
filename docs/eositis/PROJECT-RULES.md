@@ -28,3 +28,4 @@ These rules apply to all agent work on this Bramble tree unless the user explici
 
 - After emulator changes: `make -C build bramble bramble_tests` and run `./build/bramble_tests` when feasible.
 - MegaFlash runs: `-arch m33 -clock 150 -cores 2` and `scripts/megaflash-bus.stub` when validating dual-core / bus behavior.
+- MAME + MegaFlash integrated sessions live in sibling **megaflash-vm** (`../megaflash-vm`); use that launcher/stub, not scripts removed from this tree.

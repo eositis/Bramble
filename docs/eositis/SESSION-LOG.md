@@ -671,6 +671,16 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | `make -C build bramble bramble_tests`; `./build/bramble_tests` |
 | **Commit** | `091febc` — revert(mame): drop DoGetTimeString/ProDOS host-clock stubs |
 
+## 2026-07-30 — Split megaflash-vm (MAME integration)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Create `megaflash-vm` at GitHub root; move Bramble↔MAME integration outside virtual GPIO |
+| **Actions** | New sibling repo with plugin, launcher, stub, probe, MAME-BRIDGE docs; Bramble keeps `a2bus`/`-a2bus-bridge`; pointer in `docs/eositis/MAME-BRIDGE.md` |
+| **Boundary** | Inside pins → Bramble; outside pins → megaflash-vm |
+| **Outcome** | See commit below; megaflash-vm init commit separately |
+| **Commit** | _(pending)_ |
+
 <!--
 
 | Field | Detail |

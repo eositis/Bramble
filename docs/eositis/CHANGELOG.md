@@ -7,7 +7,10 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
-_(none)_
+| Change | Reason |
+|--------|--------|
+| Move MAME plugin / launcher / stub / probe / MAME-BRIDGE body to sibling `megaflash-vm` | Split attributions: outside GPIO = megaflash-vm; pin face stays in Bramble |
+| `docs/eositis/MAME-BRIDGE.md` → pointer | Operators find the integration project |
 
 ---
 
