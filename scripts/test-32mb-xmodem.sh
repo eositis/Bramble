@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 IMAGE="${1:-$ROOT/A2OSX.STABLE.32MB.po}"
 LOG="${TMPDIR:-/tmp}/bramble-32mb-test.log"
+MFVM="${MEGAFLASH_VM_ROOT:-$ROOT/../megaflash-vm}"
 
 if [[ ! -e "$IMAGE" ]]; then
   echo "Image not found: $IMAGE" >&2
@@ -14,7 +15,9 @@ if [[ ! -x "$ROOT/bramble" ]]; then
   make -C "$ROOT/build" bramble
 fi
 
-rm -f "$ROOT/flash/spi-flash1.bin"
+rm -f "$MFVM/flash/spi-flash1.bin"
+# Ensure symlink target exists
+mkdir -p "$MFVM/flash"
 env CORES=1 TIMEOUT=7200 "$ROOT/scripts/run-megaflash-usb-console.sh" </dev/null >"$LOG" 2>&1 &
 BPID=$!
 trap 'kill "$BPID" 2>/dev/null || true' EXIT

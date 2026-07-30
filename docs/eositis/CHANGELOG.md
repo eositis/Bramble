@@ -7,7 +7,10 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
-_(none)_
+| Change | Reason |
+|--------|--------|
+| Guest UF2/flash/iic live in megaflash-vm; `flash/` symlink; launchers retargeted | Runtime assets belong outside GPIO / Bramble tree |
+
 
 ---
 

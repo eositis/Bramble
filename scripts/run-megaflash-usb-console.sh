@@ -5,8 +5,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+MFVM="${MEGAFLASH_VM_ROOT:-$ROOT/../megaflash-vm}"
 BRAMBLE="${BRAMBLE:-$ROOT/bramble}"
-UF2="${MEGAFLASH_UF2:-$ROOT/../MegaFlash/pico/pico2_debug/megaflash.uf2}"
+UF2="${MEGAFLASH_UF2:-$MFVM/firmware/megaflash.uf2}"
 PORT="${USB_CONSOLE_PORT:-5555}"
 PTY_PATH="${USB_CONSOLE_PTY_PATH:-/tmp/bramble-usb-console}"
 
@@ -15,7 +16,7 @@ if [[ ! -x "$BRAMBLE" ]]; then
 fi
 if [[ ! -f "$UF2" ]]; then
   echo "UF2 not found: $UF2" >&2
-  echo "Set MEGAFLASH_UF2 to your megaflash.uf2 path." >&2
+  echo "Set MEGAFLASH_UF2, or sync into megaflash-vm: ../megaflash-vm/scripts/sync-firmware-from-megaflash.sh" >&2
   exit 1
 fi
 
@@ -38,6 +39,8 @@ fi
 SPI_FLASH_ARGS=()
 if [[ -n "${SPI_FLASH1:-}" ]]; then
   SPI_FLASH_ARGS+=(-spi-flash1 "$SPI_FLASH1")
+elif [[ -f "$MFVM/flash/spi-flash1.bin" ]]; then
+  SPI_FLASH_ARGS+=(-spi-flash1 "$MFVM/flash/spi-flash1.bin")
 else
   SPI_FLASH_ARGS+=(-spi-flash1)
 fi
@@ -46,6 +49,8 @@ if [[ -n "${SPI_FLASH1_SIZE:-}" ]]; then
 fi
 if [[ -n "${SPI_FLASH2:-}" ]]; then
   SPI_FLASH_ARGS+=(-spi-flash2 "$SPI_FLASH2")
+elif [[ -f "$MFVM/flash/spi-flash2.bin" ]]; then
+  SPI_FLASH_ARGS+=(-spi-flash2 "$MFVM/flash/spi-flash2.bin")
 else
   SPI_FLASH_ARGS+=(-spi-flash2)
 fi

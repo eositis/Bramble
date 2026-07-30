@@ -27,5 +27,5 @@ These rules apply to all agent work on this Bramble tree unless the user explici
 ## 4. Build and test expectations
 
 - After emulator changes: `make -C build bramble bramble_tests` and run `./build/bramble_tests` when feasible.
-- MegaFlash runs: `-arch m33 -clock 150 -cores 2` and `scripts/megaflash-bus.stub` when validating dual-core / bus behavior.
-- MAME + MegaFlash integrated sessions live in sibling **megaflash-vm** (`../megaflash-vm`); use that launcher/stub, not scripts removed from this tree.
+- Firmware: `../megaflash-vm/firmware/megaflash.uf2` with `-arch m33 -clock 150 -cores 2` and `scripts/megaflash-bus.stub` when relevant (sync UF2 via megaflash-vm `scripts/sync-firmware-from-megaflash.sh`)
+- MAME + MegaFlash integrated sessions live in sibling **megaflash-vm** (`../megaflash-vm`); runtime flash/firmware live there too.

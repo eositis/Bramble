@@ -693,6 +693,15 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 059641f`; megaflash-vm flash fix |
 
 
+## 2026-07-30 — Move firmware/flash assets to megaflash-vm
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Move flash images and firmware loaded for the VM out of Bramble into megaflash-vm |
+| **Actions** | Moved uf2/elf/iic/hdv/flash; launcher + USB/UART/stub defaults; `flash/` → symlink; docs |
+| **Commit** | _(pending)_ |
+
+
 <!--
 
 | Field | Detail |

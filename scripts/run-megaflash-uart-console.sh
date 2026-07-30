@@ -4,8 +4,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+MFVM="${MEGAFLASH_VM_ROOT:-$ROOT/../megaflash-vm}"
 BRAMBLE="${BRAMBLE:-$ROOT/bramble}"
-UF2="${MEGAFLASH_UF2:-$ROOT/../MegaFlash/pico/pico2_debug/megaflash.uf2}"
+UF2="${MEGAFLASH_UF2:-$MFVM/firmware/megaflash.uf2}"
 PORT="${UART_CONSOLE_PORT:-4444}"
 
 if [[ ! -x "$BRAMBLE" ]]; then
@@ -13,7 +14,7 @@ if [[ ! -x "$BRAMBLE" ]]; then
 fi
 if [[ ! -f "$UF2" ]]; then
   echo "UF2 not found: $UF2" >&2
-  echo "Set MEGAFLASH_UF2 to your megaflash.uf2 path." >&2
+  echo "Set MEGAFLASH_UF2, or sync: ../megaflash-vm/scripts/sync-firmware-from-megaflash.sh" >&2
   exit 1
 fi
 

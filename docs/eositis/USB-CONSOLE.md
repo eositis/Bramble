@@ -19,7 +19,7 @@ On **macOS**, `./scripts/run-megaflash-usb-console.sh` defaults to PTY mode (vir
 ```bash
 ./scripts/run-megaflash-usb-console.sh
 # or:
-./build/bramble ../MegaFlash/pico/pico2_debug/megaflash.uf2 \
+./build/bramble ../megaflash-vm/firmware/megaflash.uf2 \
   -arch m33 -clock 150 -cores 1 \
   -usb-serial -usb-stdio -timeout 120
 ```
@@ -76,7 +76,7 @@ sz -y /tmp/bramble-usb-console /path/to/disk.po
 
 Only **one** program may open the serial port at a time.
 
-**External flash persistence:** MegaFlash has two SPI flash chips. Each chip is backed by its own host file when `-spi-flash1` / `-spi-flash2` is set. With no path, Bramble creates `flash/spi-flash1.bin` and `flash/spi-flash2.bin` (64MB each by default). Units are 32MB slices within each chip file (chip #1 → units 1–2, chip #2 → units 3–4 at default sizes). XMODEM uploads survive between runs. Without these flags, flash is volatile (in-memory only).
+**External flash persistence:** MegaFlash has two SPI flash chips. Each chip is backed by its own host file when `-spi-flash1` / `-spi-flash2` is set. Defaults live in sibling **megaflash-vm** (`../megaflash-vm/flash/spi-flash*.bin`); this repo’s `flash/` is a symlink there. Units are 32MB slices within each chip file (chip #1 → units 1–2, chip #2 → units 3–4 at default sizes). XMODEM uploads survive between runs. Without these flags, flash is volatile (in-memory only).
 
 | Flag | Purpose |
 |------|---------|
@@ -131,7 +131,7 @@ Same pattern as [UART-CONSOLE.md](UART-CONSOLE.md), but traffic goes to **USB CD
 ```bash
 ./scripts/run-megaflash-usb-console.sh
 # or:
-./build/bramble ../MegaFlash/pico/pico2_debug/megaflash.uf2 \
+./build/bramble ../megaflash-vm/firmware/megaflash.uf2 \
   -arch m33 -clock 150 -cores 1 \
   -usb-console 5555 -usb-stdio -timeout 7200
 ```
