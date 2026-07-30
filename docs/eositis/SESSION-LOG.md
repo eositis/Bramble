@@ -669,7 +669,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Request** | Revert system clock changes (typo: meant “now updating”, not “not”) |
 | **Actions** | Restored pre-`4f3d7cd` RTC hooks (`aon_timer_get_time_calendar` + NTP seed only); kept TBH/`test_m33_thumb2_tbh` for Control-Reset |
 | **Validate** | `make -C build bramble bramble_tests`; `./build/bramble_tests` |
-| **Commit** | _(pending)_ |
+| **Commit** | `091febc` — revert(mame): drop DoGetTimeString/ProDOS host-clock stubs |
 
 <!--
 

@@ -7,6 +7,12 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+_(none)_
+
+---
+
+## 2026-07-30 — `091febc` — revert host-clock stub expansion
+
 | Change | Reason |
 |--------|--------|
 | Revert DoGetTimeString / ProDOS / full `aon_timer_*` host stubs | User typo (“not” vs “now” updating); keep TBH fix + synthetic NTP seed only |
