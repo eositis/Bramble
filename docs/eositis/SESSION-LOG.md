@@ -650,7 +650,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | M33 membus has no POWMAN AON timer; real `aon_timer_*` reads zeros → 12:00 AM forever even with `rtcRunning` set |
 | **Actions** | Stub `DoGetTimeString`, `GetProdosTimestamp`/`GetProdos25Timestamp`, and `aon_timer_{get_time,get_time_calendar,start*}` from host `localtime` |
 | **Validate** | `make -C build bramble bramble_tests`; `./build/bramble_tests` |
-| **Commit** | _(pending)_ |
+| **Commit** | `4f3d7cd` — fix(mame): drive MegaFlash clock from host localtime |
 
 <!--
 

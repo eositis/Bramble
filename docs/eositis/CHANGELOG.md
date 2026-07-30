@@ -7,6 +7,12 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+_(none)_
+
+---
+
+## 2026-07-30 — `4f3d7cd` — host-clock MegaFlash RTC
+
 | Change | Reason |
 |--------|--------|
 | a2bus: stub `DoGetTimeString` / ProDOS timestamps / full `aon_timer_*` from host clock | POWMAN AON not on M33 membus → real aon_timer returned epoch 0 (stuck 12:00) |
