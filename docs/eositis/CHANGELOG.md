@@ -7,6 +7,12 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+_(none)_
+
+---
+
+## 2026-07-30 — `1a2b834` — synthetic NTP, quiet u2macraw, exit with MAME
+
 | Change | Reason |
 |--------|--------|
 | a2bus: synthetic `GetNetworkTime` seeds `rtcRunning` + host calendar | NTP under MAME never ran (cyw43 stubbed); CP/OS clock stuck at 12:00 |
