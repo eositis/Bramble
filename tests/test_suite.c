@@ -4415,6 +4415,29 @@ TEST(test_m33_thumb2_ldmdb) {
     PASS();
 }
 
+TEST(test_m33_thumb2_tbh) {
+    reset_cpu();
+    /* tbh [r1, r3, lsl #1] — MegaFlash _svfprintf_r uses [pc,...]; same encoding
+     * class (E8Dx F01x). Must not decode as LDRD Rt=PC (loads table as PC). */
+    uint32_t table = RAM_BASE + 0x100u;
+    mem_write16(table + 0u, 0x0003u);
+    mem_write16(table + 2u, 0x00B1u); /* poison for mis-decode */
+    mem_write16(table + 4u, 0x03D1u);
+    cpu.r[1] = table;
+    cpu.r[3] = 0;
+    uint32_t pc = 0x10000100u;
+    thumb32_step(pc, 0xE8D1, 0xF013); /* tbh [r1, r3, lsl #1] */
+    ASSERT_EQ(pc + 4u + 0x0003u * 2u, cpu.r[15], "tbh index 0 → pc+4+6");
+    cpu.r[3] = 1;
+    thumb32_step(pc, 0xE8D1, 0xF013);
+    ASSERT_EQ(pc + 4u + 0x00B1u * 2u, cpu.r[15], "tbh index 1");
+    /* LDRD mis-decode would set PC to 0x00B1xxxx from table words */
+    ASSERT_TRUE((cpu.r[15] & 0xFF000000u) != 0x00000000u ||
+                cpu.r[15] >= 0x10000000u,
+                "tbh must not treat table data as absolute PC");
+    PASS();
+}
+
 /* ========================================================================
  * RISC-V Hazard3 Tests
  * ======================================================================== */
@@ -5247,6 +5270,7 @@ int main(void) {
     RUN_TEST(test_m33_thumb2_movw_movt);
     RUN_TEST(test_m33_thumb2_addw_ldah);
     RUN_TEST(test_m33_thumb2_ldmdb);
+    RUN_TEST(test_m33_thumb2_tbh);
     END_CATEGORY("Cortex-M33");
 
     BEGIN_CATEGORY("RISC-V CPU");

@@ -652,6 +652,16 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | `make -C build bramble bramble_tests`; `./build/bramble_tests` |
 | **Commit** | `4f3d7cd` — fix(mame): drive MegaFlash clock from host localtime |
 
+## 2026-07-30 — Control-Reset HardFault + clock not stubbing
+
+| Field | Detail |
+|-------|--------|
+| **Request** | closed-apple-ctrl-reset breaks system; clock matches host but not updating |
+| **Cause** | (1) TBB/TBH (`E8Dx F01x`) misdecoded as LDRD Rt=PC — loads branch table as PC (`0x00B103D0`); (2) picoram veneer rewrite of `__DoGetTimeString_veneer` skipped RTC stub in same `cpu_step` |
+| **Actions** | Check TBB/TBH before LDRD path; RTC hooks before veneer rewrite; `test_m33_thumb2_tbh` |
+| **Validate** | `make -C build bramble bramble_tests`; `./build/bramble_tests` 323/323 |
+| **Commit** | _(pending)_ |
+
 <!--
 
 | Field | Detail |

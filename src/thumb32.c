@@ -1189,7 +1189,13 @@ int thumb32_step(uint32_t pc, uint16_t upper, uint16_t lower) {
             /* upper[9:8]: 00=STMIA/LDMIA T2, 01=LDM/STM again, 10=? */
             /* Simpler: upper[8]=is_DB, upper[7]=L */
             /* Check for LDRD/STRD: upper[6]=1 and upper[7:5] pattern */
-            if (upper & 0x0040) {
+            /* TBB/TBH: 1110 1000 1101 Rn | 1111 0000 H Rm — bit6 is set in
+             * the fixed pattern, so this must beat the LDRD heuristic below.
+             * Otherwise TBH is decoded as LDRD Rt=PC and loads the branch
+             * table as PC (MegaFlash _svfprintf_r → HardFault 0x00B103D0). */
+            if ((upper & 0xFFF0) == 0xE8D0 && (lower & 0xFFE0) == 0xF000) {
+                t32_tbb_tbh(pc, upper, lower);
+            } else if (upper & 0x0040) {
                 if (t32_is_tt(upper, lower)) {
                     t32_tt(pc, upper, lower);
                 } else if (t32_is_exclusive_ldst(upper, lower)) {
@@ -1205,14 +1211,7 @@ int thumb32_step(uint32_t pc, uint16_t upper, uint16_t lower) {
                     t32_ldrd_strd(pc, upper, lower);
                 }
             } else {
-                /* LDM/STM T2 */
-                /* Check for TBB/TBH: upper = 0xE8DF or 0xE89F ... actually */
-                /* TBB/TBH: upper[15:4] = 1110 1000 1101 = 0xE8D, lower[15:4]=0xF00? */
-                if ((upper & 0xFFF0) == 0xE8D0 && (lower & 0xFFE0) == 0xF000) {
-                    t32_tbb_tbh(pc, upper, lower);
-                } else {
-                    t32_ldst_multiple(pc, upper, lower);
-                }
+                t32_ldst_multiple(pc, upper, lower);
             }
             return 1;
         }

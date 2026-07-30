@@ -7,7 +7,10 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
-_(none)_
+| Change | Reason |
+|--------|--------|
+| Decode TBB/TBH before LDRD bit6 heuristic | Control-Reset → `_svfprintf_r` TBH misread as LDRD Rt=PC → HardFault `0x00B103D0` |
+| a2bus: run RTC hooks before picoram veneer rewrite | SRAM `DoGetTimeString` veneer skipped stub → firmware `sprintf` + stuck clock |
 
 ---
 

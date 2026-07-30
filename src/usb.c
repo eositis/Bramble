@@ -2957,10 +2957,13 @@ void usb_console_guest_stdio_hook(void) {
         if (a2bus_wifi_hooks()) {
             return;
         }
-        if (a2bus_fix_picoram_veneer()) {
+        /* RTC stubs before picoram veneer rewrite: DoCommand lives in SRAM and
+         * calls __DoGetTimeString_veneer; rewriting to flash then continuing the
+         * same cpu_step skips the hook and hits firmware sprintf → TBH. */
+        if (a2bus_rtc_hooks()) {
             return;
         }
-        if (a2bus_rtc_hooks()) {
+        if (a2bus_fix_picoram_veneer()) {
             return;
         }
         if (a2bus_spi_flash_hooks()) {
