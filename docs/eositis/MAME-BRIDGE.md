@@ -49,11 +49,13 @@ Flash-resident `ldr.w pc,[pc]` veneers to SRAM are Thumb-broken in Bramble when 
 
 With an **empty SSID**, a2bus fails fast with `NETERR_SSIDNOTSET` (3) so the control panel does not hang: empty-SSID paths throw C++ exceptions that Bramble’s EH still cannot unwind. With a **configured SSID**, a2bus completes Test Wifi with synthetic `NETERR_NONE` and display strings `192.168.4.2` / `255.255.255.0` / `192.168.4.1` / `192.168.4.1` (gSPI JOIN still WIP). Optional `BRAMBLE_A2BUS_SEED_WIFI=1` seeds `BrambleNet`/`password` for bring-up without Save Settings.
 
+**Real `cyw43_arch_init` is off by default under a2bus.** Concurrent InitPicoLed gSPI + BusLoopSlinky HardFaults core1 (`PC≈0x1FFF8F6C` during `clmload_status`), which freezes Slinky registers and makes MAME report MegaFlash not found / no boot. Default stubs: `cyw43_arch_init`, `cyw43_arch_gpio_put`, `InitCyw43`, `ConnectWifi`. Set `BRAMBLE_A2BUS_REAL_WIFI=1` only to exercise real gSPI (FEEDBEAD works; BusLoop still dies — WIP).
+
 **Host NAT / real internet:** Bramble supports `-tap <if>` and `-net` (TAP + IP forward + masquerade) on **Linux only**. macOS builds print `TAP interface only supported on Linux`. The MAME launcher does not pass `-tap`/`-net`. Until gSPI join works, Test Wifi is not a live host link.
 
 Bring-up notes (a2bus):
 
-- Skip `stdio_usb_init` so core0 reaches `InitPicoLed` → `cyw43_arch_init`.
+- Skip `stdio_usb_init` so core0 reaches `InitPicoLed`; stub `cyw43_arch_init` unless `BRAMBLE_A2BUS_REAL_WIFI=1`.
 - Host-format `__wrap_printf`, stub `hw_claim_*` / `check_alloc`, skip firmware `multicore_launch` when the script already started core1.
 - Force `CheckPicoW()==true` when `-wifi` is on.
 - Optional `-tap` / `-net` (via script `"$@"`) for a real host network once join works.
@@ -73,6 +75,8 @@ Bring-up notes (a2bus):
 | `BRAMBLE_IIC_BIN` | set by launcher to `IIC_BIN` | Optional Lua re-overlay path |
 | `MAME` | `mame` | Emulator binary |
 | `TIMEOUT` | unset (none) | Bramble `-timeout` seconds |
+| `BRAMBLE_A2BUS_REAL_WIFI` | unset | `1` = real `cyw43_arch_init` (breaks BusLoop until fixed) |
+| `BRAMBLE_A2BUS_SEED_WIFI` | unset | `1` = seed BrambleNet SSID/password in config |
 
 ## Protocol (Bramble `-a2bus-bridge`)
 

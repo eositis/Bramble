@@ -622,6 +622,16 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | Probe strings `192.168.4.2` / `255.255.255.0` / `192.168.4.1`×2; err=11 |
 | **Commit** | `c36e139` — fix(mame): write correct Test Wifi IP strings for the control panel |
 
+## 2026-07-30 — Restore MegaFlash boot under a2bus
+
+| Field | Detail |
+|-------|--------|
+| **Request** | System no longer boots from MegaFlash; CP option 7 reports MegaFlash not found |
+| **Cause** | Enabling real `cyw43_arch_init` from InitPicoLed HardFaults core1 BusLoop during `clmload_status` (`PC=0x1FFF8F6C`); Slinky stuck → no native `$96` |
+| **Actions** | Default-stub `cyw43_arch_init`/`gpio_put`/`InitCyw43`/`ConnectWifi`; restore synthetic configured TestWifi; opt-in `BRAMBLE_A2BUS_REAL_WIFI=1`; docs |
+| **Validate** | `bramble_tests` 322/322; a2bus run shows stub + `BusLoopSlinky ready` and **no** HardFault |
+| **Commit** | *(pending)* |
+
 <!--
 
 | Field | Detail |

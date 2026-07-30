@@ -5,23 +5,23 @@ Scope: local commits on `main` after clone.
 
 ---
 
-## 2026-07-29 — `26fece6` — RP2350 DMA + real CYW43 gSPI test-pattern
+## Unreleased
+
+_(moved to commit section below)_
+
+---
+
+## 2026-07-30 — restore a2bus boot (stub cyw43_arch_init)
 
 | Change | Reason |
 |--------|--------|
-| RP2350 DMA: BSWAP/BUSY/INCR_WRITE/CHAIN_TO bit positions; 16 ch; TIMER/ABORT/N_CHANNELS offsets | MegaFlash sets BSWAP at bit 24; Bramble treated it as RP2040 BUSY → gSPI cmds undecoded (`Failed to read test pattern`) |
-| Re-`dma_init` after `membus_rp2350_mode=1`; PC exec allows 520KB SRAM | CHAIN_TO defaults + high-RAM fetch for M33 |
-| PIO: arm gSPI pre-DMA skip on SM disable; ignore bit-count TXF; don't abort READ on dummy TX | X/Y countdown words were decoded as gSPI |
-| a2bus: drop InitCyw43/ConnectWifi/synthetic TestWifi; empty SSID still SSIDNOTSET | Real `cyw43_arch_init` path (FEEDBEAD + FW version string) |
-| core1 script SP → StackOneTop `0x20081000`; richer HardFault regs | Cushion vs HeapLimit; debug BusLoopSlinky fault during CLM |
+| a2bus: stub `cyw43_arch_init` / `cyw43_arch_gpio_put` / `InitCyw43` / `ConnectWifi` by default | Real InitPicoLed gSPI HardFaults BusLoop → MegaFlash not found / no boot |
+| Restore synthetic configured-SSID TestWifi; `BRAMBLE_A2BUS_REAL_WIFI=1` for real gSPI | Keep CP usable; opt-in FEEDBEAD path while core1 fault is WIP |
+| Docs: MAME-BRIDGE notes REAL_WIFI + boot regression | Operators know default is BusLoop-safe |
 
 ---
 
-## Unreleased
-
-_(none)_
-
----
+## 2026-07-29 — `26fece6` — RP2350 DMA + real CYW43 gSPI test-pattern
 
 ## 2026-07-29 — `c36e139` — Test Wifi CP strings + TAP/NAT note
 

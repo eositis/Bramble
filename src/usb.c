@@ -1919,6 +1919,8 @@ static int a2bus_rtc_hooks(void) {
 #define USB_GUEST_GET_NETWORK_TIME    0x1000859cu /* GetNetworkTime */
 #define USB_GUEST_CONNECT_WIFI        0x10008bacu /* CUDPTask::ConnectWifi */
 #define USB_GUEST_INIT_CYW43          0x100088f4u /* CUDPTask::InitCyw43 */
+#define USB_GUEST_CYW43_ARCH_INIT     0x1001b030u /* cyw43_arch_init (InitPicoLed) */
+#define USB_GUEST_CYW43_GPIO_PUT      0x1001afa0u /* cyw43_arch_gpio_put */
 #define USB_GUEST_NETERR_SSIDNOTSET   3u
 #define USB_GUEST_NETERR_NONE         11u /* NetworkError_t: last enumerator */
 #define USB_GUEST_PARAMETER_BUFFER    0x20016fc8u
@@ -1971,12 +1973,65 @@ static void a2bus_ensure_malloc_mutex(void) {
     fprintf(stderr, "[A2Bus] malloc_mutex unlocked (owner=-1)\n");
 }
 
+static void a2bus_write_cstr(uint32_t *dest, const char *s) {
+    while (*s) {
+        mem_write8((*dest)++, (uint8_t)*s++);
+    }
+    mem_write8((*dest)++, 0);
+}
+
+/* Finish DoTestWifi like firmware for CP PrintStringFromDataBuffer. */
+static void a2bus_complete_testwifi_ok(void) {
+    mem_write8(USB_GUEST_PARAMETER_BUFFER, (uint8_t)USB_GUEST_NETERR_NONE);
+    mem_write8(USB_GUEST_PARAMETER_BUFFER + 1u, 192);
+    mem_write8(USB_GUEST_PARAMETER_BUFFER + 2u, 168);
+    mem_write8(USB_GUEST_PARAMETER_BUFFER + 3u, 4);
+    mem_write8(USB_GUEST_PARAMETER_BUFFER + 4u, 2);
+    mem_write8(USB_GUEST_PARAMETER_BUFFER + 5u, 255);
+    mem_write8(USB_GUEST_PARAMETER_BUFFER + 6u, 255);
+    mem_write8(USB_GUEST_PARAMETER_BUFFER + 7u, 255);
+    mem_write8(USB_GUEST_PARAMETER_BUFFER + 8u, 0);
+    mem_write8(USB_GUEST_PARAMETER_BUFFER + 9u, 192);
+    mem_write8(USB_GUEST_PARAMETER_BUFFER + 10u, 168);
+    mem_write8(USB_GUEST_PARAMETER_BUFFER + 11u, 4);
+    mem_write8(USB_GUEST_PARAMETER_BUFFER + 12u, 1);
+    mem_write8(USB_GUEST_PARAMETER_BUFFER + 13u, 192);
+    mem_write8(USB_GUEST_PARAMETER_BUFFER + 14u, 168);
+    mem_write8(USB_GUEST_PARAMETER_BUFFER + 15u, 4);
+    mem_write8(USB_GUEST_PARAMETER_BUFFER + 16u, 1);
+
+    uint32_t d = USB_GUEST_DATA_BUFFER;
+    a2bus_write_cstr(&d, "192.168.4.2");
+    a2bus_write_cstr(&d, "255.255.255.0");
+    a2bus_write_cstr(&d, "192.168.4.1");
+    a2bus_write_cstr(&d, "192.168.4.1");
+
+    mem_write8(USB_GUEST_DATA_XFER_MODE, 0);
+    mem_write32(USB_GUEST_DATA_BUFFER_INDEX, 0);
+    mem_write32(USB_GUEST_PARAM_BUFFER_INDEX, 0);
+    mem_write8(USB_GUEST_REGISTERS + 1u, mem_read8(USB_GUEST_PARAMETER_BUFFER));
+    mem_write8(USB_GUEST_REGISTERS + 2u, mem_read8(USB_GUEST_DATA_BUFFER));
+}
+
+/* Real gSPI during a2bus kills BusLoop (core1 HardFault @ clmload_status). */
+static int a2bus_real_wifi(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        const char *e = getenv("BRAMBLE_A2BUS_REAL_WIFI");
+        cached = (e && e[0] == '1' && e[1] == '\0') ? 1 : 0;
+        if (cached) {
+            fprintf(stderr, "[A2Bus] BRAMBLE_A2BUS_REAL_WIFI=1 — real cyw43_arch_init\n");
+        }
+    }
+    return cached;
+}
+
 /*
- * Empty-SSID TestWifi/NTP uses C++ exceptions (__cxa_throw). Bramble's EH path
- * still faults. Fail fast with SSIDNOTSET on core1 DoTestWifi (no IPC/sleep)
- * and skip GetNetworkTime's RunNTP so core0Loop stays responsive.
+ * Empty-SSID TestWifi/NTP uses C++ exceptions (__cxa_throw). Fail fast SSIDNOTSET.
  *
- * Configured-SSID: allow real InitCyw43 / ConnectWifi / DoTestWifi (gSPI + JOIN).
+ * Default a2bus: stub cyw43_arch_init / InitCyw43 / ConnectWifi so BusLoop stays
+ * alive (native ID $96, boot, option 7). Set BRAMBLE_A2BUS_REAL_WIFI=1 to exercise
+ * real gSPI (FEEDBEAD works; core1 Slinky still HardFaults — WIP).
  */
 static int a2bus_wifi_hooks(void) {
     if (!a2bus_bridge_active() || !cyw43.enabled) {
@@ -1985,10 +2040,6 @@ static int a2bus_wifi_hooks(void) {
     a2bus_ensure_malloc_mutex();
     uint32_t pc = cpu.r[15] & ~1u;
 
-    /*
-     * sleep_until/WFE + dual-core timer ownership stalls cyw43_arch_init for
-     * wall-minutes. Advance guest TIMER0 and return so InitPicoLed can progress.
-     */
     if (pc == USB_GUEST_SLEEP_MS) {
         a2bus_guest_time_advance_us((uint64_t)cpu.r[0] * 1000ull);
         cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
@@ -2012,26 +2063,71 @@ static int a2bus_wifi_hooks(void) {
         return 1;
     }
 
-    /* wrap_malloc takes malloc_mutex; zero owner deadlocks before InitCyw43.
-     * NOP mutexes still needed: real WFE paths stall under dual-core+a2bus. */
     if (pc == USB_GUEST_MUTEX_ENTER_VENEER || pc == USB_GUEST_MUTEX_EXIT_VENEER ||
         pc == USB_GUEST_MUTEX_ENTER_V || pc == USB_GUEST_MUTEX_EXIT_V) {
         cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
         return 1;
     }
 
-    /* Empty SSID only — configured TestWifi runs real cyw43 join/DHCP. */
+    if (!a2bus_real_wifi()) {
+        if (pc == USB_GUEST_CYW43_ARCH_INIT) {
+            static int once;
+            if (!once++) {
+                fprintf(stderr,
+                        "[A2Bus] stub cyw43_arch_init (BusLoop-safe; "
+                        "BRAMBLE_A2BUS_REAL_WIFI=1 for real gSPI)\n");
+            }
+            mem_write8(0x200615fcu, 1u); /* s_cyw43Inited */
+            cpu.r[0] = 0;
+            cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+            return 1;
+        }
+        if (pc == USB_GUEST_CYW43_GPIO_PUT) {
+            cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+            return 1;
+        }
+        if (pc == USB_GUEST_INIT_CYW43) {
+            mem_write8(0x200615fcu, 1u);
+            cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+            return 1;
+        }
+        if (pc == USB_GUEST_CONNECT_WIFI) {
+            cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+            return 1;
+        }
+    }
+
     if (pc != USB_GUEST_DO_TEST_WIFI && pc != USB_GUEST_GET_NETWORK_TIME &&
         pc != USB_GUEST_TEST_WIFI && pc != 0x20004548u /* __DoTestWifi_veneer */) {
         return 0;
     }
 
     if (mem_read8(USB_GUEST_WIFI_SSID) != 0u) {
+        if (a2bus_real_wifi()) {
+            return 0; /* real JOIN path */
+        }
+        if (pc == USB_GUEST_DO_TEST_WIFI || pc == 0x20004548u) {
+            fprintf(stderr,
+                    "[A2Bus] DoTestWifi: configured SSID → synthetic OK "
+                    "(192.168.4.2/24)\n");
+            fflush(stderr);
+            a2bus_complete_testwifi_ok();
+            cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+            return 1;
+        }
+        if (pc == USB_GUEST_TEST_WIFI) {
+            uint32_t result = cpu.r[0];
+            if (result != 0u) {
+                mem_write32(result + 16u, USB_GUEST_NETERR_NONE);
+                mem_write8(result + 20u, 1u);
+            }
+            cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+            return 1;
+        }
         return 0;
     }
 
     if (pc == USB_GUEST_DO_TEST_WIFI || pc == 0x20004548u) {
-        /* Mirror DoTestWifi !PicoW epilogue with NETERR_SSIDNOTSET. */
         fprintf(stderr, "[A2Bus] DoTestWifi: SSID not set → NETERR_SSIDNOTSET\n");
         fflush(stderr);
         mem_write8(USB_GUEST_TESTWIFI_ERRBYTE, (uint8_t)USB_GUEST_NETERR_SSIDNOTSET);
