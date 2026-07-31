@@ -11,7 +11,8 @@
 #include <unistd.h>
 #include "emulator.h"
 #include "devtools.h"
-#include "a2bus.h"
+#include "bramble_ext.h"
+#include "pio.h"
 
 /* ========================================================================
  * ARM Semihosting
@@ -534,7 +535,7 @@ int script_enabled = 0;
 
 typedef struct {
     uint32_t time_us;
-    int type;     /* 0=uart, 1=gpio, 2=a2phi, 3=a2read, 4=a2write, 5=pioburst, 6=core1launch */
+    int type;     /* 0=uart, 1=gpio, 5=pioburst, 6=core1launch; >=100 = bramble_ext */
     int channel;  /* uart num, gpio pin, addr nibble, or burst count */
     uint8_t data[256];
     int data_len;
@@ -587,18 +588,8 @@ int script_init(const char *path) {
             ev->type = 1;
             ev->channel = atoi(cmd + 4);
             ev->gpio_val = atoi(arg);
-        } else if (strcmp(cmd, "a2phi") == 0) {
-            ev->type = 2;
-        } else if (strcmp(cmd, "a2read") == 0) {
-            ev->type = 3;
-            ev->channel = (int)strtoul(arg, NULL, 0);
-        } else if (strcmp(cmd, "a2write") == 0) {
-            unsigned addr = 0, data = 0;
-            if (sscanf(arg, "%u %u", &addr, &data) >= 2) {
-                ev->type = 4;
-                ev->channel = (int)addr;
-                ev->gpio_val = (int)data;
-            }
+        } else if (bramble_ext_script_parse(cmd, arg, &ev->type, &ev->channel, &ev->gpio_val)) {
+            /* extension script command */
         } else if (strcmp(cmd, "pioburst") == 0) {
             ev->type = 5;
             ev->channel = atoi(arg);
@@ -632,15 +623,16 @@ void script_poll(uint32_t elapsed_us) {
             }
         } else if (ev->type == 1) {
             gpio_set_input_pin((uint8_t)ev->channel, (uint8_t)ev->gpio_val);
-            a2bus_pio_burst(8);
-        } else if (ev->type == 2) {
-            a2bus_phi0_pulse_for_detect();
-        } else if (ev->type == 3) {
-            a2bus_inject_read((uint8_t)ev->channel);
-        } else if (ev->type == 4) {
-            a2bus_inject_write((uint8_t)ev->channel, (uint8_t)ev->gpio_val);
+            for (unsigned b = 0; b < 8u; b++) {
+                pio_step();
+            }
+        } else if (bramble_ext_script_run(ev->type, ev->channel, ev->gpio_val)) {
+            /* extension handled */
         } else if (ev->type == 5) {
-            a2bus_pio_burst((unsigned)ev->channel);
+            unsigned n = (unsigned)ev->channel;
+            for (unsigned b = 0; b < n; b++) {
+                pio_step();
+            }
         } else if (ev->type == 6) {
             /* MegaFlash defaults: core1Main@0x20000120, stack@StackOneTop;
              * VTOR 0 = sio_force_core1_launch picks CORE0.vtor / ram_vector_table. */

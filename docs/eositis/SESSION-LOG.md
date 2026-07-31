@@ -702,6 +702,16 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Commit** | `ad5c396` — chore: point MegaFlash runtime assets at sibling megaflash-vm; megaflash-vm `ab79980` |
 
 
+## 2026-07-31 — Move a2bus into megaflash-vm overlay
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Implement a2bus megaflash-vm overlay split plan |
+| **Actions** | Weak `bramble_ext_*` in Bramble; move a2bus/bridge/hooks to megaflash-vm; overlay CMake; launcher prefers overlay binary; SPI flash stays in Bramble |
+| **Validate** | `bramble_tests` 323/323; overlay PING + BusLoopSlinky ready |
+| **Commit** | _(pending)_ |
+
+
 <!--
 
 | Field | Detail |

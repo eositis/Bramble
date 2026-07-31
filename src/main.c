@@ -62,8 +62,7 @@ typedef enum { ARCH_M0PLUS, ARCH_RV32, ARCH_M33 } arch_t;
 #include "vnet.h"
 #include "sdd.h"
 #include "w5500.h"
-#include "a2bus.h"
-#include "a2bus_bridge.h"
+#include "bramble_ext.h"
 
 
 int any_core_running(void);
@@ -363,9 +362,9 @@ int main(int argc, char **argv) {
         fprintf(stderr, "  -no-boot2  Skip boot2 even if detected in firmware\n");
         fprintf(stderr, "  -debug-mem Log unmapped peripheral accesses\n");
         fprintf(stderr, "  -flash <path> Persistent flash storage (2MB file)\n");
-        fprintf(stderr, "  -spi-flash1 [path]       MegaFlash SPI chip #1 backing file (default: flash/spi-flash1.bin)\n");
+        fprintf(stderr, "  -spi-flash1 [path]       SPI flash chip #1 backing file (default: flash/spi-flash1.bin)\n");
         fprintf(stderr, "  -spi-flash1-size <MB>    SPI chip #1 size in MB (default: 64, multiple of 32)\n");
-        fprintf(stderr, "  -spi-flash2 [path]       MegaFlash SPI chip #2 backing file (default: flash/spi-flash2.bin)\n");
+        fprintf(stderr, "  -spi-flash2 [path]       SPI flash chip #2 backing file (default: flash/spi-flash2.bin)\n");
         fprintf(stderr, "  -spi-flash2-size <MB>    SPI chip #2 size in MB (default: 64, multiple of 32)\n");
         fprintf(stderr, "  -mount <dir>  Mount flash FAT filesystem via FUSE (requires -flash, may need sudo)\n");
         fprintf(stderr, "  -mount-offset <hex>  Flash offset of FAT region (default: auto-scan)\n");
@@ -410,8 +409,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "  -timeout <seconds>    Kill emulator after N seconds (exit 124)\n");
         fprintf(stderr, "  -symbols <elf>        Load ELF symbols for readable reports\n");
         fprintf(stderr, "  -script <file>        Scripted I/O (timestamped UART/GPIO input)\n");
-        fprintf(stderr, "  -a2bus-bridge [port]  MegaFlash Apple-bus TCP bridge (default 19765)\n");
-        fprintf(stderr, "  -a2bus-regs <addr>    Guest BSS address of MegaFlash registers\n");
+        bramble_ext_print_help();
         fprintf(stderr, "  -expect <file>        Compare stdout against golden file (exit 0/1)\n");
         fprintf(stderr, "  -watch <addr[:len]>   Log reads/writes to address range\n");
         fprintf(stderr, "  -callgraph <file>     Write call graph in DOT format\n");
@@ -458,8 +456,6 @@ int main(int argc, char **argv) {
     int timeout_secs = 0;
     char *symbols_path = NULL;
     char *script_path = NULL;
-    int a2bus_bridge_port = 0; /* 0 = off; >0 = listen port */
-    uint32_t a2bus_regs_addr = 0;
     char *expect_file = NULL;
     char *callgraph_path = NULL;
     char *gpio_trace_path = NULL;
@@ -731,16 +727,8 @@ int main(int argc, char **argv) {
             if (i + 1 < argc) symbols_path = argv[++i];
         } else if (strcmp(argv[i], "-script") == 0) {
             if (i + 1 < argc) script_path = argv[++i];
-        } else if (strcmp(argv[i], "-a2bus-bridge") == 0) {
-            a2bus_bridge_port = 19765;
-            if (i + 1 < argc && argv[i + 1][0] != '-') {
-                a2bus_bridge_port = atoi(argv[++i]);
-                if (a2bus_bridge_port <= 0) a2bus_bridge_port = 19765;
-            }
-        } else if (strcmp(argv[i], "-a2bus-regs") == 0) {
-            if (i + 1 < argc) {
-                a2bus_regs_addr = (uint32_t)strtoul(argv[++i], NULL, 0);
-            }
+        } else if (bramble_ext_parse_arg(&i, argc, argv)) {
+            /* extension consumed argv[i] (and maybe following) */
         } else if (strcmp(argv[i], "-expect") == 0) {
             if (i + 1 < argc) expect_file = argv[++i];
         } else if (strcmp(argv[i], "-watch") == 0) {
@@ -1058,25 +1046,7 @@ skip_fuse:
         return EXIT_FAILURE;
     }
 
-    if (a2bus_bridge_port > 0) {
-        if (a2bus_regs_addr == 0 && symbols_path) {
-            uint32_t resolved = a2bus_bridge_regs_from_elf(symbols_path);
-            if (resolved) {
-                a2bus_regs_addr = resolved;
-                fprintf(stderr, "[A2Bus] resolved registers @ 0x%08X from %s\n",
-                        a2bus_regs_addr, symbols_path);
-            }
-        }
-        if (a2bus_regs_addr != 0) {
-            a2bus_bridge_set_regs_addr(a2bus_regs_addr);
-        }
-        a2bus_bridge_set_port(a2bus_bridge_port);
-        a2bus_bridge_set_pump(NULL); /* default: dual_core_step + pio_step */
-        if (a2bus_bridge_init() < 0) {
-            fprintf(stderr, "[Error] Failed to initialize A2 bus bridge\n");
-            return EXIT_FAILURE;
-        }
-    }
+    bramble_ext_post_init(symbols_path);
 
     /* Wire protocol initialization */
     if (wire_init() < 0) {
@@ -1376,7 +1346,7 @@ skip_fuse:
             if (timeout_expired || semihost_exit_requested) break;
 
             /* Safety limit (skip when interactive I/O keeps the guest alive) */
-            if (!stdin_enabled && !a2bus_bridge_active() && step_count > 1000000000) {
+            if (!stdin_enabled && !bramble_ext_active() && step_count > 1000000000) {
                 fprintf(stderr, "[Warning] Instruction limit reached (1B)\n");
                 break;
             }
@@ -1432,7 +1402,7 @@ skip_fuse:
             corepool_lock();
             net_bridge_poll();
             usb_console_tcp_poll();
-            if (a2bus_bridge_active()) a2bus_bridge_poll();
+            if (bramble_ext_active()) bramble_ext_poll();
             wire_poll();
             cyw43_tap_poll();
             if (vnet_enabled) vnet_poll();
@@ -1474,8 +1444,8 @@ skip_fuse:
             /* Semihosting exit */
             if (semihost_exit_requested) break;
 
-            /* Safety limit (skip for a2bus bridge — MAME session needs indefinite run) */
-            if (!stdin_enabled && !a2bus_bridge_active() && step_count > 1000000) {
+            /* Safety limit (skip when extension session needs indefinite run) */
+            if (!stdin_enabled && !bramble_ext_active() && step_count > 1000000) {
                 /* Approximate: each poll ~= 1000 instructions */
                 instruction_count = cores[CORE0].step_count + cores[CORE1].step_count;
                 if (instruction_count > 1000000000) {
@@ -1530,20 +1500,19 @@ skip_fuse:
                         eus = step_us;
                     }
                 }
-                /* MAME bridge: also advance on host time so core1launch is not
-                 * starved when guest init burns steps without TIMER0 progress. */
-                if (a2bus_bridge_active()) {
-                    static uint64_t a2bus_script_t0;
-                    static int a2bus_script_t0_set;
+                /* Extension (MAME bridge): also advance on host wall time. */
+                if (bramble_ext_script_use_wallclock()) {
+                    static uint64_t ext_script_t0;
+                    static int ext_script_t0_set;
                     struct timespec ts;
                     clock_gettime(CLOCK_MONOTONIC, &ts);
                     uint64_t now_us = (uint64_t)ts.tv_sec * 1000000ull +
                                      (uint64_t)ts.tv_nsec / 1000ull;
-                    if (!a2bus_script_t0_set) {
-                        a2bus_script_t0 = now_us;
-                        a2bus_script_t0_set = 1;
+                    if (!ext_script_t0_set) {
+                        ext_script_t0 = now_us;
+                        ext_script_t0_set = 1;
                     }
-                    uint32_t wall_us = (uint32_t)(now_us - a2bus_script_t0);
+                    uint32_t wall_us = (uint32_t)(now_us - ext_script_t0);
                     if (wall_us > eus) {
                         eus = wall_us;
                     }
@@ -1551,9 +1520,9 @@ skip_fuse:
                 script_poll(eus);
             }
 
-            /* Poll A2 bus bridge often enough for MAME RPC, not every step. */
-            if (a2bus_bridge_active() && (step_count & 0x7F) == 0) {
-                a2bus_bridge_poll();
+            /* Poll extension bridges (e.g. a2bus) often enough for RPC. */
+            if (bramble_ext_active() && (step_count & 0x7F) == 0) {
+                bramble_ext_poll();
             }
 
             /* Poll stdin for UART Rx data every 1024 steps */
@@ -1617,7 +1586,7 @@ skip_fuse:
 
             /* Safety limit: prevent infinite loops (disabled for interactive I/O) */
             instruction_count = cores[CORE0].step_count + cores[CORE1].step_count;
-            if (!gdb_enabled && !stdin_enabled && !a2bus_bridge_active() &&
+            if (!gdb_enabled && !stdin_enabled && !bramble_ext_active() &&
                 instruction_count > 1000000000) {
                 fprintf(stderr,"[Warning] Instruction limit reached (1B)\n");
                 break;
@@ -1639,7 +1608,7 @@ skip_fuse:
 
     net_bridge_cleanup();
     usb_console_tcp_cleanup();
-    a2bus_bridge_cleanup();
+    bramble_ext_cleanup();
     wire_cleanup();
     cyw43_tap_close();
     if (vnet_enabled) vnet_cleanup();

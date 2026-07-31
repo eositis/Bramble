@@ -7,7 +7,10 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
-_(none)_
+| Change | Reason |
+|--------|--------|
+| Remove a2bus from Bramble; add weak `bramble_ext_*`; keep `-spi-flash*` | Apple II glue moves to megaflash-vm overlay for upstream cleanliness |
+
 
 ---
 

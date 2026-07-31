@@ -27,5 +27,5 @@ These rules apply to all agent work on this Bramble tree unless the user explici
 ## 4. Build and test expectations
 
 - After emulator changes: `make -C build bramble bramble_tests` and run `./build/bramble_tests` when feasible.
-- Firmware: `../megaflash-vm/firmware/megaflash.uf2` with `-arch m33 -clock 150 -cores 2` and `scripts/megaflash-bus.stub` when relevant (sync UF2 via megaflash-vm `scripts/sync-firmware-from-megaflash.sh`)
-- MAME + MegaFlash integrated sessions live in sibling **megaflash-vm** (`../megaflash-vm`); runtime flash/firmware live there too.
+- MAME / MegaFlash Apple-bus: build overlay in `../megaflash-vm` (`cmake -B build && make -C build bramble`); firmware under `../megaflash-vm/firmware/`.
+- Stock Bramble has no `a2bus`; SPI flash (`-spi-flash*`) remains here. Temporary wifi/RTC stubs live in megaflash-vm overlay until macOS CYW43 networking works.

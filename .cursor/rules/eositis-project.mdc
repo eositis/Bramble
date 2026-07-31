@@ -19,5 +19,5 @@ Read `docs/eositis/PROJECT-RULES.md` at task start.
 
 - Build: `make -C build bramble bramble_tests`
 - Tests: `./build/bramble_tests`
-- Firmware: `../megaflash-vm/firmware/megaflash.uf2` with `-arch m33 -clock 150 -cores 2` and `scripts/megaflash-bus.stub` when relevant
-- MAME integration + runtime flash/firmware: sibling `../megaflash-vm` (outside GPIO); keep `a2bus` / `-a2bus-bridge` in Bramble
+- MAME / Apple-bus: sibling `../megaflash-vm` overlay binary (not stock bramble)
+- SPI flash host backing stays in Bramble; a2bus / MegaFlash guest stubs are megaflash-vm overlay only
