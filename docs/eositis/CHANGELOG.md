@@ -7,17 +7,19 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+_(none)_
+
+---
+
+## 2026-07-31 — `c1e1ae0` — a2bus to megaflash-vm
+
 | Change | Reason |
 |--------|--------|
 | Remove a2bus from Bramble; add weak `bramble_ext_*`; keep `-spi-flash*` | Apple II glue moves to megaflash-vm overlay for upstream cleanliness |
 
-
 ---
 
-## 2026-07-30 — `[main ad5c396] chore: point MegaFlash runtime assets at sibling megaflash-vm
- 11 files changed, 43 insertions(+), 20 deletions(-)
- create mode 120000 flash
-ad5c396` — assets in megaflash-vm
+## 2026-07-30 — `ad5c396` — assets in megaflash-vm
 
 | Change | Reason |
 |--------|--------|

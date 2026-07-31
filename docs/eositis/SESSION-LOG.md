@@ -709,7 +709,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Request** | Implement a2bus megaflash-vm overlay split plan |
 | **Actions** | Weak `bramble_ext_*` in Bramble; move a2bus/bridge/hooks to megaflash-vm; overlay CMake; launcher prefers overlay binary; SPI flash stays in Bramble |
 | **Validate** | `bramble_tests` 323/323; overlay PING + BusLoopSlinky ready |
-| **Commit** | _(pending)_ |
+| **Commit** | `c1e1ae0` — refactor: move Apple-bus out; megaflash-vm overlay |
 
 
 <!--
