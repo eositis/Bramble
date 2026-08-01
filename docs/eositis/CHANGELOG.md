@@ -7,6 +7,12 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+_(none)_
+
+---
+
+## 2026-08-01 — `9ce6401` — Open-Apple device info line endings
+
 | Change | Reason |
 |--------|--------|
 | Device-info string uses Apple `\n\r`; avoid float snprintf | Match firmware layout; no host `%f` |
