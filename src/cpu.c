@@ -1555,6 +1555,28 @@ static int guest_megaflash_memset_accel(uint32_t pc) {
 }
 
 __attribute__((hot)) void cpu_step(void) {
+    /*
+     * Dual-core newlib can smash flash function pointers with an extra
+     * 0x20000000 bit (e.g. __ascii_mbtowc 0x10034281 → 0x30034281). 0x30xxxxxx
+     * is not a valid RP2350 XIP window; rewrite before hooks / bounds checks.
+     */
+    {
+        uint32_t raw = cpu.r[15];
+        uint32_t pc0 = raw & ~1u;
+        if ((pc0 & 0xf0000000u) == 0x30000000u) {
+            uint32_t fixed = (pc0 & 0x0fffffffu) | FLASH_BASE;
+            if (fixed >= FLASH_BASE && fixed < FLASH_BASE + FLASH_SIZE_MAX) {
+                static int remap_logged;
+                if (!remap_logged++) {
+                    fprintf(stderr,
+                            "[CPU] remap corrupt flash PC 0x%08X → 0x%08X\n",
+                            pc0, fixed);
+                }
+                cpu.r[15] = fixed | (raw & 1u);
+            }
+        }
+    }
+
     usb_console_guest_stdio_hook();
 
     uint32_t pc = cpu.r[15] & ~1u;

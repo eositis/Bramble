@@ -829,3 +829,13 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Commit** | Bramble `9ce6401`; megaflash-vm `5b88cb0` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
 
+## 2026-08-01 — Option 7 MegaFlash Not Found (core0 HardFault 0x30034280)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Boot-menu option 7 still MegaFlash Not Found; log shows HardFault PC=0x30034280 |
+| **Cause** | a2bus+wifi skips USB/UART stdio hooks; dual-core newlib `_vfprintf_r` smashes locale mbtowc to `0x10034280\|0x20000000`; BusLoop stuck off the bus → ID check fails |
+| **Actions** | Enable megaflash stdio hooks when `-wifi`; stub `_vfprintf_r` on a2bus; remap/repair `0x30xxxxxx` flash PCs; host `__wrap_vprintf` |
+| **Validate** | `bramble_tests` 323/323; overlay rebuild |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+

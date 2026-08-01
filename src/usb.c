@@ -234,7 +234,13 @@ static int usb_console_bridge_mode(void) {
 }
 
 static int guest_megaflash_hook_active(void) {
-    return usb_console_bridge_mode() || net_bridge_any_active();
+    /*
+     * Include -wifi: a2bus+tap has no UART console, but newlib _vfprintf_r still
+     * runs (sprintf / unwrapped paths). Without these hooks, dual-core printf
+     * smashes locale mbtowc to 0x30034280 and HardFaults — BusLoop stuck →
+     * boot-menu option 7 "MegaFlash Not Found".
+     */
+    return usb_console_bridge_mode() || net_bridge_any_active() || cyw43.enabled;
 }
 
 /* Pico `ldr.w pc,[pc]` veneers; Thumb decode historically mishandled them. */
@@ -2614,8 +2620,7 @@ void usb_console_guest_stdio_hook(void) {
         return;
     }
     /* Skip newlib locale/wchar path under emu (broken Thumb BL / VFP spin). */
-    if (pc == USB_GUEST_VFPRINTF_R &&
-        (usb_mode || net_bridge_uart_active(0))) {
+    if (pc == USB_GUEST_VFPRINTF_R) {
         usb_guest_return_to_lr(0);
         return;
     }
@@ -2632,17 +2637,27 @@ void usb_console_guest_stdio_hook(void) {
     } else if (pc < USB_GUEST_VFPRINTF_LO || pc > USB_GUEST_VFPRINTF_HI) {
         vf_locale_iters = 0;
     }
-    if (pc == USB_GUEST_ASCII_MBTOWC) {
+    /* 0x30034280 = corrupted mbtowc (0x10034280 | 0x20000000) from dual-core smash. */
+    if (pc == USB_GUEST_ASCII_MBTOWC || pc == (USB_GUEST_ASCII_MBTOWC | 0x20000000u)) {
         int ret = 0;
         if (cpu.r[1] != 0 && cpu.r[2] != 0) {
             uint8_t ch = mem_read8(cpu.r[2]);
             mem_write32(cpu.r[1], (uint32_t)ch);
             ret = 1;
         }
+        /* Repair locale so the next BLX does not HardFault again. */
+        {
+            uint32_t loc = 0x20004f00u + 0x1ccu; /* __global_locale.mbtowc */
+            uint32_t p = mem_read32(loc);
+            if ((p & ~1u) == (USB_GUEST_ASCII_MBTOWC | 0x20000000u)) {
+                mem_write32(loc, USB_GUEST_ASCII_MBTOWC | 1u);
+            }
+        }
         usb_guest_return_to_lr((uint32_t)ret);
         return;
     }
-    if (pc == USB_GUEST_ASCII_MBTOWC_LOOP) {
+    if (pc == USB_GUEST_ASCII_MBTOWC_LOOP ||
+        pc == (USB_GUEST_ASCII_MBTOWC_LOOP | 0x20000000u)) {
         usb_guest_return_to_lr(1);
         return;
     }

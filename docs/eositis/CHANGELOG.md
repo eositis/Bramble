@@ -7,7 +7,9 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
-_(none)_
+| Change | Reason |
+|--------|--------|
+| `-wifi` enables `_vfprintf_r` / mbtowc guest hooks; remap corrupt `0x30` flash PCs | Dual-core locale smash → HardFault → option 7 Not Found |
 
 ---
 
