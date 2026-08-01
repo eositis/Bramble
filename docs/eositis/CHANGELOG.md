@@ -7,7 +7,10 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
-_(none)_
+| Change | Reason |
+|--------|--------|
+| Device-info string uses Apple `\n\r`; avoid float snprintf | Match firmware layout; no host `%f` |
+| Docs: Open-Apple left key / option-7 vs CP Test Wifi | User clarification |
 
 ---
 

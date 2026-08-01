@@ -2120,19 +2120,20 @@ void usb_guest_fill_device_info_string(uint32_t dest) {
     if (total_mb == 0u) {
         total_mb = USB_GUEST_EMU_FLASH_CHIP_MB * USB_GUEST_SPI_FLASH_CHIP_COUNT;
     }
+    /* Firmware uses Apple \n\r line endings (see GetDeviceInfoString). */
     int n = snprintf(k_msg, sizeof(k_msg),
-        "Device Information\r\n"
-        "==================\r\n\r\n"
-        "Pico Board = Pico 2 RP2350\r\n"
-        "Wifi Supported = Yes\r\n"
-        "CPU Speed = 150MHz, SPI Speed = %.0fMHz\r\n"
-        "MegaFlash Pico Firmware Version = V1.2.3-eo (DEBUG)\r\n"
-        "Firmware build: 2026-07-27 07:49:55 UTC  (1785138595 Unix s)\r\n"
-        "Pico SDK Version = 2.2.0\r\n"
-        "Total Flash Capacity = %uMB\r\n"
-        "Flash Chip #0 JEDEC ID = %06Xh\r\n"
-        "Flash Chip #1 JEDEC ID = %06Xh\r\n",
-        (double)USB_GUEST_SPI_BAUDRATE_HZ / 1000000.0,
+        "Device Information\n\r"
+        "==================\n\n\r"
+        "Pico Board = Pico 2 RP2350\n\r"
+        "Wifi Supported = Yes\n\r"
+        "CPU Speed = 150MHz, SPI Speed = %uMHz\n\r"
+        "MegaFlash Pico Firmware Version = V1.2.3-eo (DEBUG)\n\r"
+        "Firmware build: 2026-07-27 07:49:55 UTC  (1785138595 Unix s)\n\r"
+        "Pico SDK Version = 2.2.0\n\r"
+        "Total Flash Capacity = %uMB\n\r"
+        "Flash Chip #0 JEDEC ID = %06Xh\n\r"
+        "Flash Chip #1 JEDEC ID = %06Xh\n\r",
+        (unsigned)(USB_GUEST_SPI_BAUDRATE_HZ / 1000000u),
         total_mb,
         USB_GUEST_WINBOND_JEDEC24,
         USB_GUEST_WINBOND_JEDEC24);

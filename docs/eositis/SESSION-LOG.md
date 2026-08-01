@@ -818,3 +818,13 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Commit** | Bramble `1aecdeb`; megaflash-vm `37776bb` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
 
+## 2026-08-01 — Open-Apple left key + device info hang → “MegaFlash not available”
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Open-Apple is left of keyboard; CP option 7 reports MegaFlash not available (SP boot OK) |
+| **Cause** | Docs pointed at Right ⌘; OA device info uses `$C061` / Left Option. `GetDeviceInfoString` sprintf hang left STATUS BUSY so later ID checks look like MegaFlash gone. “Option 7” may mean boot-menu Control Panel or CP Test Wifi |
+| **Actions** | Host-complete `DoGetInfoString`; Apple `\n\r` device-info text; MAME cfg binds Open-Apple to Left Option **or** Left ⌘; docs clarify OA-at-CP-start vs option 7 |
+| **Validate** | `bramble_tests` 323/323; overlay rebuild |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
