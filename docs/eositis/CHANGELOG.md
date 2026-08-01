@@ -11,7 +11,7 @@ _(none)_
 
 ---
 
-## 2026-08-01 — MAME host-net docs
+## 2026-08-01 — `987fda0` — MAME host-net docs
 
 | Change | Reason |
 |--------|--------|

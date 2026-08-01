@@ -729,7 +729,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Request** | Integrate network link into MAME startup with macOS admin popup; remove false TestWifi/NTP; real DNS/time diagnostics |
 | **Actions** | Docs: `MACOS-WIFI.md`, `PROJECT-RULES.md`; megaflash-vm: askpass + host-net prep, launcher `-wifi -tap` via `sudo -A`, remove synthetic a2bus TestWifi/NTP |
 | **Outcome** | Overlay rebuild OK; admin dialog path ready for user approve → MAME |
-| **Commit** | (this task) |
+| **Commit** | Bramble `987fda0` (docs); megaflash-vm `d9af01e` — host net + real WiFi diagnostics |
 
 
 <!--
