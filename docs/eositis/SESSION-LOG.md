@@ -719,7 +719,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Request** | Link WiFi radio to macOS network stack (SSID/PW join → host internet) |
 | **Actions** | Darwin `tapif` utun + Ethernet↔IPv4/ARP; pf helper script; refuse empty SSID; log passphrase present; docs |
 | **Validate** | `bramble_tests` 323/323; utun open needs sudo (no interactive password in agent) |
-| **Commit** | _(pending)_ |
+| **Commit** |  — feat(wifi): bridge CYW43 to macOS via utun |
 
 
 <!--
