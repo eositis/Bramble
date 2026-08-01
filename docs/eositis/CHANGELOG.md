@@ -11,7 +11,7 @@ _(none)_
 
 ---
 
-## 2026-08-01 — `bc6596a` — Pico2W-faithful CYW43
+## 2026-08-01 — `40606f6` — Pico2W-faithful CYW43
 
 | Change | Reason |
 |--------|--------|

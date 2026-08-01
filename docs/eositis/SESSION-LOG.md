@@ -770,7 +770,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Actions** | Overlay: tear out host TestWifi/NTP/InitRTC; empty-SSID fail-fast only; defer BusLoop until after `cyw43_arch_init` + restore `.data`. Bramble: `clmload_status=0`, WFI wall-clock TIMER, POWMAN AON, memcpy fast-path/abort, `mem_guest_memcpy_any`. Docs: MAME-BRIDGE/MACOS-WIFI/PROJECT-RULES/UPSTREAM. |
 | **Validate** | `bramble_tests` 323/323; MegaFlash `-wifi`: FEEDBEAD, `cyw43 loaded ok`, BusLoop `magic=0xf0`, both cores RUNNING (no HardFault). Seeded NTP hits assert without `-tap` (expected). |
 | **Outcome** | Radio-faithful path: guest stack + CYW43 + tap; overlay is Apple-bus glue only |
-| **Commit** | Bramble `bc6596a`; megaflash-vm `a82539e` |
+| **Commit** | Bramble `40606f6`; megaflash-vm `a82539e` |
 | **Transcript** | [Pico2W CYW43 fidelity](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
 
 
