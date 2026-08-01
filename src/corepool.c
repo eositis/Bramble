@@ -347,11 +347,10 @@ static void *core_thread_fn(void *arg) {
                     systick_tick_for_core(core_id, (uint32_t)elapsed_cycles);
                 }
 
-                /* If every active core is sleeping/halted, use host elapsed time
-                 * as a fallback so timer-driven wakeups still happen. */
-                if (core_id == CORE0 &&
-                    (num_active_cores == 1 || cores[CORE1].is_wfi || cores[CORE1].is_halted) &&
-                    elapsed_us > 0) {
+                /* Any core in WFI/WFE: advance shared TIMER by host elapsed so
+                 * sleep_until/alarms work while the peer core stays busy (e.g.
+                 * cyw43_arch_init on core0 + BusLoop on core1). */
+                if (elapsed_us > 0) {
                     timer_tick(elapsed_us);
                     rtc_tick(elapsed_us);
                 }

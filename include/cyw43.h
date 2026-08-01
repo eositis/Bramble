@@ -220,6 +220,7 @@ typedef struct {
 typedef struct {
     int enabled;
     int initialized;
+    int feedbead_ok;         /* SPI_READ_TEST_REGISTER seen (bus bring-up) */
 
     /* gSPI state */
     cyw43_spi_state_t spi;

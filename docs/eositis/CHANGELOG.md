@@ -11,6 +11,18 @@ _(none)_
 
 ---
 
+## 2026-08-01 — `bc6596a` — Pico2W-faithful CYW43
+
+| Change | Reason |
+|--------|--------|
+| POWMAN AON timer (SET_TIME / READ_TIME / TIMER RUN) | Guest `aon_timer_*` / InitRTC after real NTP |
+| WFI/WFE wall-clock TIMER advance (dual_core + corepool) | `sleep_until` starved while peer core busy during CYW43 init |
+| `clmload_status` GET_VAR → int32 0; memcpy fast-path/abort | `cyw43_arch_init` completes without spinning forever |
+| `mem_guest_memcpy_any` | RAM↔RAM and flash→RAM bulk copies for libc memcpy |
+| Docs: radio-faithful CYW43 (no MegaFlash host DNS/NTP) | Course-correct network layer |
+
+---
+
 ## 2026-08-01 — `c97d5a7` — host SNTP InitRTC docs
 
 | Change | Reason |

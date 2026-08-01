@@ -105,10 +105,14 @@ void rp2350_periph_init(rp2350_periph_state_t *state) {
     state->ticks.ctrl[3] = 1;  /* TIMER1 enabled */
     state->ticks.ctrl[4] = 1;  /* WATCHDOG enabled */
 
-    /* POWMAN: default power state (all domains on) */
+    /* POWMAN: default power state (all domains on) + AON timer idle */
     state->powman.state = 0x0000000F;  /* All domains powered */
     state->powman.vreg_ctrl = 0x000000B1;  /* Default VREG (1.1V, enabled) */
     state->powman.bod_ctrl = 0x00000091;   /* Default BOD (enabled) */
+    state->powman.aon_time_ms = 0;
+    state->powman.aon_guest_us_at_set = 0;
+    state->powman.timer_ctrl = 0;
+    memset(state->powman.set_time_parts, 0, sizeof(state->powman.set_time_parts));
 
     /* QMI: default flash read command (03h, standard SPI) */
     state->qmi.m0_rcmd = 0x03000000;
@@ -141,8 +145,8 @@ int rp2350_periph_match(uint32_t addr) {
 
     /* TICKS */
     if (base >= RP2350_TICKS_BASE && base < RP2350_TICKS_BASE + 0x100) return 1;
-    /* POWMAN */
-    if (base >= RP2350_POWMAN_BASE && base < RP2350_POWMAN_BASE + 0x100) return 1;
+    /* POWMAN (AON timer + password regs span past 0x100) */
+    if (base >= RP2350_POWMAN_BASE && base < RP2350_POWMAN_BASE + 0x1000) return 1;
     /* QMI */
     if (base >= RP2350_QMI_BASE && base < RP2350_QMI_BASE + 0x100) return 1;
     /* OTP controller */
@@ -182,35 +186,120 @@ static void ticks_write(rp2350_ticks_state_t *t, uint32_t offset, uint32_t val) 
 }
 
 /* ========================================================================
- * POWMAN (0x40100000)
+ * POWMAN (0x40100000) — includes AON timer used by pico_aon_timer / InitRTC
  * ======================================================================== */
+
+#define POWMAN_PASSWORD_BITS          0x5afe0000u
+#define POWMAN_SET_TIME_63TO48_OFF    0x60u
+#define POWMAN_SET_TIME_47TO32_OFF    0x64u
+#define POWMAN_SET_TIME_31TO16_OFF    0x68u
+#define POWMAN_SET_TIME_15TO0_OFF     0x6cu
+#define POWMAN_READ_TIME_UPPER_OFF    0x70u
+#define POWMAN_READ_TIME_LOWER_OFF    0x74u
+#define POWMAN_TIMER_OFF              0x88u
+#define POWMAN_TIMER_RUN_BITS         0x00000002u
+#define POWMAN_TIMER_USING_LPOSC_BITS 0x00020000u
+
+static uint32_t powman_strip_password(uint32_t val) {
+    if ((val & 0xffff0000u) == POWMAN_PASSWORD_BITS) {
+        return val & 0xffffu;
+    }
+    return val;
+}
+
+static void powman_sync_aon_from_guest(rp2350_powman_state_t *p) {
+    if ((p->timer_ctrl & POWMAN_TIMER_RUN_BITS) == 0u) {
+        return;
+    }
+    uint64_t now_us = timer_state.time_us;
+    if (now_us > p->aon_guest_us_at_set) {
+        uint64_t delta_ms = (now_us - p->aon_guest_us_at_set) / 1000ull;
+        p->aon_time_ms += delta_ms;
+        p->aon_guest_us_at_set = now_us;
+    }
+}
+
+static void powman_apply_set_time(rp2350_powman_state_t *p) {
+    p->aon_time_ms =
+        ((uint64_t)(p->set_time_parts[0] & 0xffffu) << 48) |
+        ((uint64_t)(p->set_time_parts[1] & 0xffffu) << 32) |
+        ((uint64_t)(p->set_time_parts[2] & 0xffffu) << 16) |
+        ((uint64_t)(p->set_time_parts[3] & 0xffffu));
+    p->aon_guest_us_at_set = timer_state.time_us;
+}
 
 static uint32_t powman_read(rp2350_powman_state_t *p, uint32_t offset) {
     switch (offset) {
-    case 0x00: return p->vreg_ctrl;
-    case 0x04: return p->vreg_ctrl | 0x00001000;  /* VREG_STATUS: ROK=1 */
-    case 0x08: return p->bod_ctrl;
-    case 0x0C: return p->bod_ctrl | 0x00001000;   /* BOD_STATUS: OK=1 */
-    case 0x10: return p->state;
-    case 0x50: return (uint32_t)p->timer;
-    case 0x54: return p->timer_hi;
-    case 0x60: return p->inte;
-    case 0x64: return p->intf;
-    case 0x68: return p->ints;
+    case 0x00: return 0; /* BADPASSWD */
+    case 0x04: return p->vreg_ctrl;
+    case 0x08: return p->vreg_ctrl | 0x00000011u; /* VREG_STS OK */
+    case 0x0c: return p->vreg_ctrl;
+    case 0x18: return p->bod_ctrl;
+    case 0x1c: return p->bod_ctrl;
+    case 0x38: return p->state;
+    case POWMAN_READ_TIME_UPPER_OFF:
+        powman_sync_aon_from_guest(p);
+        return (uint32_t)(p->aon_time_ms >> 32);
+    case POWMAN_READ_TIME_LOWER_OFF:
+        powman_sync_aon_from_guest(p);
+        return (uint32_t)(p->aon_time_ms & 0xffffffffu);
+    case POWMAN_TIMER_OFF: {
+        uint32_t v = p->timer_ctrl;
+        /* Report USING_LPOSC when RUN so SDK wait loops complete. */
+        if (v & POWMAN_TIMER_RUN_BITS) {
+            v |= POWMAN_TIMER_USING_LPOSC_BITS;
+        }
+        return v;
+    }
+    case 0x60: case 0x64: case 0x68: case 0x6c:
+        return p->set_time_parts[(offset - 0x60u) / 4u] & 0xffffu;
+    case 0xe0: return p->inte;
+    case 0xe4: return p->intf;
+    case 0xe8: return p->ints;
     default:
-        if (offset / 4 < 32) return p->regs[offset / 4];
+        if (offset / 4 < 64) return p->regs[offset / 4];
         return 0;
     }
 }
 
 static void powman_write(rp2350_powman_state_t *p, uint32_t offset, uint32_t val) {
+    uint32_t raw = val;
+    uint32_t low = powman_strip_password(val);
     switch (offset) {
-    case 0x00: p->vreg_ctrl = val; break;
-    case 0x08: p->bod_ctrl = val; break;
-    case 0x60: p->inte = val; break;
-    case 0x64: p->intf = val; break;
+    case 0x04: p->vreg_ctrl = low; break;
+    case 0x0c: p->vreg_ctrl = low; break;
+    case 0x18: p->bod_ctrl = low; break;
+    case 0x1c: p->bod_ctrl = low; break;
+    case 0x38: p->state = (p->state & ~0xfu) | (low & 0xfu); break;
+    case POWMAN_SET_TIME_63TO48_OFF:
+        p->set_time_parts[0] = low & 0xffffu;
+        powman_apply_set_time(p);
+        break;
+    case POWMAN_SET_TIME_47TO32_OFF:
+        p->set_time_parts[1] = low & 0xffffu;
+        powman_apply_set_time(p);
+        break;
+    case POWMAN_SET_TIME_31TO16_OFF:
+        p->set_time_parts[2] = low & 0xffffu;
+        powman_apply_set_time(p);
+        break;
+    case POWMAN_SET_TIME_15TO0_OFF:
+        p->set_time_parts[3] = low & 0xffffu;
+        powman_apply_set_time(p);
+        break;
+    case POWMAN_TIMER_OFF: {
+        uint32_t prev = p->timer_ctrl;
+        p->timer_ctrl = low;
+        if ((low & POWMAN_TIMER_RUN_BITS) && !(prev & POWMAN_TIMER_RUN_BITS)) {
+            p->aon_guest_us_at_set = timer_state.time_us;
+        }
+        break;
+    }
+    case 0xe0: p->inte = low; break;
+    case 0xe4: p->intf = low; break;
     default:
-        if (offset / 4 < 32) p->regs[offset / 4] = val;
+        (void)raw;
+        if (offset / 4 < 64) p->regs[offset / 4] = low;
         break;
     }
 }
@@ -528,7 +617,7 @@ uint32_t rp2350_periph_read32(rp2350_periph_state_t *state, uint32_t addr) {
         return ticks_read(&state->ticks, base - RP2350_TICKS_BASE);
 
     /* POWMAN */
-    if (base >= RP2350_POWMAN_BASE && base < RP2350_POWMAN_BASE + 0x100)
+    if (base >= RP2350_POWMAN_BASE && base < RP2350_POWMAN_BASE + 0x1000)
         return powman_read(&state->powman, base - RP2350_POWMAN_BASE);
 
     /* QMI */
@@ -581,7 +670,7 @@ void rp2350_periph_write32(rp2350_periph_state_t *state, uint32_t addr, uint32_t
     }
 
     /* POWMAN */
-    if (base >= RP2350_POWMAN_BASE && base < RP2350_POWMAN_BASE + 0x100) {
+    if (base >= RP2350_POWMAN_BASE && base < RP2350_POWMAN_BASE + 0x1000) {
         powman_write(&state->powman, base - RP2350_POWMAN_BASE, val);
         return;
     }

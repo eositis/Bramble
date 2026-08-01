@@ -225,6 +225,7 @@ void mem_set_ram_ptr(uint8_t *ram, uint32_t base, uint32_t size);
 int mem_guest_memset(uint32_t dest, int val, uint32_t len);
 int mem_guest_memset_words(uint32_t dest, uint32_t word, uint32_t len);
 int mem_guest_memcpy(uint32_t dest, uint32_t src_flash, uint32_t len);
+int mem_guest_memcpy_any(uint32_t dest, uint32_t src, uint32_t len);
 
 /* pc_updated flag: set by instruction handlers that modify PC */
 extern int pc_updated;

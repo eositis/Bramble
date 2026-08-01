@@ -582,6 +582,29 @@ int mem_guest_memcpy(uint32_t dest, uint32_t src_flash, uint32_t len) {
     return 1;
 }
 
+/* RAM↔RAM or flash→RAM bulk copy for libc memcpy acceleration. */
+int mem_guest_memcpy_any(uint32_t dest, uint32_t src, uint32_t len) {
+    if (!active_ram || len == 0) {
+        return 0;
+    }
+    if (dest < active_ram_base || dest + len > active_ram_base + active_ram_size) {
+        return 0;
+    }
+    if (src >= FLASH_BASE && src + len <= FLASH_BASE + FLASH_SIZE) {
+        memcpy(get_ram() + (dest - active_ram_base),
+               cpu.flash + (src - FLASH_BASE), len);
+        icache_invalidate_range(dest, len);
+        return 1;
+    }
+    if (src >= active_ram_base && src + len <= active_ram_base + active_ram_size) {
+        memmove(get_ram() + (dest - active_ram_base),
+                get_ram() + (src - active_ram_base), len);
+        icache_invalidate_range(dest, len);
+        return 1;
+    }
+    return 0;
+}
+
 int mem_guest_memset_words(uint32_t dest, uint32_t word, uint32_t len) {
     if (!active_ram || len == 0 || (len & 3u)) {
         return 0;

@@ -45,12 +45,14 @@ typedef struct {
     uint32_t vreg_ctrl;        /* VREG control */
     uint32_t bod_ctrl;         /* Brown-out detector */
     uint32_t state;            /* Current power state */
-    uint32_t timer;            /* AON timer (64-bit, low word) */
-    uint32_t timer_hi;         /* AON timer high word */
+    uint64_t aon_time_ms;      /* AON timer value (milliseconds) */
+    uint64_t aon_guest_us_at_set; /* timer_state.time_us when aon_time_ms was latched */
+    uint32_t timer_ctrl;       /* POWMAN_TIMER (RUN / source bits) */
+    uint32_t set_time_parts[4]; /* SET_TIME_63TO48 .. 15TO0 (16-bit fields) */
     uint32_t inte;             /* Interrupt enable */
     uint32_t intf;             /* Interrupt force */
     uint32_t ints;             /* Interrupt status */
-    uint32_t regs[32];         /* General register storage */
+    uint32_t regs[64];         /* General register storage */
 } rp2350_powman_state_t;
 
 /* ========================================================================

@@ -13,6 +13,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <sys/time.h>
+#include <time.h>
 #include "emulator.h"
 #include "instructions.h"
 #include "thumb32.h"
@@ -1211,6 +1212,16 @@ void cpu_exception_return(uint32_t lr_value) {
  * advance the timer by 1 µs.
  * ======================================================================== */
 
+/* Wall-clock TIMER advance while any core is in WFI/WFE (see dual_core_step). */
+static int dual_any_core_wfi(void) {
+    for (int i = 0; i < num_active_cores; i++) {
+        if (cores[i].is_wfi) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void __attribute__((hot)) timing_tick(uint32_t cycles) {
     /* Timer and RTC: advance from Core 0 in the normal case, but let the
      * currently executing core own shared time whenever Core 0 is asleep or
@@ -1221,6 +1232,14 @@ static void __attribute__((hot)) timing_tick(uint32_t cycles) {
     if (!advance_shared_time &&
         (num_active_cores == 1 || cores[CORE0].is_wfi || cores[CORE0].is_halted)) {
         advance_shared_time = 1;
+    }
+
+    /* While a peer sleeps in WFI/WFE, dual_core_wfi_wallclock_tick() owns the
+     * shared TIMER so sleep_until/alarms track host time. Skip instruction-
+     * based shared ticks from the busy core to avoid double-counting. */
+    if (advance_shared_time && dual_any_core_wfi() &&
+        (cores[owner_core].is_wfi == 0)) {
+        advance_shared_time = 0;
     }
 
     if (advance_shared_time) {
@@ -1240,6 +1259,75 @@ static void __attribute__((hot)) timing_tick(uint32_t cycles) {
     }
     /* SysTick counts in CPU cycles, not microseconds (per-core on real RP2040) */
     systick_tick(cycles);
+}
+
+static uint64_t dual_wfi_wall_ns;
+static int dual_wfi_wall_armed;
+
+static uint64_t host_monotonic_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
+
+/* Advance TIMER0/TIMER1 with host wall time whenever any core is in WFI/WFE.
+ * Dual-core Pico W bring-up (cyw43_arch_init sleeps on core0 while BusLoop
+ * runs on core1) otherwise starves guest µs at instruction rate (~1s guest
+ * per minute wall at 150 MHz). */
+static void dual_core_wfi_wallclock_tick(void) {
+    static unsigned sample_div;
+
+    if (!dual_any_core_wfi()) {
+        dual_wfi_wall_armed = 0;
+        return;
+    }
+
+    /* Sample often enough that sleep_until tracks host time under a tight
+     * dual_core_step loop; clock_gettime every step is still too costly. */
+    if ((++sample_div & 0x3Fu) != 0u) {
+        return;
+    }
+
+    uint64_t now = host_monotonic_ns();
+    if (!dual_wfi_wall_armed) {
+        dual_wfi_wall_ns = now;
+        dual_wfi_wall_armed = 1;
+        return;
+    }
+    uint64_t delta_ns = now - dual_wfi_wall_ns;
+    if (delta_ns < 1000ull) {
+        return;
+    }
+    /* Cap so a host stall does not leap past many alarms at once. */
+    if (delta_ns > 50000000ull) { /* 50 ms */
+        delta_ns = 50000000ull;
+    }
+    uint32_t us = (uint32_t)(delta_ns / 1000ull);
+    dual_wfi_wall_ns += (uint64_t)us * 1000ull;
+    timer_tick(us);
+    rtc_tick(us);
+    if (membus_rp2350_mode && membus_rp2350_periph) {
+        rp2350_timer1_tick((rp2350_periph_state_t *)membus_rp2350_periph, us);
+    }
+    /* sleep_until uses WFE after arming an alarm; treat timer progress as an
+     * event so the sleeper can re-poll TIMERAWH/TIMERAWL (IRQ may be masked
+     * briefly around the exclusive lock). */
+    for (int i = 0; i < num_active_cores; i++) {
+        if (cores[i].is_wfi) {
+            cores[i].is_wfi = 0;
+        }
+    }
+    {
+        static int logged;
+        static uint64_t advanced;
+        advanced += us;
+        if (!logged && advanced >= 1000ull) {
+            logged = 1;
+            fprintf(stderr,
+                    "[Timer] WFI wall-clock advance active (guest +%llu µs)\n",
+                    (unsigned long long)advanced);
+        }
+    }
 }
 
 /* Set to 1 once the F4E8/F594 async-wait has been cleared (25 bursts fired).
@@ -1276,6 +1364,45 @@ static void cpu_set_active_ram_for_exec(void) {
 /* MegaFlash crt0/libc hot paths — skip millions of emulated store loops. */
 static int guest_megaflash_crt0_accel(uint32_t pc) {
     pc &= ~1u;
+    /* newlib memcpy — CYW43 CLM/firmware staging copies megabytes here. */
+    if (pc >= 0x1002a744u && pc <= 0x1002a82eu) {
+        uint32_t dst = cpu.r[0];
+        uint32_t src = cpu.r[1];
+        uint32_t len = cpu.r[2];
+        uint32_t ret = cpu.r[12]; /* ip holds original dest after entry */
+        if (pc == 0x1002a744u || pc == 0x1002a746u) {
+            ret = dst;
+        } else if (pc >= 0x1002a754u && pc <= 0x1002a79au) {
+            len += 64u; /* body after initial subs #64 */
+        } else if (pc >= 0x1002a7a0u && pc <= 0x1002a7b6u) {
+            len += 16u;
+        } else if (pc >= 0x1002a7bcu && pc <= 0x1002a7c6u) {
+            len += 4u;
+        }
+        if (len > (8u * 1024u * 1024u)) {
+            /* Corrupt/overflow length — abort copy rather than spin forever. */
+            static int abort_logged;
+            if (!abort_logged++) {
+                fprintf(stderr,
+                        "[Init] memcpy abort insane len=%u dst=0x%08X src=0x%08X\n",
+                        len, dst, src);
+            }
+            cpu.r[0] = ret ? ret : dst;
+            cpu.r[15] = cpu.r[14] & ~1u;
+            pc_updated = 1;
+            return 1;
+        }
+        if (len > 0u && mem_guest_memcpy_any(dst, src, len)) {
+            cpu.r[0] = ret;
+            cpu.r[15] = cpu.r[14] & ~1u;
+            pc_updated = 1;
+            static int logged;
+            if (!logged++) {
+                fprintf(stderr, "[Init] memcpy fast-path active\n");
+            }
+            return 1;
+        }
+    }
     /* crt0 data_cpy: cmp at 0x1000019a — bulk flash→RAM for .data (core1 RAM code) */
     if (pc == 0x1000019au) {
         uint32_t dst = cpu.r[2];
@@ -1905,6 +2032,9 @@ void cpu_step_core(int core_id) {
 void dual_core_step(void) {
     static int current = 0;
 
+    /* Host-time TIMER while any core sleeps (WFI/WFE); see comment above. */
+    dual_core_wfi_wallclock_tick();
+
     for (int i = 0; i < num_active_cores; i++) {
         int c = current % num_active_cores;
         current = (current + 1) % num_active_cores;
@@ -1913,24 +2043,6 @@ void dual_core_step(void) {
         if (cores[c].is_wfi) {
             /* SysTick keeps running while the core is asleep. */
             systick_tick_for_core(c, 1);
-
-            /* If every active core is currently asleep/halted, keep the shared
-             * timer moving so timer-driven wakeups can still happen. */
-            if (c == CORE0 &&
-                (num_active_cores == 1 || cores[CORE1].is_wfi || cores[CORE1].is_halted)) {
-                timing_config.cycle_accumulator += 1;
-                uint32_t us = timing_config.cycle_accumulator / timing_config.cycles_per_us;
-                if (us > 0) {
-                    timing_config.cycle_accumulator -= us * timing_config.cycles_per_us;
-                    timer_tick(us);
-                    rtc_tick(us);
-                    /* Tick RP2350 TIMER1 if active */
-                    if (membus_rp2350_mode && membus_rp2350_periph) {
-                        rp2350_periph_state_t *ps = (rp2350_periph_state_t *)membus_rp2350_periph;
-                        rp2350_timer1_tick(ps, us);
-                    }
-                }
-            }
 
             /* Check for pending interrupt that would wake this core */
             int saved_core = get_active_core();

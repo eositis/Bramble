@@ -314,6 +314,14 @@ static void cyw43_handle_ioctl(const uint8_t *buf, int len) {
                                         (const uint8_t *)ver, (int)strlen(ver) + 1, 0);
             return;
         }
+        /* CLM blob load status: 0 = complete/OK. Returning zeros left firmware
+         * spinning / HardFaulting BusLoop during cyw43_arch_init. */
+        if (strcmp(varname, "clmload_status") == 0) {
+            int32_t status = 0;
+            cyw43_queue_ioctl_response(cmd, ioctl_id,
+                                        (const uint8_t *)&status, (int)sizeof(status), 0);
+            return;
+        }
         /* Default: return zeros */
         uint8_t zeros[256];
         memset(zeros, 0, sizeof(zeros));
@@ -760,6 +768,7 @@ static uint32_t cyw43_bus_read(uint32_t addr) {
         return val;
     }
     case 0x14: /* SPI_READ_TEST_REGISTER = FEEDBEAD */
+        cyw43.feedbead_ok = 1;
         return 0xFEEDBEAD;
     case 0x18:
         return cyw43.bus_test_reg;
