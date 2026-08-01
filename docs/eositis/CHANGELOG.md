@@ -7,7 +7,9 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
-_(none)_
+| Change | Reason |
+|--------|--------|
+| Docs: boot-stub vs deferred real CYW43 for MAME | Real init at InitPicoLed → MegaFlash not found |
 
 ---
 

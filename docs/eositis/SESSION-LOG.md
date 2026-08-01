@@ -732,6 +732,16 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Commit** | Bramble `987fda0` (docs); megaflash-vm `d9af01e` — host net + real WiFi diagnostics |
 
 
+## 2026-08-01 — MegaFlash not found after real WiFi default
+
+| Field | Detail |
+|-------|--------|
+| **Request** | MAME reports MegaFlash not found |
+| **Cause** | Real `cyw43_arch_init` at InitPicoLed concurrent with BusLoop HardFaults core1 |
+| **Actions** | Boot-stub cyw43 again; arm real JOIN/DNS/NTP only on TestWifi/NTP with SSID; rebuild; BusLoop smoke OK |
+| **Commit** | megaflash-vm `276179c` |
+
+
 <!--
 
 | Field | Detail |

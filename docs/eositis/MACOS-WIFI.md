@@ -59,8 +59,8 @@ Linux still uses a real TAP + iptables/nft; the CYW43 call sites are unchanged.
 |---------|--------|
 | `utun connect failed` / `ifconfig failed` | Approve the admin dialog; Bramble must run elevated for `-tap` |
 | Guest gets DHCP but no internet | `sudo ./scripts/macos-cyw43-pf-nat.sh status` — launcher should enable this |
+| BusLoop dies / MegaFlash not found | Boot must stub `cyw43_arch_init`; rebuild overlay. `BRAMBLE_A2BUS_REAL_WIFI=1` is debug-only |
 | Admin dialog cancelled | Re-run launcher; or `NO_HOST_NET=1` for radio-only |
-| BusLoop dies after real `cyw43_arch_init` | Temporary: `BRAMBLE_A2BUS_STUB_WIFI=1` (no fake TestWifi OK) |
 
 ## Slirp fallback
 
