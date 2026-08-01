@@ -848,6 +848,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | Hung DoCommand leaves STATUS BUSY; ID no longer toggles; chkmegaflashex times out → skip COLDSTART/slot 4 |
 | **Actions** | ID toggle while BUSY; BUSY timeout unsticks BusLoop; host-complete DoLoadCPanel + DoGetDeviceInfo |
 | **Validate** | overlay rebuild |
+| **Commit** | megaflash-vm `5786339` |
 | **Commit** | megaflash-vm  |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
 
