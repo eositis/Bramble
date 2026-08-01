@@ -7,6 +7,12 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+_(none)_
+
+---
+
+## 2026-08-01 — `550cc2b` — boot-stub cyw43 docs
+
 | Change | Reason |
 |--------|--------|
 | Docs: boot-stub vs deferred real CYW43 for MAME | Real init at InitPicoLed → MegaFlash not found |
