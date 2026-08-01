@@ -28,4 +28,5 @@ These rules apply to all agent work on this Bramble tree unless the user explici
 
 - After emulator changes: `make -C build bramble bramble_tests` and run `./build/bramble_tests` when feasible.
 - MAME / MegaFlash Apple-bus: build overlay in `../megaflash-vm` (`cmake -B build && make -C build bramble`); firmware under `../megaflash-vm/firmware/`.
-- Stock Bramble has no `a2bus`; SPI flash (`-spi-flash*`) remains here. Temporary wifi/RTC stubs live in megaflash-vm overlay until macOS CYW43 networking works.
+- Stock Bramble has no `a2bus`; SPI flash (`-spi-flash*`) remains here.
+- macOS CYW43 internet: `-wifi -tap` uses utun; see `docs/eositis/MACOS-WIFI.md` and `scripts/macos-cyw43-pf-nat.sh`. MegaFlash MAME may still stub WiFi until BusLoop-safe real `cyw43_arch_init`.

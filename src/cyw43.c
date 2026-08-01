@@ -325,22 +325,44 @@ static void cyw43_handle_ioctl(const uint8_t *buf, int len) {
 
     case WLC_SET_SSID: {
         /* Payload: 4 bytes SSID length + SSID string (32 bytes) */
+        uint32_t ssid_len = 0;
         if (payload_len >= 36) {
-            uint32_t ssid_len = payload[0] | (payload[1] << 8) |
-                                (payload[2] << 16) | (payload[3] << 24);
+            ssid_len = payload[0] | (payload[1] << 8) |
+                       (payload[2] << 16) | (payload[3] << 24);
             if (ssid_len > CYW43_MAX_SSID_LEN) ssid_len = CYW43_MAX_SSID_LEN;
             memcpy(cyw43.connected_ssid, payload + 4, ssid_len);
             cyw43.connected_ssid[ssid_len] = '\0';
-
-            if (cpu.debug_enabled)
-                fprintf(stderr, "[CYW43] JOIN SSID: '%s'\n", cyw43.connected_ssid);
+        } else {
+            cyw43.connected_ssid[0] = '\0';
         }
 
-        /* Respond success */
-        cyw43_queue_ioctl_response(cmd, ioctl_id, NULL, 0, 0);
+        fprintf(stderr, "[CYW43] JOIN SSID='%s' (len=%u)%s\n",
+                cyw43.connected_ssid, ssid_len,
+                cyw43.password_provided ? " [passphrase set]" : " [no passphrase yet]");
 
-        /* Queue connection events */
+        if (ssid_len == 0) {
+            fprintf(stderr, "[CYW43] JOIN refused: empty SSID (no link-up events)\n");
+            cyw43.wifi_state = CYW43_WIFI_OFF;
+            cyw43_queue_ioctl_response(cmd, ioctl_id, NULL, 0, 0);
+            return;
+        }
+
+        /* Respond success and simulate association */
+        cyw43_queue_ioctl_response(cmd, ioctl_id, NULL, 0, 0);
         cyw43_queue_connect_events();
+        return;
+    }
+
+    case WLC_SET_WSEC_PMK: {
+        /* Passphrase / PMK for WPA — accept any; host never joins a real AP. */
+        cyw43.password_provided = 1;
+        uint32_t key_len = 0;
+        if (payload_len >= 2) {
+            key_len = payload[0] | ((uint32_t)payload[1] << 8);
+        }
+        fprintf(stderr, "[CYW43] WPA passphrase provided (reported_len=%u, payload=%d)\n",
+                key_len, payload_len);
+        cyw43_queue_ioctl_response(cmd, ioctl_id, NULL, 0, 0);
         return;
     }
 

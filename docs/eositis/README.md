@@ -10,6 +10,7 @@ Personal working notes and process rules for the **Bramble** fork used to run **
 | [UART-CONSOLE.md](UART-CONSOLE.md) | Bidirectional UART debug via TCP (`-uart-console`) |
 | [USB-CONSOLE.md](USB-CONSOLE.md) | MegaFlash USB diagnostic terminal (`-usb-console`, `-usb-stdio`) |
 | [TIO-CONSOLE.md](TIO-CONSOLE.md) | tio: attach, menu XMODEM upload, quit |
+| [MACOS-WIFI.md](MACOS-WIFI.md) | CYW43 `-wifi -tap` on macOS (utun + pf NAT) |
 | [MAME-BRIDGE.md](MAME-BRIDGE.md) | Pointer → sibling **megaflash-vm** (MAME + Bramble MegaFlash integration) |
 
 Cursor agents should follow `.cursor/rules/eositis-project.mdc` on every task in this repo.

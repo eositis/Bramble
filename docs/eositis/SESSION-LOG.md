@@ -712,6 +712,16 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Commit** | `c1e1ae0` — refactor: move Apple-bus out; megaflash-vm overlay |
 
 
+## 2026-08-01 — macOS CYW43 utun + pf NAT
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Link WiFi radio to macOS network stack (SSID/PW join → host internet) |
+| **Actions** | Darwin `tapif` utun + Ethernet↔IPv4/ARP; pf helper script; refuse empty SSID; log passphrase present; docs |
+| **Validate** | `bramble_tests` 323/323; utun open needs sudo (no interactive password in agent) |
+| **Commit** | _(pending)_ |
+
+
 <!--
 
 | Field | Detail |

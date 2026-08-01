@@ -7,7 +7,11 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
-_(none)_
+| Change | Reason |
+|--------|--------|
+| macOS utun hostif in `tapif.c` + `scripts/macos-cyw43-pf-nat.sh`; SSID/passphrase logging | CYW43 guest join → host stack / internet (Linux TAP unchanged) |
+| Docs: `MACOS-WIFI.md` | Operator steps for utun + pf |
+
 
 ---
 

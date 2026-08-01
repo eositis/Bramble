@@ -307,7 +307,7 @@ static void reset_runtime_peripherals(const char *tap_name) {
         fprintf(stderr, "[WiFi] CYW43439 emulation enabled\n");
         if (tap_name && cyw43.tap_fd < 0) {
             if (cyw43_tap_open(tap_name) < 0) {
-                fprintf(stderr, "[WiFi] Failed to open TAP interface '%s'\n", tap_name);
+                fprintf(stderr, "[WiFi] Failed to open host network interface '%s'\n", tap_name);
             }
         }
     }
@@ -390,7 +390,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "  -wire-eth <path>            Wire Ethernet frames to peer via Unix socket\n");
         fprintf(stderr, "\nWiFi (Pico W):\n");
         fprintf(stderr, "  -wifi                       Enable CYW43 WiFi chip emulation\n");
-        fprintf(stderr, "  -tap <ifname>               Bridge WiFi to TAP interface (implies -wifi, sudo)\n");
+        fprintf(stderr, "  -tap <ifname>               Bridge WiFi to host TAP/utun (implies -wifi; may need sudo)\n");
         fprintf(stderr, "\nVirtual Network:\n");
         fprintf(stderr, "  -net                        Create TAP + NAT for internet bridge (auto-sudo)\n");
         fprintf(stderr, "  -net-peer <path>            Mesh with another Bramble instance via Unix socket\n");
