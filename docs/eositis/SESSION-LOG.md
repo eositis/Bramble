@@ -796,3 +796,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Commit** | Bramble `17af40d`; megaflash-vm `ab9f2e9` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
 
+## 2026-08-01 — CP TestWifi hang (DoTestWifi IPC freezes BusLoop)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Test Wifi from MegaFlash CP still hangs with credentials set |
+| **Cause** | `DoTestWifi` on core1 waits up to 90s for core0 IPC `TestWifi()` — freezes BusLoop; core0 never logged `TestWifi()` |
+| **Actions** | megaflash-vm: host-complete configured-SSID `DoTestWifi` (virtual IPs + host DNS); keep radio stub JOIN/DNS/SNTP for GetNetworkTime; docs |
+| **Outcome** | CP Test Wifi returns immediately without blocking Apple bus |
+| **Commit** | megaflash-vm `346667b` |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+

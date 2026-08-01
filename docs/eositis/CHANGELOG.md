@@ -11,6 +11,14 @@ _(none)_
 
 ---
 
+## 2026-08-01 — CP DoTestWifi host-complete (docs)
+
+| Change | Reason |
+|--------|--------|
+| Docs: CP DoTestWifi must host-complete under a2bus | Core1 IPC wait freezes BusLoop / MAME “Testing…” |
+
+---
+
 ## 2026-08-01 — `17af40d` — CYW43 stub / strlen join
 
 | Change | Reason |
