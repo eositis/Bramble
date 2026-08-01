@@ -752,6 +752,17 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Commit** | megaflash-vm `d239a2a` |
 
 
+## 2026-08-01 — Confirm NTP / fix MegaFlash clock
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Confirm MegaFlash sends NTP and updates Pico clock |
+| **Finding** | Guest lwIP NTP not used; host SNTP ran on GetNetworkTime but epoch discarded; TestWifi was DNS-only |
+| **Actions** | Host SNTP → InitRTC (tz + AON stubs); TestWifi runs SNTP after DNS; force IsAppleConnected for core0Loop |
+| **Validate** | `InitRTC from NTP: utc=… → 2026-08-01 13:21:06`; BusLoop OK |
+| **Commit** | megaflash-vm `6258bc0` |
+
+
 <!--
 
 | Field | Detail |

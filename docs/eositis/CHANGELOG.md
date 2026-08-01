@@ -7,11 +7,13 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
-_(none)_
+| Change | Reason |
+|--------|--------|
+| Docs: host SNTP → guest InitRTC for MegaFlash clock | TestWifi DNS-only left RTC unset |
 
 ---
 
-## 2026-08-01 — `9d6e161` — TestWifi host DNS docs
+## 2026-08-01 — `e2a64ef` — TestWifi host DNS docs
 
 | Change | Reason |
 |--------|--------|
