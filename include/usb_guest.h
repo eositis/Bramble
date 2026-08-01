@@ -13,6 +13,8 @@ int usb_guest_host_vprintf(uint32_t fmt, uint32_t ap);
 void usb_guest_hw_claim_bootstrap(void);
 void usb_guest_init_default_config(void);
 void usb_guest_stub_save_user_settings(void);
+void usb_guest_persist_config_to_host(void);
+void usb_guest_fill_device_info_string(uint32_t dest);
 void usb_guest_stub_get_config_byte1(void);
 void usb_guest_stub_get_config_byte2(void);
 void usb_guest_init_flash_stub(void);

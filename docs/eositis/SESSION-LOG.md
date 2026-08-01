@@ -807,3 +807,13 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Commit** | megaflash-vm `346667b` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
 
+## 2026-08-01 — Persist WiFi, NTP/RTC after TestWifi, OA device info
+
+| Field | Detail |
+|-------|--------|
+| **Request** | WiFi settings not saved across reboot; TestWifi OK but RTC/time not updated; Open-Apple tech details missing |
+| **Cause** | Host mirror only stored 7-byte user settings (no SSID); DoTestWifi host-complete skipped NTP; GetDeviceInfoString sprintf(%f) hangs on a2bus |
+| **Actions** | Persist/load full 512-byte configBuffer; host SNTP+InitRTC stubs on TestWifi; host-fill GetDeviceInfoString; EncryptWrite → host file |
+| **Validate** | Boot loads SSID=PERSISTTEST → WIFI connected + host NTP; build OK |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+

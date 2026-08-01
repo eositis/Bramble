@@ -842,6 +842,8 @@ static void usb_log_cdc_active_once(void) {
 #define USB_GUEST_WRITE_BLOCK         0x200013f0u /* WriteBlock (RAM) */
 #define USB_GUEST_CONFIG_BUFFER       0x2000bef4u
 #define USB_GUEST_CONFIG_MAGIC        0x5e97724cu
+#define USB_GUEST_CONFIG_BUFFER_SIZE  512u
+#define USB_GUEST_CONFIG_HOST_PATH    "flash/megaflash-user-config.bin"
 #define USB_GUEST_CONFIG_FD_FLAGS_OFF 0xe2u
 #define USB_GUEST_SETTINGS_NOT_FLASH  0x2006161fu
 #define USB_GUEST_FLASH_SIZE0         0x2000d1ccu
@@ -1537,6 +1539,75 @@ void usb_guest_spi_flash_close(void) {
     }
 }
 
+void usb_guest_persist_config_to_host(void) {
+    uint8_t buf[USB_GUEST_CONFIG_BUFFER_SIZE];
+    uint32_t i;
+    for (i = 0; i < USB_GUEST_CONFIG_BUFFER_SIZE; i++) {
+        buf[i] = mem_read8(USB_GUEST_CONFIG_BUFFER + i);
+    }
+    FILE *fp = fopen(USB_GUEST_CONFIG_HOST_PATH, "wb");
+    if (fp == NULL) {
+        fprintf(stderr, "[A2Bus] WARN: cannot write %s\n", USB_GUEST_CONFIG_HOST_PATH);
+        return;
+    }
+    if (fwrite(buf, 1, sizeof(buf), fp) != sizeof(buf)) {
+        fprintf(stderr, "[A2Bus] WARN: short write to %s\n", USB_GUEST_CONFIG_HOST_PATH);
+    }
+    fclose(fp);
+    {
+        char ssid[33];
+        for (i = 0; i < 32u; i++) {
+            ssid[i] = (char)buf[0x5au + i];
+            if (ssid[i] == '\0') {
+                break;
+            }
+        }
+        ssid[32] = '\0';
+        fprintf(stderr,
+                "[A2Bus] persisted config (%u bytes) SSID='%s' cfg1=0x%02X\n",
+                (unsigned)USB_GUEST_CONFIG_BUFFER_SIZE, ssid, buf[4]);
+    }
+}
+
+static int usb_guest_try_load_full_config(void) {
+    FILE *fp = fopen(USB_GUEST_CONFIG_HOST_PATH, "rb");
+    if (fp == NULL) {
+        return 0;
+    }
+    uint8_t buf[USB_GUEST_CONFIG_BUFFER_SIZE];
+    size_t n = fread(buf, 1, sizeof(buf), fp);
+    fclose(fp);
+    if (n == sizeof(buf)) {
+        uint32_t magic = (uint32_t)buf[0] | ((uint32_t)buf[1] << 8) |
+                         ((uint32_t)buf[2] << 16) | ((uint32_t)buf[3] << 24);
+        if (magic == USB_GUEST_CONFIG_MAGIC) {
+            uint32_t i;
+            for (i = 0; i < USB_GUEST_CONFIG_BUFFER_SIZE; i++) {
+                mem_write8(USB_GUEST_CONFIG_BUFFER + i, buf[i]);
+            }
+            mem_write8(USB_GUEST_SETTINGS_NOT_FLASH, 0u);
+            fprintf(stderr,
+                    "[A2Bus] loaded config from %s (SSID='%s')\n",
+                    USB_GUEST_CONFIG_HOST_PATH,
+                    (const char *)&buf[0x5a]);
+            return 1;
+        }
+    }
+    /* Legacy 7-byte SaveUserSettings mirror. */
+    if (n == 7u && buf[0] == 2u && buf[4] == 1u &&
+        (uint8_t)(buf[0] ^ 0x5Au) == buf[1]) {
+        mem_write8(USB_GUEST_CONFIG_BUFFER + 4u, buf[2]);
+        mem_write8(USB_GUEST_CONFIG_BUFFER + 5u, buf[3]);
+        mem_write8(USB_GUEST_CONFIG_BUFFER + 6u, buf[4]);
+        mem_write8(USB_GUEST_CONFIG_BUFFER + 7u, buf[5]);
+        mem_write8(USB_GUEST_CONFIG_BUFFER + USB_GUEST_CONFIG_FD_FLAGS_OFF, buf[6]);
+        fprintf(stderr, "[A2Bus] loaded legacy 7-byte user settings from %s\n",
+                USB_GUEST_CONFIG_HOST_PATH);
+        return 1;
+    }
+    return 0;
+}
+
 void usb_guest_init_default_config(void) {
     mem_write32(USB_GUEST_CONFIG_BUFFER, USB_GUEST_CONFIG_MAGIC);
     /* DEFCFGBYTE1 = AUTOBOOTFLAG — required for IIc slot‑4 MegaFlash boot. */
@@ -1547,20 +1618,8 @@ void usb_guest_init_default_config(void) {
     mem_write8(USB_GUEST_CONFIG_BUFFER + USB_GUEST_CONFIG_FD_FLAGS_OFF, 0xffu);
     mem_write8(USB_GUEST_SETTINGS_NOT_FLASH, 0u);
 
-    /* Restore prior a2bus SaveUserSettings if present. */
-    FILE *fp = fopen("flash/megaflash-user-config.bin", "rb");
-    if (fp != NULL) {
-        uint8_t u[7];
-        if (fread(u, 1, sizeof(u), fp) == sizeof(u) &&
-            u[0] == 2u && u[4] == 1u && (uint8_t)(u[0] ^ 0x5Au) == u[1]) {
-            mem_write8(USB_GUEST_CONFIG_BUFFER + 4u, u[2]);
-            mem_write8(USB_GUEST_CONFIG_BUFFER + 5u, u[3]);
-            mem_write8(USB_GUEST_CONFIG_BUFFER + 6u, u[4]);
-            mem_write8(USB_GUEST_CONFIG_BUFFER + 7u, u[5]);
-            mem_write8(USB_GUEST_CONFIG_BUFFER + USB_GUEST_CONFIG_FD_FLAGS_OFF, u[6]);
-        }
-        fclose(fp);
-    }
+    /* Restore prior a2bus SaveUserSettings / SaveWifiSettings if present. */
+    (void)usb_guest_try_load_full_config();
 }
 
 /* Apply UserSettings_t at src into configBuffer; optionally persist for a2bus. */
@@ -1586,12 +1645,7 @@ static int usb_guest_apply_user_settings_from(uint32_t src, int persist) {
     mem_write8(USB_GUEST_CONFIG_BUFFER + USB_GUEST_CONFIG_FD_FLAGS_OFF, fd);
     mem_write8(USB_GUEST_SETTINGS_NOT_FLASH, 0u);
     if (persist) {
-        uint8_t u[7] = { ver, chk, c1, c2, tzv, tzi, fd };
-        FILE *fp = fopen("flash/megaflash-user-config.bin", "wb");
-        if (fp != NULL) {
-            (void)fwrite(u, 1, sizeof(u), fp);
-            fclose(fp);
-        }
+        usb_guest_persist_config_to_host();
     }
     return 1;
 }
@@ -1601,7 +1655,7 @@ void usb_guest_stub_save_user_settings(void) {
     int ok = usb_guest_apply_user_settings_from(cpu.r[0], 1);
     if (ok) {
         fprintf(stderr,
-                "[A2Bus] SaveUserSettings: cfg1=0x%02X NTP/FPU bits applied (no SPI)\n",
+                "[A2Bus] SaveUserSettings: cfg1=0x%02X applied + host persist\n",
                 mem_read8(USB_GUEST_CONFIG_BUFFER + 4u));
     }
     cpu.r[0] = ok ? 1u : 0u;
@@ -2055,23 +2109,25 @@ static void usb_guest_write_cstr_to_guest(uint32_t buf, const char *s) {
     mem_write8(buf + (uint32_t)strlen(s), 0);
 }
 
-static void usb_guest_skip_get_device_info_string(void) {
-    uint32_t buf = cpu.r[0];
+void usb_guest_fill_device_info_string(uint32_t dest) {
     /*
      * Native GetDeviceInfoString uses sprintf(%f) after VFP; newlib float
      * formatting can spin under emulation. Build the same multiline layout
-     * the firmware would produce (see megaflash .rodata @ 0x10035640).
+     * the firmware would produce.
      */
     char k_msg[512];
     unsigned total_mb = usb_guest_spi_flash[0].size_mb + usb_guest_spi_flash[1].size_mb;
+    if (total_mb == 0u) {
+        total_mb = USB_GUEST_EMU_FLASH_CHIP_MB * USB_GUEST_SPI_FLASH_CHIP_COUNT;
+    }
     int n = snprintf(k_msg, sizeof(k_msg),
         "Device Information\r\n"
-        "==========\r\n\r\n"
+        "==================\r\n\r\n"
         "Pico Board = Pico 2 RP2350\r\n"
         "Wifi Supported = Yes\r\n"
         "CPU Speed = 150MHz, SPI Speed = %.0fMHz\r\n"
-        "MegaFlash Pico Firmware Version = V1.2.1-eo (DEBUG)\r\n"
-        "Firmware build: 2026-05-03 03:55:51 UTC  (1777780551 Unix s)\r\n"
+        "MegaFlash Pico Firmware Version = V1.2.3-eo (DEBUG)\r\n"
+        "Firmware build: 2026-07-27 07:49:55 UTC  (1785138595 Unix s)\r\n"
         "Pico SDK Version = 2.2.0\r\n"
         "Total Flash Capacity = %uMB\r\n"
         "Flash Chip #0 JEDEC ID = %06Xh\r\n"
@@ -2080,9 +2136,13 @@ static void usb_guest_skip_get_device_info_string(void) {
         total_mb,
         USB_GUEST_WINBOND_JEDEC24,
         USB_GUEST_WINBOND_JEDEC24);
-    if (n > 0) {
-        usb_guest_write_cstr_to_guest(buf, k_msg);
+    if (n > 0 && dest != 0u) {
+        usb_guest_write_cstr_to_guest(dest, k_msg);
     }
+}
+
+static void usb_guest_skip_get_device_info_string(void) {
+    usb_guest_fill_device_info_string(cpu.r[0]);
     cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
 }
 

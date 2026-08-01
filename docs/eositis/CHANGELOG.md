@@ -7,7 +7,10 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
-_(none)_
+| Change | Reason |
+|--------|--------|
+| Full 512-byte `configBuffer` host persist/load (`megaflash-user-config.bin`) | WiFi SSID/PW were RAM-only after Save |
+| Docs: Open-Apple device info + TestWifi NTP/RTC on a2bus | CP clock and tech details |
 
 ---
 
