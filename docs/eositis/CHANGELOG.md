@@ -11,7 +11,7 @@ _(none)_
 
 ---
 
-## 2026-08-01 — megaflash-vm  — BusLoop BUSY unstick
+## 2026-08-01 — megaflash-vm `5786339` — BusLoop BUSY unstick
 
 | Change | Reason |
 |--------|--------|
