@@ -793,6 +793,6 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Actions** | Bramble: host `strlen` fast-path (join key_len); soft pbuf helpers. megaflash-vm: BusLoop-only `.data` restore; stub JOIN + AP lease; host DNS; host SNTP for `SendNTPRequest`; docs |
 | **Validate** | Seeded `-wifi` a2bus: `WIFI connected`, host DNS `0.pool.ntp.org`, host NTP epoch, `NETPUMP: end`; `bramble_tests` 323/323 |
 | **Outcome** | Test Wifi / GetNetworkTime no longer die on alarm-pool / join timeout / UDP NTP; radio stub + host DNS/NTP |
-| **Commit** | Bramble `5a7e852`; megaflash-vm `ab9f2e9` |
+| **Commit** | Bramble `17af40d`; megaflash-vm `ab9f2e9` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
 

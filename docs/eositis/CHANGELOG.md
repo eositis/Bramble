@@ -11,7 +11,7 @@ _(none)_
 
 ---
 
-## 2026-08-01 — `5a7e852` — CYW43 stub / strlen join
+## 2026-08-01 — `17af40d` — CYW43 stub / strlen join
 
 | Change | Reason |
 |--------|--------|
