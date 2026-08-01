@@ -719,7 +719,17 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Request** | Link WiFi radio to macOS network stack (SSID/PW join → host internet) |
 | **Actions** | Darwin `tapif` utun + Ethernet↔IPv4/ARP; pf helper script; refuse empty SSID; log passphrase present; docs |
 | **Validate** | `bramble_tests` 323/323; utun open needs sudo (no interactive password in agent) |
-| **Commit** |  — feat(wifi): bridge CYW43 to macOS via utun |
+| **Commit** | `0dd0ac1` — feat(wifi): bridge CYW43 to macOS via utun |
+
+
+## 2026-08-01 — MAME launcher host net + real WiFi diagnostics
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Integrate network link into MAME startup with macOS admin popup; remove false TestWifi/NTP; real DNS/time diagnostics |
+| **Actions** | Docs: `MACOS-WIFI.md`, `PROJECT-RULES.md`; megaflash-vm: askpass + host-net prep, launcher `-wifi -tap` via `sudo -A`, remove synthetic a2bus TestWifi/NTP |
+| **Outcome** | Overlay rebuild OK; admin dialog path ready for user approve → MAME |
+| **Commit** | (this task) |
 
 
 <!--

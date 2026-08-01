@@ -11,17 +11,27 @@ Bramble’s `-wifi` emulates the Pico W CYW43 radio. With `-tap` / `-net` on mac
 | DHCP | In-emulator: guest `192.168.4.2/24`, gateway/DNS `192.168.4.1` |
 | Host | Virtual gateway only — does **not** join your Mac’s Wi‑Fi with the guest SSID |
 
-## Quick start
+## Quick start (stock Bramble)
 
 ```bash
 # Optional: enable NAT so 192.168.4.0/24 reaches the internet
 sudo ./scripts/macos-cyw43-pf-nat.sh enable
 
-# Run Pico W firmware (or MegaFlash when a2bus real WiFi is safe)
+# Run Pico W firmware
 ./bramble firmware.uf2 -wifi -tap bramble0 -arch m33   # -arch as needed
 ```
 
-`-tap` on macOS opens the next `utunN` (the name argument is ignored for allocation). Bramble configures `192.168.4.1` ↔ peer `192.168.4.2` via `ifconfig` (may require the same sudo session as `-tap` privilege escalation).
+`-tap` on macOS opens the next `utunN` (the name argument is ignored for allocation). Bramble configures `192.168.4.1` ↔ peer `192.168.4.2` via `ifconfig` (requires the same elevated session as `-tap`).
+
+## MegaFlash + MAME (recommended)
+
+From **megaflash-vm**, `scripts/run-megaflash-mame.sh` integrates host net into startup:
+
+1. Shows a **macOS admin dialog** (`sudo -A` + `macos-sudo-askpass.sh`) describing utun + pf NAT.
+2. Enables pf for `192.168.4.0/24` and starts overlay Bramble as root with `-wifi -tap`.
+3. Waits for MegaFlash BusLoop, then launches MAME.
+
+Synthetic Test Wifi / NTP results were removed; MegaFlash diagnostics use real JOIN/DHCP/DNS/NTP through this path.
 
 Disable NAT later:
 
@@ -47,9 +57,10 @@ Linux still uses a real TAP + iptables/nft; the CYW43 call sites are unchanged.
 
 | Symptom | Check |
 |---------|--------|
-| `utun connect failed` / `ifconfig failed` | Run under sudo (Bramble auto-escalates for `-tap`) |
-| Guest gets DHCP but no internet | `sudo ./scripts/macos-cyw43-pf-nat.sh status` — enable if empty |
-| MegaFlash MAME Test Wifi still synthetic | Overlay stubs `cyw43_arch_init` until BusLoop-safe; use stock `-wifi -tap` to test hostif |
+| `utun connect failed` / `ifconfig failed` | Approve the admin dialog; Bramble must run elevated for `-tap` |
+| Guest gets DHCP but no internet | `sudo ./scripts/macos-cyw43-pf-nat.sh status` — launcher should enable this |
+| Admin dialog cancelled | Re-run launcher; or `NO_HOST_NET=1` for radio-only |
+| BusLoop dies after real `cyw43_arch_init` | Temporary: `BRAMBLE_A2BUS_STUB_WIFI=1` (no fake TestWifi OK) |
 
 ## Slirp fallback
 

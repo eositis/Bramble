@@ -11,6 +11,14 @@ _(none)_
 
 ---
 
+## 2026-08-01 — MAME host-net docs
+
+| Change | Reason |
+|--------|--------|
+| `MACOS-WIFI.md` + `PROJECT-RULES.md`: launcher admin dialog / `-tap` / real diagnostics | Document integrated MegaFlash MAME host networking |
+
+---
+
 ## 2026-08-01 — `0dd0ac1` — macOS CYW43 utun
 
 | Change | Reason |
