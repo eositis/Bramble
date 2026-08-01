@@ -2,22 +2,23 @@
 
 Bramble’s `-wifi` emulates the Pico W CYW43 radio. With `-tap` / `-net` on macOS, WLAN Ethernet frames are bridged through a **utun** interface so guest IP traffic can reach the host stack and (with pf NAT) the internet.
 
-## Model (radio-faithful)
+## Model (radio stub → host)
 
 ```
-Guest lwIP / cyw43_arch  ──gSPI──►  Bramble cyw43.c  ──frames──►  tapif (utun)
-                                                                      │
-                                                         pf NAT → host DNS/NTP/Internet
+Guest lwIP / cyw43_arch  ──gSPI──►  Bramble cyw43.c (fake radio)  ──frames──►  tapif (utun)
+                                                                              │
+                                                                     pf NAT → host DNS/NTP/Internet
 ```
 
-Bramble owns the radio + host bridge. Guest firmware owns JOIN diagnostics, DNS, and NTP. MegaFlash-specific host traps that complete TestWifi outside the radio are **not** the supported path.
+CYW43 is an API-shaped stub: accept SSID/password, synthesize association, and bridge Ethernet so guest lwIP talks to the world through the host. Full chip fidelity (CLM quirks, advanced radio features) can be filled in later.
 
 | Step | Behavior |
 |------|----------|
 | SSID | `WLC_SET_SSID` — empty refused; non-empty joins synthetically |
 | Password | `WLC_SET_WSEC_PMK` — accepted/logged; not validated against a real AP |
-| DHCP | In-emulator: guest `192.168.4.2/24`, gateway/DNS `192.168.4.1` |
+| Addressing | Guest `192.168.4.2/24`, gateway/DNS `192.168.4.1` (in-chip DHCP and/or MegaFlash `dhcp_start` static lease under a2bus) |
 | Host | Virtual gateway only — does **not** join your Mac’s Wi‑Fi with the guest SSID |
+| a2bus DNS/NTP | Guest UDP TX is still fragile; MegaFlash overlay may resolve DNS / SNTP on the host so `GetNetworkTime` / Test Wifi can finish while JOIN still uses the radio stub |
 
 ## Quick start (stock Bramble)
 
@@ -43,7 +44,7 @@ sudo ./scripts/macos-cyw43-pf-nat.sh disable
 
 ## Dual-core note
 
-`cyw43_arch_init` on core0 while BusLoop runs on core1 can HardFault the bus loop. MegaFlash overlay defers BusLoop until radio init finishes and restores `.data`. Stock dual-core Pico W firmware should keep long CYW43 bring-up off the same PIO/RAM as a critical peer loop, or rely on Bramble’s WFI wall-clock TIMER so sleeps complete.
+`cyw43_arch_init` on core0 while BusLoop runs on core1 can HardFault the bus loop. MegaFlash overlay defers BusLoop until radio init finishes and restores **only BusLoop RAM code** from flash (not all of `.data` — a full reload zeros `default_alarm_pool` and crashes NETPUMP/TestWifi). Stock dual-core Pico W firmware should keep long CYW43 bring-up off the same PIO/RAM as a critical peer loop, or rely on Bramble’s WFI wall-clock TIMER so sleeps complete.
 
 ## Troubleshooting
 

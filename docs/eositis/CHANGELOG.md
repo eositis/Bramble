@@ -11,6 +11,16 @@ _(none)_
 
 ---
 
+## 2026-08-01 — `5a7e852` — CYW43 stub / strlen join
+
+| Change | Reason |
+|--------|--------|
+| Host `strlen` fast-path at MegaFlash `0x1002a830` | Word-at-a-time strlen → bogus key_len → JOIN `-5` |
+| Soft pbuf_alloc scratch / ip4 ref clamp (MegaFlash hot PCs) | Guest lwIP TX asserts under a2bus |
+| Docs: CYW43 radio stub → host; a2bus host DNS/SNTP OK | Align model with Test Wifi bring-up |
+
+---
+
 ## 2026-08-01 — `40606f6` — Pico2W-faithful CYW43
 
 | Change | Reason |

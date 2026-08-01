@@ -1364,6 +1364,62 @@ static void cpu_set_active_ram_for_exec(void) {
 /* MegaFlash crt0/libc hot paths — skip millions of emulated store loops. */
 static int guest_megaflash_crt0_accel(uint32_t pc) {
     pc &= ~1u;
+    /* pbuf_alloc epilogue — if small alloc returned NULL, supply scratch pbuf. */
+    if (pc == 0x10013b00u) {
+        if (cpu.r[9] == 0u && cpu.r[7] > 0u && cpu.r[7] <= 64u) {
+            static int scratch_idx;
+            static int once;
+            if (scratch_idx < 8) {
+                uint32_t p = 0x2007F000u + (uint32_t)scratch_idx * 256u;
+                uint32_t len = cpu.r[7];
+                scratch_idx++;
+                mem_write32(p + 0u, 0u);
+                mem_write32(p + 4u, p + 64u);
+                mem_write8(p + 8u, (uint8_t)len);
+                mem_write8(p + 9u, (uint8_t)(len >> 8));
+                mem_write8(p + 10u, (uint8_t)len);
+                mem_write8(p + 11u, (uint8_t)(len >> 8));
+                mem_write8(p + 12u, 0u);
+                mem_write8(p + 13u, 0u);
+                mem_write8(p + 14u, 1u);
+                mem_write8(p + 15u, 0u);
+                cpu.r[9] = p;
+                if (!once++) {
+                    fprintf(stderr, "[Init] pbuf_alloc fallback → 0x%08X len=%u\n",
+                            p, (unsigned)len);
+                }
+            }
+        }
+        return 0;
+    }
+    /* lwIP ip4_output_if_src: do not invent pbufs — r4 may be unrelated. */
+    if (pc == 0x1001aa4cu) {
+        uint32_t p = cpu.r[0];
+        if (p != 0u && mem_read8(p + 14u) != 1u) {
+            mem_write8(p + 14u, 1u);
+        }
+        return 0;
+    }
+    /* newlib strlen — word-at-a-time path miscomputes length under Thumb emu
+     * (returns ~0x20000001), so cyw43_wifi_join sees key_len>64 → -5. */
+    if (pc == 0x1002a830u) {
+        uint32_t p = cpu.r[0];
+        uint32_t n = 0;
+        while (n < (8u * 1024u * 1024u)) {
+            if (mem_read8(p + n) == 0u) {
+                break;
+            }
+            n++;
+        }
+        cpu.r[0] = n;
+        cpu.r[15] = cpu.r[14] & ~1u;
+        pc_updated = 1;
+        static int logged;
+        if (!logged++) {
+            fprintf(stderr, "[Init] strlen fast-path active\n");
+        }
+        return 1;
+    }
     /* newlib memcpy — CYW43 CLM/firmware staging copies megabytes here. */
     if (pc >= 0x1002a744u && pc <= 0x1002a82eu) {
         uint32_t dst = cpu.r[0];
