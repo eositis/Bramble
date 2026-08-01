@@ -7,6 +7,12 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+_(none)_
+
+---
+
+## 2026-08-01 — `9d6e161` — TestWifi host DNS docs
+
 | Change | Reason |
 |--------|--------|
 | Docs: TestWifi host DNS/NTP (no guest CYW43 re-init) | Guest TestWifi timeout → zero-flood IP / MegaFlash hang |
