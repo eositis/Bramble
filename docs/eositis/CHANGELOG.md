@@ -11,6 +11,14 @@ _(none)_
 
 ---
 
+## 2026-08-01 — megaflash-vm  — BusLoop BUSY unstick
+
+| Change | Reason |
+|--------|--------|
+| Docs: option 7 BUSY-stuck / Ctrl-Reset boot loss | Track megaflash-vm BusLoop unstick |
+
+---
+
 ## 2026-08-01 — `b199a1a` — vfprintf HardFault / option 7 Not Found
 
 | Change | Reason |

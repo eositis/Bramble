@@ -840,3 +840,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Commit** | Bramble `b199a1a`; megaflash-vm `b66fae4` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
 
+## 2026-08-01 — Option 7 Not Found + Ctrl-Reset loses MegaFlash boot
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Option 7 still MegaFlash Not Found; after Ctrl-Reset machine no longer boots from MegaFlash |
+| **Cause** | Hung DoCommand leaves STATUS BUSY; ID no longer toggles; chkmegaflashex times out → skip COLDSTART/slot 4 |
+| **Actions** | ID toggle while BUSY; BUSY timeout unsticks BusLoop; host-complete DoLoadCPanel + DoGetDeviceInfo |
+| **Validate** | overlay rebuild |
+| **Commit** | megaflash-vm  |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
