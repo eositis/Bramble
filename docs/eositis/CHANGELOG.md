@@ -7,7 +7,9 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
-_(none)_
+| Change | Reason |
+|--------|--------|
+| Docs: TestWifi host DNS/NTP (no guest CYW43 re-init) | Guest TestWifi timeout → zero-flood IP / MegaFlash hang |
 
 ---
 

@@ -742,6 +742,16 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Commit** | megaflash-vm `276179c` |
 
 
+## 2026-08-01 — TestWifi timeout / zero-flood IP
+
+| Field | Detail |
+|-------|--------|
+| **Request** | TestWifi: MegaFlash not found then OK with IP of zeros; MAME force-quit |
+| **Cause** | Arming real CYW43 on TestWifi; sleep_ms stubs expire 90s wait before CLM; empty dataBuffer printed |
+| **Actions** | Keep boot cyw43 stub; complete TestWifi with guest IPs + host DNS; GetNetworkTime via host NTP |
+| **Commit** | megaflash-vm `d239a2a` |
+
+
 <!--
 
 | Field | Detail |
