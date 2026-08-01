@@ -7,6 +7,12 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+_(none)_
+
+---
+
+## 2026-08-01 — `1aecdeb` — full config persist / device info
+
 | Change | Reason |
 |--------|--------|
 | Full 512-byte `configBuffer` host persist/load (`megaflash-user-config.bin`) | WiFi SSID/PW were RAM-only after Save |

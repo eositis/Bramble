@@ -815,5 +815,6 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | Host mirror only stored 7-byte user settings (no SSID); DoTestWifi host-complete skipped NTP; GetDeviceInfoString sprintf(%f) hangs on a2bus |
 | **Actions** | Persist/load full 512-byte configBuffer; host SNTP+InitRTC stubs on TestWifi; host-fill GetDeviceInfoString; EncryptWrite → host file |
 | **Validate** | Boot loads SSID=PERSISTTEST → WIFI connected + host NTP; build OK |
+| **Commit** | Bramble `1aecdeb`; megaflash-vm `37776bb` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
 
