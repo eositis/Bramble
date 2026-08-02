@@ -11,6 +11,15 @@ _(none)_
 
 ---
 
+## 2026-08-02 — megaflash-vm `512b756` — CP bottom-line clock garbage
+
+| Change | Reason |
+|--------|--------|
+| megaflash-vm: host-complete `DoGetTimeString`; stub `_svfprintf_r` / `_svfiprintf_r` | CP `DisplayTime` PARAM junk flickered on bottom line after CMD BUSY timeout in `_svfprintf_r` |
+| Bramble: stub `_svfprintf_r` / `_svfiprintf_r` (not only `_vfprintf_r`) | Same sprintf hang path under `-wifi` / guest hooks |
+
+---
+
 ## 2026-08-01 — megaflash-vm `5786339` — BusLoop BUSY unstick
 
 | Change | Reason |

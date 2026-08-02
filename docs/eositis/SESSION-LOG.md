@@ -851,3 +851,13 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Commit** | megaflash-vm `5786339` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
 
+## 2026-08-02 — CP bottom-line rogue data (wifi test OK)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Wifi test works; constantly updating junk on bottom of CP screen |
+| **Cause** | Bottom line is `DisplayTime` (ver + `CMD_GETTIMESTR`). `DoGetTimeString` → `sprintf` → `_svfprintf_r` hangs (BUSY timeout PC=`0x1002DE12`); unstick leaves PARAM garbage; `cgetc_showclock` redraws it |
+| **Actions** | Host-complete `DoGetTimeString`; stub `_svfprintf_r`/`_svfiprintf_r` in overlay + Bramble `usb.c`; docs note |
+| **Validate** | `make -C megaflash-vm/build bramble`; `make -C Bramble/build bramble` |
+| **Commit** | megaflash-vm `512b756`; Bramble _(this commit)_ |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |

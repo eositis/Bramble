@@ -889,12 +889,14 @@ static void usb_log_cdc_active_once(void) {
 #define USB_GUEST_U2_MON_POLL_FLUSH   0x100070b4u /* U2_MonPollFlush */
 #define USB_GUEST_WRAP_VPRINTF      0x1000e2c8u /* __wrap_vprintf */
 #define USB_GUEST_VFPRINTF_R         0x1002f818u /* _vfprintf_r — skip locale/wchar body */
+#define USB_GUEST_SVFPRINTF_R        0x1002d680u /* _svfprintf_r — sprintf (hangs before _vfprintf_r) */
+#define USB_GUEST_SVFIPRINTF_R       0x1002acd0u /* _svfiprintf_r */
 #define USB_GUEST_LOCALE_MB_CUR_MAX 0x10032838u /* __locale_mb_cur_max — vfprintf locale spin */
 #define USB_GUEST_VFPRINTF_LOOP_BACK  0x1002f818u /* unused on this build; VFPRINTF_R covers path */
 #define USB_GUEST_VFPRINTF_LOOP_EXIT  0x10031aa4u
 #define USB_GUEST_ASCII_MBTOWC      0x10034280u /* __ascii_mbtowc */
 #define USB_GUEST_ASCII_MBTOWC_LOOP 0x1003429cu /* internal bne fallback */
-#define USB_GUEST_VFPRINTF_LO       0x1002f800u
+#define USB_GUEST_VFPRINTF_LO       0x1002d680u /* cover _svfprintf_r .. _vfprintf_r */
 #define USB_GUEST_VFPRINTF_HI       0x10031aa4u
 #define USB_GUEST_USB_CONN_CMP      0x10000498u /* cmp r0,#0 after stdio_usb_connected */
 #define USB_GUEST_USB_CONN_CMP_DBG  0x10000412u /* cbz after stdio_usb_connected (PicoW) */
@@ -2619,8 +2621,10 @@ void usb_console_guest_stdio_hook(void) {
         usb_guest_return_to_lr(cpu.r[0]);
         return;
     }
-    /* Skip newlib locale/wchar path under emu (broken Thumb BL / VFP spin). */
-    if (pc == USB_GUEST_VFPRINTF_R) {
+    /* Skip newlib locale/wchar / sprintf string FILE path under emu. */
+    if (pc == USB_GUEST_VFPRINTF_R ||
+        pc == USB_GUEST_SVFPRINTF_R ||
+        pc == USB_GUEST_SVFIPRINTF_R) {
         usb_guest_return_to_lr(0);
         return;
     }
