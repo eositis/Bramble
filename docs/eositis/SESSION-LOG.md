@@ -890,5 +890,5 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 |-------|--------|
 | **Request** | USB console start script should live in megaflash-vm; update links |
 | **Actions** | Moved `run/connect/open-usb-console*`, XMODEM test scripts, `USB-CONSOLE.md` / `TIO-CONSOLE.md` to megaflash-vm; Bramble keeps pointer docs + thin forwarders; README/UPSTREAM/PROJECT-RULES updated |
-| **Commit** | megaflash-vm `0479d6a`; Bramble _(this commit)_ |
+| **Commit** | megaflash-vm `0479d6a`; Bramble `a18beb8` |
 
