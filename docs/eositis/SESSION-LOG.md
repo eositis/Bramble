@@ -883,3 +883,12 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | make -C megaflash-vm/build bramble |
 | **Commit** | megaflash-vm `4344085` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-02 — Move USB console runners to megaflash-vm
+
+| Field | Detail |
+|-------|--------|
+| **Request** | USB console start script should live in megaflash-vm; update links |
+| **Actions** | Moved `run/connect/open-usb-console*`, XMODEM test scripts, `USB-CONSOLE.md` / `TIO-CONSOLE.md` to megaflash-vm; Bramble keeps pointer docs + thin forwarders; README/UPSTREAM/PROJECT-RULES updated |
+| **Commit** | megaflash-vm `0479d6a`; Bramble _(this commit)_ |
+

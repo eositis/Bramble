@@ -3,8 +3,8 @@
 #
 # WARNING: Do not use this script for USB UserTerminal / -usb-console testing.
 # The stub's a2phi makes IsAppleConnected() true → firmware takes core0Loop
-# (Apple bus) and skips UserTerminal. Use scripts/run-megaflash-usb-console.sh
-# instead (no -script).
+# (Apple bus) and skips UserTerminal. Use ../megaflash-vm/scripts/run-megaflash-usb-console.sh
+# (or the thin forwarder scripts/run-megaflash-usb-console.sh in this repo).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -29,7 +29,7 @@ fi
 if [[ -n "${USB_CONSOLE_PORT:-}" ]]; then
   echo "run-megaflash-stub.sh: USB_CONSOLE_PORT is set but this script uses the Apple bus stub." >&2
   echo "  Apple online suppresses the USB UserTerminal menu. Use instead:" >&2
-  echo "  USB_CONSOLE_PORT=$USB_CONSOLE_PORT ./scripts/run-megaflash-usb-console.sh" >&2
+  echo "  cd ../megaflash-vm && USB_CONSOLE_PORT=$USB_CONSOLE_PORT ./scripts/run-megaflash-usb-console.sh" >&2
   exit 1
 fi
 

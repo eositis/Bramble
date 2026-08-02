@@ -11,6 +11,14 @@ _(none)_
 
 ---
 
+## 2026-08-02 — megaflash-vm `0479d6a` — USB console runners → megaflash-vm
+
+| Change | Reason |
+|--------|--------|
+| Move USB console scripts/docs to sibling megaflash-vm; leave Bramble pointers + thin forwarders | MegaFlash orchestration belongs in megaflash-vm (same as MAME) |
+
+---
+
 ## 2026-08-02 — megaflash-vm `4344085` — native DoTestWifi dual-core pump
 
 | Change | Reason |

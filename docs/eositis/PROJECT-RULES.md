@@ -28,5 +28,6 @@ These rules apply to all agent work on this Bramble tree unless the user explici
 
 - After emulator changes: `make -C build bramble bramble_tests` and run `./build/bramble_tests` when feasible.
 - MAME / MegaFlash Apple-bus: build overlay in `../megaflash-vm` (`cmake -B build && make -C build bramble`); firmware under `../megaflash-vm/firmware/`.
+- MegaFlash USB CDC UserTerminal runners/docs: `../megaflash-vm` (`scripts/run-megaflash-usb-console.sh`, `docs/USB-CONSOLE.md`). Stock Bramble keeps `-usb-console` host I/O.
 - Stock Bramble has no `a2bus`; SPI flash (`-spi-flash*`) remains here.
 - macOS CYW43 internet: `-wifi -tap` uses utun; see `docs/eositis/MACOS-WIFI.md`. CYW43 is a radio stub (SSID/PW → host bridge). Guest lwIP owns the API; under a2bus, host DNS/SNTP stubs are allowed where guest UDP TX is unreliable.
