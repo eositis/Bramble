@@ -11,6 +11,14 @@ _(none)_
 
 ---
 
+## 2026-08-02 — megaflash-vm `d631dbe` — TestWifi IP line garbage
+
+| Change | Reason |
+|--------|--------|
+| megaflash-vm: zero dataBuffer + MODE_LINEAR on DoTestWifi; fix guest DATA READ off-by-one | CP printed junk/zero-flood on IP/netmask/gateway after wifi test OK |
+
+---
+
 ## 2026-08-02 — megaflash-vm `512b756` — CP bottom-line clock garbage
 
 | Change | Reason |
