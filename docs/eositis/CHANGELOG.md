@@ -11,6 +11,14 @@ _(none)_
 
 ---
 
+## 2026-08-02 — megaflash-vm `4344085` — native DoTestWifi dual-core pump
+
+| Change | Reason |
+|--------|--------|
+| megaflash-vm: pump CORE0+CORE1 while BUSY; remove DoTestWifi host-complete | Match real HW (core0 TestWifi + firmware FormatIPAddr); stop fabricating CP status strings |
+
+---
+
 ## 2026-08-02 — megaflash-vm `d631dbe` — TestWifi IP line garbage
 
 | Change | Reason |

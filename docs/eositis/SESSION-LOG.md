@@ -872,3 +872,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | make -C megaflash-vm/build bramble |
 | **Commit** | megaflash-vm `d631dbe` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-02 — Fix emu dual-core for native DoTestWifi (no host-complete)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Do not workaround MegaFlash display; fix emulation to match real hardware |
+| **Cause** | a2bus pump_guest stepped only core1; DoTestWifi IPC to core0 never ran → host-complete fabricated dataBuffer |
+| **Actions** | Pump both cores while BUSY; remove DoTestWifi host-complete; track InitRTC; docs corrected |
+| **Validate** | make -C megaflash-vm/build bramble |
+| **Commit** | megaflash-vm `4344085` |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
