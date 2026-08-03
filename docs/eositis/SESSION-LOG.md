@@ -901,4 +901,5 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | NETERR_NONE is independent of dataBuffer strings. FormatIPAddr→strcpy left dataBuffer empty (newlib strcpy word-path under Thumb emu). Overlay also skipped DHCP and poked netif lease |
 | **Actions** | Host strcpy accel; enlarge pbuf_alloc NULL fallback; remove DHCP skip + netif lease poke; wait_for_work returns immediately so native wifi_connect drains JOIN+fake DHCP; log DHCP OFFER/ACK; update MAME-BRIDGE |
 | **Validate** | `bramble_tests` 323/323; `make -C megaflash-vm/build bramble` |
+| **Commit** | Bramble `946c705` (+ docs `d3c7983`); megaflash-vm `b47c3a8` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
