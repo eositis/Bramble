@@ -1364,17 +1364,20 @@ static void cpu_set_active_ram_for_exec(void) {
 /* MegaFlash crt0/libc hot paths — skip millions of emulated store loops. */
 static int guest_megaflash_crt0_accel(uint32_t pc) {
     pc &= ~1u;
-    /* pbuf_alloc epilogue — if small alloc returned NULL, supply scratch pbuf. */
+    /* pbuf_alloc epilogue — if alloc returned NULL, supply scratch pbuf.
+     * Cover DHCP/UDP sizes (not just tiny ≤64) so guest lwIP can TX DISCOVER. */
     if (pc == 0x10013b00u) {
-        if (cpu.r[9] == 0u && cpu.r[7] > 0u && cpu.r[7] <= 64u) {
+        if (cpu.r[9] == 0u && cpu.r[7] > 0u && cpu.r[7] <= 1600u) {
             static int scratch_idx;
             static int once;
             if (scratch_idx < 8) {
-                uint32_t p = 0x2007F000u + (uint32_t)scratch_idx * 256u;
                 uint32_t len = cpu.r[7];
+                uint32_t slot = 2048u; /* header + payload cushion */
+                uint32_t p = 0x2007E000u + (uint32_t)scratch_idx * slot;
+                uint32_t payload = (p + 16u + 3u) & ~3u;
                 scratch_idx++;
                 mem_write32(p + 0u, 0u);
-                mem_write32(p + 4u, p + 64u);
+                mem_write32(p + 4u, payload);
                 mem_write8(p + 8u, (uint8_t)len);
                 mem_write8(p + 9u, (uint8_t)(len >> 8));
                 mem_write8(p + 10u, (uint8_t)len);
@@ -1417,6 +1420,28 @@ static int guest_megaflash_crt0_accel(uint32_t pc) {
         static int logged;
         if (!logged++) {
             fprintf(stderr, "[Init] strlen fast-path active\n");
+        }
+        return 1;
+    }
+    /* newlib strcpy — word path corrupts under Thumb emu; FormatIPAddr then
+     * leaves dataBuffer empty while TestWifi still reports NETERR_NONE. */
+    if (pc == 0x1002a5dcu) {
+        uint32_t dst = cpu.r[0];
+        uint32_t src = cpu.r[1];
+        uint32_t i;
+        for (i = 0; i < (8u * 1024u * 1024u); i++) {
+            uint8_t c = mem_read8(src + i);
+            mem_write8(dst + i, c);
+            if (c == 0u) {
+                break;
+            }
+        }
+        /* r0 stays dest (AAPCS strcpy return). */
+        cpu.r[15] = cpu.r[14] & ~1u;
+        pc_updated = 1;
+        static int logged;
+        if (!logged++) {
+            fprintf(stderr, "[Init] strcpy fast-path active\n");
         }
         return 1;
     }

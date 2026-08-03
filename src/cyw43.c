@@ -523,11 +523,13 @@ static void cyw43_send_dhcp_reply(const uint8_t *eth_req, int eth_len, uint8_t r
 
     cyw43_queue_rx_data(frame, off);
 
-    if (cpu.debug_enabled)
-        fprintf(stderr, "[CYW43] DHCP %s → offer %d.%d.%d.%d\n",
-                reply_type == 2 ? "DISCOVER" : "REQUEST",
-                dhcp_client_ip[0], dhcp_client_ip[1],
-                dhcp_client_ip[2], dhcp_client_ip[3]);
+    fprintf(stderr, "[CYW43] DHCP %s → %d.%d.%d.%d/24 gw/dns %d.%d.%d.%d\n",
+            reply_type == 2 ? "OFFER" : "ACK",
+            dhcp_client_ip[0], dhcp_client_ip[1],
+            dhcp_client_ip[2], dhcp_client_ip[3],
+            dhcp_server_ip[0], dhcp_server_ip[1],
+            dhcp_server_ip[2], dhcp_server_ip[3]);
+    fflush(stderr);
 }
 
 /* Returns 1 if this was a DHCP packet that we handled, 0 otherwise. */

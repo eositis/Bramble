@@ -892,3 +892,13 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Actions** | Moved `run/connect/open-usb-console*`, XMODEM test scripts, `USB-CONSOLE.md` / `TIO-CONSOLE.md` to megaflash-vm; Bramble keeps pointer docs + thin forwarders; README/UPSTREAM/PROJECT-RULES updated |
 | **Commit** | megaflash-vm `0479d6a`; Bramble `a18beb8` |
 
+
+## 2026-08-03 — TestWifi OK but IP fields empty (lease via DHCP, not poke)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | How can WIFI/DNS/NTP be OK with empty IP fields? Report IPs via correct channels, not stubbing |
+| **Cause** | NETERR_NONE is independent of dataBuffer strings. FormatIPAddr→strcpy left dataBuffer empty (newlib strcpy word-path under Thumb emu). Overlay also skipped DHCP and poked netif lease |
+| **Actions** | Host strcpy accel; enlarge pbuf_alloc NULL fallback; remove DHCP skip + netif lease poke; wait_for_work returns immediately so native wifi_connect drains JOIN+fake DHCP; log DHCP OFFER/ACK; update MAME-BRIDGE |
+| **Validate** | `bramble_tests` 323/323; `make -C megaflash-vm/build bramble` |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |

@@ -7,7 +7,9 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
-_(none)_
+| Change | Reason |
+|--------|--------|
+| Host `strcpy` accel; enlarge `pbuf_alloc` NULL fallback; always-log CYW43 DHCP OFFER/ACK | CP TestWifi showed WIFI/DNS/NTP OK with empty IP lines — `FormatIPAddr` uses `strcpy` into `dataBuffer`; lease must arrive via fake DHCP → guest lwIP |
 
 ---
 
