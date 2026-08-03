@@ -903,3 +903,13 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | `bramble_tests` 323/323; `make -C megaflash-vm/build bramble` |
 | **Commit** | Bramble `946c705` (+ docs `d3c7983`); megaflash-vm `b47c3a8` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-03 — Remove host DNS/NTP fakes; fix DHCP TX path
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Radio misconfigured; remove stubs faking web access; use lwIP+radio as mating interface to localhost |
+| **Cause** | Log stuck at connect status 2 (NOIP); soft-continue p->ref==1 returned ERR_BUF (no DHCP TX); pbuf_free soft-continue fell into memp_free (HardFault); host DNS/NTP stubs faked OK |
+| **Actions** | Remove host DNS/SNTP stubs; skip ip4_output ref assert after forcing ref=1; fix pbuf_free soft-continue to retry; WLAN TX logging; update PROJECT-RULES/MACOS-WIFI/MAME-BRIDGE |
+| **Validate** | bramble_tests 323/323; megaflash-vm overlay rebuild |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |

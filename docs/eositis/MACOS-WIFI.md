@@ -16,9 +16,9 @@ CYW43 is an API-shaped stub: accept SSID/password, synthesize association, and b
 |------|----------|
 | SSID | `WLC_SET_SSID` — empty refused; non-empty joins synthetically |
 | Password | `WLC_SET_WSEC_PMK` — accepted/logged; not validated against a real AP |
-| Addressing | Guest `192.168.4.2/24`, gateway/DNS `192.168.4.1` (in-chip DHCP and/or MegaFlash `dhcp_start` static lease under a2bus) |
+| Addressing | Guest `192.168.4.2/24`, gateway/DNS `192.168.4.1` via Bramble fake DHCP on the WLAN data path (guest `dhcp_start` → gSPI TX → OFFER/ACK RX) |
 | Host | Virtual gateway only — does **not** join your Mac’s Wi‑Fi with the guest SSID |
-| a2bus DNS/NTP | Guest UDP TX is still fragile; MegaFlash overlay may resolve DNS / SNTP on the host so `GetNetworkTime` / Test Wifi can finish while JOIN still uses the radio stub |
+| a2bus DNS/NTP/TFTP | Same path as DHCP: guest lwIP UDP/TCP through CYW43 to TAP/utun. No host-side DNS/SNTP completion inside the Pico. |
 
 ## Quick start (stock Bramble)
 

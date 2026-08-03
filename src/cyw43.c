@@ -622,6 +622,18 @@ static void cyw43_wlan_tx_complete(void) {
             int eth_len = len - eth_offset;
             if (eth_len > 0) {
                 const uint8_t *eth = cyw43.wlan_tx_buf + eth_offset;
+                {
+                    static int tx_logged;
+                    if (tx_logged < 8) {
+                        tx_logged++;
+                        fprintf(stderr,
+                                "[CYW43] WLAN DATA TX %d bytes ethertype=%02x%02x\n",
+                                eth_len,
+                                eth_len >= 14 ? eth[12] : 0,
+                                eth_len >= 14 ? eth[13] : 0);
+                        fflush(stderr);
+                    }
+                }
                 /* Always try fake DHCP first (no real network needed) */
                 if (!cyw43_handle_dhcp(eth, eth_len)) {
                     /* Not DHCP: forward to TAP interface if available */

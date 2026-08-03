@@ -1395,11 +1395,29 @@ static int guest_megaflash_crt0_accel(uint32_t pc) {
         }
         return 0;
     }
-    /* lwIP ip4_output_if_src: do not invent pbufs — r4 may be unrelated. */
-    if (pc == 0x1001aa4cu) {
+    /* lwIP ip4_output_if_src requires p->ref == 1 (LWIP_NETIF_TX_SINGLE_PBUF).
+     * Under emu, refs can be stale; force and skip the assert so DHCP/UDP TX
+     * reaches cyw43_send_ethernet → Bramble WLAN (fake DHCP / TAP). */
+    if (pc == 0x1001aa3cu || pc == 0x1001aa4cu) {
         uint32_t p = cpu.r[0];
-        if (p != 0u && mem_read8(p + 14u) != 1u) {
-            mem_write8(p + 14u, 1u);
+        if (p != 0u) {
+            uint8_t ref = mem_read8(p + 14u);
+            if (ref != 1u) {
+                static int fixed;
+                if (fixed < 8) {
+                    fixed++;
+                    fprintf(stderr,
+                            "[Init] ip4_output p->ref %u → 1 (p=0x%08X)\n",
+                            (unsigned)ref, p);
+                }
+                mem_write8(p + 14u, 1u);
+            }
+        }
+        if (pc == 0x1001aa4cu) {
+            /* Skip cmp/bne panic; land on mov r4, r0 (success path). */
+            cpu.r[15] = 0x1001aa52u | 1u;
+            pc_updated = 1;
+            return 1;
         }
         return 0;
     }
