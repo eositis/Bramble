@@ -7,6 +7,12 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+_(none)_
+
+---
+
+## 2026-08-03 — `e76b825` — DHCP TX via CYW43 (no host DNS/NTP)
+
 | Change | Reason |
 |--------|--------|
 | Skip `ip4_output` p->ref assert (force ref=1); log WLAN DATA TX; docs: no host DNS/NTP | Soft-continue as ERR_BUF aborted DHCP → stuck LINK_NOIP; user wants lwIP↔CYW43↔TAP only |
