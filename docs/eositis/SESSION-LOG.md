@@ -794,6 +794,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | Seeded `-wifi` a2bus: `WIFI connected`, host DNS `0.pool.ntp.org`, host NTP epoch, `NETPUMP: end`; `bramble_tests` 323/323 |
 | **Outcome** | Test Wifi / GetNetworkTime no longer die on alarm-pool / join timeout / UDP NTP; radio stub + host DNS/NTP |
 | **Commit** | Bramble `17af40d`; megaflash-vm `ab9f2e9` |
+| **Commit** | Bramble DHCP-TX fix + docs; megaflash-vm `65d6098` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
 
 ## 2026-08-01 — CP TestWifi hang (DoTestWifi IPC freezes BusLoop)
@@ -805,6 +806,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Actions** | megaflash-vm: host-complete configured-SSID `DoTestWifi` (virtual IPs + host DNS); keep radio stub JOIN/DNS/SNTP for GetNetworkTime; docs |
 | **Outcome** | CP Test Wifi returns immediately without blocking Apple bus |
 | **Commit** | megaflash-vm `346667b` |
+| **Commit** | Bramble DHCP-TX fix + docs; megaflash-vm `65d6098` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
 
 ## 2026-08-01 — Persist WiFi, NTP/RTC after TestWifi, OA device info
@@ -816,6 +818,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Actions** | Persist/load full 512-byte configBuffer; host SNTP+InitRTC stubs on TestWifi; host-fill GetDeviceInfoString; EncryptWrite → host file |
 | **Validate** | Boot loads SSID=PERSISTTEST → WIFI connected + host NTP; build OK |
 | **Commit** | Bramble `1aecdeb`; megaflash-vm `37776bb` |
+| **Commit** | Bramble DHCP-TX fix + docs; megaflash-vm `65d6098` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
 
 ## 2026-08-01 — Open-Apple left key + device info hang → “MegaFlash not available”
@@ -827,6 +830,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Actions** | Host-complete `DoGetInfoString`; Apple `\n\r` device-info text; MAME cfg binds Open-Apple to Left Option **or** Left ⌘; docs clarify OA-at-CP-start vs option 7 |
 | **Validate** | `bramble_tests` 323/323; overlay rebuild |
 | **Commit** | Bramble `9ce6401`; megaflash-vm `5b88cb0` |
+| **Commit** | Bramble DHCP-TX fix + docs; megaflash-vm `65d6098` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
 
 ## 2026-08-01 — Option 7 MegaFlash Not Found (core0 HardFault 0x30034280)
@@ -838,6 +842,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Actions** | Enable megaflash stdio hooks when `-wifi`; stub `_vfprintf_r` on a2bus; remap/repair `0x30xxxxxx` flash PCs; host `__wrap_vprintf` |
 | **Validate** | `bramble_tests` 323/323; overlay rebuild |
 | **Commit** | Bramble `b199a1a`; megaflash-vm `b66fae4` |
+| **Commit** | Bramble DHCP-TX fix + docs; megaflash-vm `65d6098` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
 
 ## 2026-08-01 — Option 7 Not Found + Ctrl-Reset loses MegaFlash boot
@@ -849,6 +854,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Actions** | ID toggle while BUSY; BUSY timeout unsticks BusLoop; host-complete DoLoadCPanel + DoGetDeviceInfo |
 | **Validate** | overlay rebuild |
 | **Commit** | megaflash-vm `5786339` |
+| **Commit** | Bramble DHCP-TX fix + docs; megaflash-vm `65d6098` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
 
 ## 2026-08-02 — CP bottom-line rogue data (wifi test OK)
@@ -860,6 +866,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Actions** | Host-complete `DoGetTimeString`; stub `_svfprintf_r`/`_svfiprintf_r` in overlay + Bramble `usb.c`; docs note |
 | **Validate** | `make -C megaflash-vm/build bramble`; `make -C Bramble/build bramble` |
 | **Commit** | megaflash-vm `512b756`; Bramble `e4fe230` |
+| **Commit** | Bramble DHCP-TX fix + docs; megaflash-vm `65d6098` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
 
 ## 2026-08-02 — TestWifi result screen IP garbage
@@ -871,6 +878,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Actions** | Zero 512-byte dataBuffer + force MODE_LINEAR on DoTestWifi fill; fix guest READ to return pre-inject byte; dump dataBuffer in log |
 | **Validate** | make -C megaflash-vm/build bramble |
 | **Commit** | megaflash-vm `d631dbe` |
+| **Commit** | Bramble DHCP-TX fix + docs; megaflash-vm `65d6098` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
 
 ## 2026-08-02 — Fix emu dual-core for native DoTestWifi (no host-complete)
@@ -882,6 +890,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Actions** | Pump both cores while BUSY; remove DoTestWifi host-complete; track InitRTC; docs corrected |
 | **Validate** | make -C megaflash-vm/build bramble |
 | **Commit** | megaflash-vm `4344085` |
+| **Commit** | Bramble DHCP-TX fix + docs; megaflash-vm `65d6098` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
 
 ## 2026-08-02 — Move USB console runners to megaflash-vm
@@ -912,4 +921,5 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | Log stuck at connect status 2 (NOIP); soft-continue p->ref==1 returned ERR_BUF (no DHCP TX); pbuf_free soft-continue fell into memp_free (HardFault); host DNS/NTP stubs faked OK |
 | **Actions** | Remove host DNS/SNTP stubs; skip ip4_output ref assert after forcing ref=1; fix pbuf_free soft-continue to retry; WLAN TX logging; update PROJECT-RULES/MACOS-WIFI/MAME-BRIDGE |
 | **Validate** | bramble_tests 323/323; megaflash-vm overlay rebuild |
+| **Commit** | Bramble `e76b825` (+ docs `35e927f`); megaflash-vm `65d6098` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
