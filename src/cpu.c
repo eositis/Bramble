@@ -1364,43 +1364,72 @@ static void cpu_set_active_ram_for_exec(void) {
 /* MegaFlash crt0/libc hot paths — skip millions of emulated store loops. */
 static int guest_megaflash_crt0_accel(uint32_t pc) {
     pc &= ~1u;
+    /* Debug MegaFlash: pbuf_add_header_impl asserts p!=NULL before the
+     * release-build "return 1". Fail soft so DHCP TX errors instead of LOCKUP. */
+    if (pc == 0x10013918u) {
+        if (cpu.r[0] == 0u) {
+            static int once;
+            if (!once++) {
+                fprintf(stderr, "[Init] pbuf_add_header_impl(NULL) → 1\n");
+            }
+            cpu.r[0] = 1u;
+            cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+            pc_updated = 1;
+            return 1;
+        }
+        return 0;
+    }
     /* pbuf_alloc epilogue — if alloc returned NULL, supply scratch pbuf.
-     * Cover DHCP/UDP sizes (not just tiny ≤64) so guest lwIP can TX DISCOVER. */
+     * Must leave payload headroom so pbuf_add_header (ETH/IP/UDP) can rewind
+     * toward the struct. Place below stacks (≤0x20081000) and above heap. */
     if (pc == 0x10013b00u) {
         if (cpu.r[9] == 0u && cpu.r[7] > 0u && cpu.r[7] <= 1600u) {
-            static int scratch_idx;
+            static unsigned scratch_idx;
             static int once;
-            if (scratch_idx < 8) {
-                uint32_t len = cpu.r[7];
-                uint32_t slot = 2048u; /* header + payload cushion */
-                uint32_t p = 0x2007E000u + (uint32_t)scratch_idx * slot;
-                uint32_t payload = (p + 16u + 3u) & ~3u;
-                scratch_idx++;
-                mem_write32(p + 0u, 0u);
-                mem_write32(p + 4u, payload);
-                mem_write8(p + 8u, (uint8_t)len);
-                mem_write8(p + 9u, (uint8_t)(len >> 8));
-                mem_write8(p + 10u, (uint8_t)len);
-                mem_write8(p + 11u, (uint8_t)(len >> 8));
-                mem_write8(p + 12u, 0u);
-                mem_write8(p + 13u, 0u);
-                mem_write8(p + 14u, 1u);
-                mem_write8(p + 15u, 0u);
-                cpu.r[9] = p;
-                if (!once++) {
-                    fprintf(stderr, "[Init] pbuf_alloc fallback → 0x%08X len=%u\n",
-                            p, (unsigned)len);
-                }
+            uint32_t len = cpu.r[7];
+            uint32_t headroom = 128u; /* link + IP + UDP */
+            uint32_t slot = 16u + headroom + 1600u;
+            uint32_t base = 0x2007A000u; /* 8*1744 < 16KiB gap under 0x20080000 */
+            uint32_t p = base + (scratch_idx % 8u) * slot;
+            uint32_t payload = (p + 16u + headroom + 3u) & ~3u;
+            scratch_idx++;
+            mem_write32(p + 0u, 0u);
+            mem_write32(p + 4u, payload);
+            mem_write8(p + 8u, (uint8_t)len);
+            mem_write8(p + 9u, (uint8_t)(len >> 8));
+            mem_write8(p + 10u, (uint8_t)len);
+            mem_write8(p + 11u, (uint8_t)(len >> 8));
+            mem_write8(p + 12u, 0x80u); /* STRUCT_DATA_CONTIGUOUS | heap */
+            mem_write8(p + 13u, 0u);
+            mem_write8(p + 14u, 1u);
+            mem_write8(p + 15u, 0u);
+            cpu.r[9] = p;
+            if (!once++) {
+                fprintf(stderr,
+                        "[Init] pbuf_alloc fallback → 0x%08X len=%u headroom=%u\n",
+                        p, (unsigned)len, (unsigned)headroom);
             }
         }
         return 0;
     }
     /* lwIP ip4_output_if_src requires p->ref == 1 (LWIP_NETIF_TX_SINGLE_PBUF).
      * Under emu, refs can be stale; force and skip the assert so DHCP/UDP TX
-     * reaches cyw43_send_ethernet → Bramble WLAN (fake DHCP / TAP). */
+     * reaches cyw43_send_ethernet → Bramble WLAN (fake DHCP / TAP).
+     * NULL p must not continue — that hit pbuf_add_header → panic → LOCKUP. */
     if (pc == 0x1001aa3cu || pc == 0x1001aa4cu) {
         uint32_t p = cpu.r[0];
-        if (p != 0u) {
+        if (p == 0u) {
+            static int nullp;
+            if (nullp < 8) {
+                nullp++;
+                fprintf(stderr, "[Init] ip4_output NULL pbuf → ERR_BUF\n");
+            }
+            cpu.r[0] = 0xfffffffeu; /* ERR_BUF */
+            cpu.r[15] = 0x1001ab04u | 1u;
+            pc_updated = 1;
+            return 1;
+        }
+        {
             uint8_t ref = mem_read8(p + 14u);
             if (ref != 1u) {
                 static int fixed;

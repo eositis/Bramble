@@ -923,3 +923,13 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | bramble_tests 323/323; megaflash-vm overlay rebuild |
 | **Commit** | Bramble `e76b825` (+ docs `35e927f`); megaflash-vm `65d6098` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-03 — core0 LOCKUP p!=NULL after JOIN
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Log shows panic p!=NULL then core0 LOCKUP; TestWifi still shows truncated IP |
+| **Cause** | ip4_output got NULL pbuf; ref-skip continued into pbuf_add_header(NULL); debug assert panics (release returns 1); re-enter panic → LOCKUP; scratch pbufs at 0x2007E000 overlapped core stacks |
+| **Actions** | Soft-fail NULL add_header; ip4 NULL→ERR_BUF; scratch at 0x2007A000 with 128B headroom; unknown panic → WFI not re-enter |
+| **Validate** | bramble_tests 323/323; megaflash-vm overlay rebuild |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
