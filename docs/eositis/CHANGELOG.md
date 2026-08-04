@@ -7,6 +7,12 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+_(none)_
+
+---
+
+## 2026-08-03 — `c6b3cd1` — survive NULL pbuf after JOIN
+
 | Change | Reason |
 |--------|--------|
 | Soft-fail NULL `pbuf_add_header`; relocate scratch pbufs with ETH/IP headroom; `ip4_output(NULL)` → ERR_BUF | Debug `p != NULL` LOCKUPed core0 after JOIN; prior scratch overlapped stacks / lacked header room |
