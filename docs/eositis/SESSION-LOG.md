@@ -932,4 +932,5 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | ip4_output got NULL pbuf; ref-skip continued into pbuf_add_header(NULL); debug assert panics (release returns 1); re-enter panic → LOCKUP; scratch pbufs at 0x2007E000 overlapped core stacks |
 | **Actions** | Soft-fail NULL add_header; ip4 NULL→ERR_BUF; scratch at 0x2007A000 with 128B headroom; unknown panic → WFI not re-enter |
 | **Validate** | bramble_tests 323/323; megaflash-vm overlay rebuild |
+| **Commit** | Bramble `c6b3cd1`; megaflash-vm `9ab69a4` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
