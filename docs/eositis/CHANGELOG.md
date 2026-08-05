@@ -7,7 +7,10 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
-_(none)_
+| Change | Reason |
+|--------|--------|
+| Host-accel MegaFlash `FormatIPAddr`; dump `dataBuffer` after TestWifi fill | CP showed WIFI/DNS/NTP OK with IP=`AG` / blank netmask/gw/dns — guest `ntoa`+`strcpy` left empty strings |
+| Soft-continue guest `_exit` (WFI) | Abort → `__verbose_terminate_handler` → `abort` → `_exit` BKPT LOCKUPed core0 / CMD BUSY |
 
 ---
 

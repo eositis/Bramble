@@ -945,3 +945,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | `bramble_tests` 323/323; seeded `-wifi` a2bus: DHCP OFFER+ACK, `connect status: 3`, `WIFI connected`, `NTP: EvtStart()` |
 | **Commit** | Bramble `0f061da`; megaflash-vm `d995305` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-05 — CP TestWifi IP “AG” / blank + Abort LOCKUP
+
+| Field | Detail |
+|-------|--------|
+| **Request** | DHCP/WIFI OK in log; CP shows IP=`AG`, blank netmask/gw/dns; Abort → core0 HardFault at `_exit` |
+| **Cause** | Status codes from PARAM; IP lines from `dataBuffer` via `FormatIPAddr` — guest path left empty/NUL strings (“AG” = leftover screen). Abort’s C++ terminate hits `_exit` BKPT → LOCKUP |
+| **Actions** | Host-accel `FormatIPAddr` (real IP word → ASCII); dump dataBuffer after fill; `_exit` → WFI; rebuild megaflash-vm `bramble`; docs |
+| **Validate** | `bramble_tests` 323/323; overlay rebuild |
+| **Commit** | (pending) |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |

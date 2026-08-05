@@ -1577,6 +1577,72 @@ static int guest_megaflash_crt0_accel(uint32_t pc) {
         }
         return 0;
     }
+    /* After DoTestWifi's four FormatIPAddr calls — dump dataBuffer for CP. */
+    if (pc == 0x10001e1eu) {
+        static int dumped;
+        if (!dumped++) {
+            char s[80];
+            uint32_t p = 0x2000caccu;
+            uint32_t i, n = 0;
+            for (i = 0; i < 79u && n < 4u; i++) {
+                uint8_t c = mem_read8(p + i);
+                if (c == 0u) {
+                    s[i] = (n < 3u) ? '|' : '\0';
+                    n++;
+                    if (n >= 4u) {
+                        s[i] = '\0';
+                        break;
+                    }
+                } else if (c >= 32u && c < 127u) {
+                    s[i] = (char)c;
+                } else {
+                    s[i] = '?';
+                }
+            }
+            s[79] = '\0';
+            fprintf(stderr, "[Init] DoTestWifi dataBuffer: %s\n", s);
+        }
+        return 0;
+    }
+    /* MegaFlash FormatIPAddr — bypass guest ip4addr_ntoa+strcpy (both fragile
+     * under Thumb emu). CP TestWifi prints these strings from dataBuffer;
+     * empty/NUL first string shows as blank/"AG" screen junk while PARAM still
+     * reports NETERR_NONE. r0=dest, r1=ip4_addr_t.addr (LE lwIP byte order). */
+    if (pc == 0x10001cf8u) {
+        uint32_t dest = cpu.r[0];
+        uint32_t ip = cpu.r[1];
+        char buf[16];
+        int n = snprintf(buf, sizeof(buf), "%u.%u.%u.%u",
+                         (unsigned)(ip & 0xffu),
+                         (unsigned)((ip >> 8) & 0xffu),
+                         (unsigned)((ip >> 16) & 0xffu),
+                         (unsigned)((ip >> 24) & 0xffu));
+        if (n < 0) {
+            n = 0;
+            buf[0] = '\0';
+        }
+        if (n >= (int)sizeof(buf)) {
+            n = (int)sizeof(buf) - 1;
+            buf[n] = '\0';
+        }
+        {
+            int i;
+            for (i = 0; i <= n; i++) {
+                mem_write8(dest + (uint32_t)i, (uint8_t)buf[i]);
+            }
+        }
+        cpu.r[0] = dest + (uint32_t)n + 1u;
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        pc_updated = 1;
+        {
+            static int logged;
+            if (logged < 8) {
+                logged++;
+                fprintf(stderr, "[Init] FormatIPAddr '%s' → 0x%08X\n", buf, dest);
+            }
+        }
+        return 1;
+    }
     /* newlib strlen — word-at-a-time path miscomputes length under Thumb emu
      * (returns ~0x20000001), so cyw43_wifi_join sees key_len>64 → -5. */
     if (pc == 0x1002a830u) {
@@ -1617,6 +1683,22 @@ static int guest_megaflash_crt0_accel(uint32_t pc) {
         if (!logged++) {
             fprintf(stderr, "[Init] strcpy fast-path active\n");
         }
+        return 1;
+    }
+    /* _exit is BKPT forever — abort/terminate after Abort Requested LOCKUPs
+     * core0 and leaves BusLoop CMD BUSY. Park the core in WFI instead. */
+    if (pc == 0x1000df80u) {
+        int ac = get_active_core();
+        static int logged;
+        if (!logged++) {
+            fprintf(stderr,
+                    "[Init] guest _exit ignored (core=%d r0=%u lr=0x%08X)\n",
+                    ac, cpu.r[0], cpu.r[14]);
+        }
+        if (ac >= 0 && ac < 2) {
+            cores[ac].is_wfi = 1;
+        }
+        pc_updated = 1;
         return 1;
     }
     /* newlib memcpy — CYW43 CLM/firmware staging copies megabytes here. */
