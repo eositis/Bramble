@@ -11,7 +11,7 @@ _(none)_
 
 ---
 
-## 2026-08-05 — DHCP lease under a2bus (UXTAH + EXC_RETURN + OFFER pad)
+## 2026-08-05 — `0f061da` — DHCP lease under a2bus (UXTAH + EXC_RETURN + OFFER pad)
 
 | Change | Reason |
 |--------|--------|
