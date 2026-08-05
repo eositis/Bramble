@@ -11,6 +11,17 @@ _(none)_
 
 ---
 
+## 2026-08-05 — DHCP lease under a2bus (UXTAH + EXC_RETURN + OFFER pad)
+
+| Change | Reason |
+|--------|--------|
+| Fix UXTAH/UXTAB accumulate decode mask (`FF80`, not `FF8F`) | Mask cleared op bits and only matched Rn=1; second UXTAH in `ip4_output_if_src` fell through to ldst → PC=0xFE → HardFault |
+| T32 LDMIA with PC: honor EXC_RETURN (`cpu_exception_return`) | Alarm-pool / IRQ return cleared bit0 of `0xFFFFFFF9` and corrupted callee-saved regs mid-lwIP |
+| Fake DHCP OFFER/ACK: 4-byte trailing pad after END | `dhcp_parse_reply` issues a 4-byte `pbuf_copy_partial` at END offset under emu; without pad → ERR_BUF, stuck `connect status: 2` |
+| Keep UDP NOCHKSUM force + udp TX pbuf rescue; NULL `ip4_output` returns via LR | Prior session work: checksum LDMIA / NULL epilogue HardFaults |
+
+---
+
 ## 2026-08-03 — `c6b3cd1` — survive NULL pbuf after JOIN
 
 | Change | Reason |

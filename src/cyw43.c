@@ -501,6 +501,10 @@ static void cyw43_send_dhcp_reply(const uint8_t *eth_req, int eth_len, uint8_t r
     frame[off++] =  6; frame[off++] = 4;
     memcpy(frame + off, dhcp_server_ip, 4);     off += 4;  /* DNS */
     frame[off++] = 255;                                    /* end */
+    /* lwIP dhcp_parse_reply under Thumb emu issues a 4-byte pbuf_copy_partial
+     * at the END option offset (IT/cmp edge). Trailing pad makes that read
+     * succeed so parse can still see END and return ERR_OK. */
+    frame[off++] = 0; frame[off++] = 0; frame[off++] = 0; frame[off++] = 0;
 
     /* Fill in lengths */
     int ip_total  = off - ip_off;
@@ -1144,9 +1148,18 @@ void cyw43_pio_tx_write(uint32_t val) {
                     pio_resp_count = total_words;
                     rx_queue_pop();
 
-                    if (cpu.debug_enabled)
-                        fprintf(stderr, "[CYW43] WLAN RX: delivering %d byte frame (ch=%d seq=%d)\n",
-                                copy_len, f->data[4] & 0x0F, f->data[3]);
+                    {
+                        /* Always log data-channel / large frames (DHCP OFFER ~300B+). */
+                        uint8_t ch = f->data[5] & 0x0Fu;
+                        uint8_t seq = f->data[4];
+                        if (copy_len >= 64 || ch == SDPCM_DATA_CHANNEL) {
+                            fprintf(stderr,
+                                    "[CYW43] WLAN RX: delivering %d byte frame "
+                                    "(ch=%u seq=%u)\n",
+                                    copy_len, (unsigned)ch, (unsigned)seq);
+                            fflush(stderr);
+                        }
+                    }
                 } else {
                     /* No data - return empty SDPCM (size=0) */
                     pio_resp_count = total_words;

@@ -258,6 +258,16 @@ static void t32_ldst_multiple(uint32_t pc, uint16_t upper, uint16_t lower) {
             if (L) {
                 uint32_t val = mem_read32(addr);
                 if (i == 15) {
+                    /* EXC_RETURN magic — mirror 16-bit POP / BX. */
+                    if ((val & 0xFFFFFFF0u) == 0xFFFFFFF0u) {
+                        addr += 4u;
+                        if (W) {
+                            cpu.r[Rn] = addr;
+                        }
+                        cpu_exception_return(val);
+                        pc_updated = 1;
+                        return;
+                    }
                     cpu.r[15] = val & ~1u;
                     pc_updated = 1;
                 } else {
@@ -825,6 +835,38 @@ static int t32_misc(uint32_t pc, uint16_t upper, uint16_t lower) {
         /* Memory barriers are NOPs in emulator */
         return 1;
     }
+    /* LSL/LSR/ASR/ROR register T2:
+     * upper = 1111 1010 00ss Rn (value), lower = 1111 Rd 0000 Rm (shift).
+     * ss: 00=LSL, 01=LSR, 10=ASR, 11=ROR.  (Rn/Rm placement matches
+     * objdump/C usage: lsl.w Rd, Rn, Rm.) */
+    if ((upper & 0xFFC0) == 0xFA00 && (lower & 0xF0F0) == 0xF000) {
+        int Rn  = upper & 0xF;           /* value */
+        int Rd  = (lower >> 8) & 0xF;
+        int Rm  = lower & 0xF;           /* shift count */
+        int typ = (upper >> 4) & 3;
+        uint32_t shift = cpu.r[Rm] & 0xFFu;
+        uint32_t val   = cpu.r[Rn];
+        if (shift >= 32u) {
+            if (typ == 2) { /* ASR */
+                cpu.r[Rd] = (val & 0x80000000u) ? 0xFFFFFFFFu : 0u;
+            } else if (typ == 3) { /* ROR uses low 5 bits */
+                shift &= 31u;
+                cpu.r[Rd] = shift ? ((val >> shift) | (val << (32u - shift))) : val;
+            } else {
+                cpu.r[Rd] = 0u;
+            }
+        } else if (shift == 0u) {
+            cpu.r[Rd] = val;
+        } else {
+            switch (typ) {
+            case 0: cpu.r[Rd] = val << shift; break;
+            case 1: cpu.r[Rd] = val >> shift; break;
+            case 2: cpu.r[Rd] = (uint32_t)((int32_t)val >> shift); break;
+            case 3: cpu.r[Rd] = (val >> shift) | (val << (32u - shift)); break;
+            }
+        }
+        return 1;
+    }
     /* SDIV T1: upper = 1111 1011 1001 Rn, lower = 1111 Rd 1111 Rm */
     if ((upper & 0xFFF0) == 0xFB90 && (lower & 0xF0F0) == 0xF0F0) {
         int Rd = (lower >> 8) & 0xF;
@@ -1007,6 +1049,43 @@ static int t32_misc(uint32_t pc, uint16_t upper, uint16_t lower) {
         if (rot) val = (val >> rot) | (val << (32 - rot));
         cpu.r[Rd] = val & 0xFFFF;
         return 1;
+    }
+    /* UXTAB/UXTAH/SXTAB/SXTAH T2: upper = 1111 1010 0oo Rn (Rn != 15)
+     *   op ooo: 000=SXTAH, 001=UXTAH, 100=SXTAB, 101=UXTAB
+     * Accumulate forms use Rn≠15; extract-only uses Rn=15 (handled above).
+     * Mask must keep op bits[6:4] and clear only Rn: use FF80 not FF8F
+     * (FF8F cleared op and only matched Rn=1 — second UXTAH in ip4 used Rn=3
+     * and fell through to ldst → PC=0xFE → ROM stray → HardFault). */
+    if ((upper & 0xFF80) == 0xFA00 && (lower & 0xF0C0) == 0xF080) {
+        int Rd  = (lower >> 8) & 0xF;
+        int Rm  = lower & 0xF;
+        int Rn  = upper & 0xF;
+        int rot = ((lower >> 4) & 3) * 8;
+        int op  = (upper >> 4) & 0x7;
+        uint32_t val;
+        if (Rn == 15) {
+            return 0; /* UXTB/UXTH/SXTB/SXTH extract-only — handled above */
+        }
+        val = cpu.r[Rm];
+        if (rot) {
+            val = (val >> rot) | (val << (32 - rot));
+        }
+        switch (op) {
+        case 0x0: /* SXTAH */
+            cpu.r[Rd] = cpu.r[Rn] + (uint32_t)(int32_t)(int16_t)(val & 0xFFFF);
+            return 1;
+        case 0x1: /* UXTAH */
+            cpu.r[Rd] = cpu.r[Rn] + (val & 0xFFFF);
+            return 1;
+        case 0x4: /* SXTAB */
+            cpu.r[Rd] = cpu.r[Rn] + (uint32_t)(int32_t)(int8_t)(val & 0xFF);
+            return 1;
+        case 0x5: /* UXTAB */
+            cpu.r[Rd] = cpu.r[Rn] + (val & 0xFF);
+            return 1;
+        default:
+            break;
+        }
     }
     /* REV T2: upper = 1111 1010 1001 Rm, lower = 1111 Rd 1000 Rm */
     if ((upper & 0xFFF0) == 0xFA90 && (lower & 0xF0FF) == 0xF080) {
@@ -1286,7 +1365,7 @@ int thumb32_step(uint32_t pc, uint16_t upper, uint16_t lower) {
     /* Group 11111: F8xx-FFxx                                              */
     /* ------------------------------------------------------------------ */
     if (top5 == 0x1F) {
-        /* Check misc 32-bit first (SDIV, UDIV, MUL, CLZ etc.) */
+        /* Check misc 32-bit first (SDIV, UDIV, MUL, CLZ, UXTAH etc.) */
         if (t32_misc(pc, upper, lower)) return 1;
         /* Load/Store single */
         t32_ldst_single(pc, upper, lower);

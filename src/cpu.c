@@ -1361,6 +1361,22 @@ static void cpu_set_active_ram_for_exec(void) {
     }
 }
 
+/* Scratch pbufs for failed guest pbuf_alloc (below stacks, above heap). */
+#define MF_PBUF_SCRATCH_BASE  0x2007A000u
+#define MF_PBUF_SCRATCH_HEAD  128u
+#define MF_PBUF_SCRATCH_SLOT  (16u + MF_PBUF_SCRATCH_HEAD + 1600u)
+#define MF_PBUF_SCRATCH_COUNT 8u
+#define MF_PBUF_SCRATCH_END \
+    (MF_PBUF_SCRATCH_BASE + MF_PBUF_SCRATCH_COUNT * MF_PBUF_SCRATCH_SLOT)
+
+static int mf_pbuf_is_scratch(uint32_t p) {
+    return p >= MF_PBUF_SCRATCH_BASE && p < MF_PBUF_SCRATCH_END &&
+           ((p - MF_PBUF_SCRATCH_BASE) % MF_PBUF_SCRATCH_SLOT) == 0u;
+}
+
+/* Last good udp TX pbuf — callee-saved r4/r5 can be smashed by IRQ handlers. */
+static uint32_t mf_udp_tx_pbuf;
+
 /* MegaFlash crt0/libc hot paths — skip millions of emulated store loops. */
 static int guest_megaflash_crt0_accel(uint32_t pc) {
     pc &= ~1u;
@@ -1381,17 +1397,16 @@ static int guest_megaflash_crt0_accel(uint32_t pc) {
     }
     /* pbuf_alloc epilogue — if alloc returned NULL, supply scratch pbuf.
      * Must leave payload headroom so pbuf_add_header (ETH/IP/UDP) can rewind
-     * toward the struct. Place below stacks (≤0x20081000) and above heap. */
+     * toward the struct. Place below stacks (≤0x20081000) and above heap.
+     * type_internal=0x80 (contiguous); free path must not mem_free scratch. */
     if (pc == 0x10013b00u) {
         if (cpu.r[9] == 0u && cpu.r[7] > 0u && cpu.r[7] <= 1600u) {
             static unsigned scratch_idx;
             static int once;
             uint32_t len = cpu.r[7];
-            uint32_t headroom = 128u; /* link + IP + UDP */
-            uint32_t slot = 16u + headroom + 1600u;
-            uint32_t base = 0x2007A000u; /* 8*1744 < 16KiB gap under 0x20080000 */
-            uint32_t p = base + (scratch_idx % 8u) * slot;
-            uint32_t payload = (p + 16u + headroom + 3u) & ~3u;
+            uint32_t p = MF_PBUF_SCRATCH_BASE +
+                         (scratch_idx % MF_PBUF_SCRATCH_COUNT) * MF_PBUF_SCRATCH_SLOT;
+            uint32_t payload = (p + 16u + MF_PBUF_SCRATCH_HEAD + 3u) & ~3u;
             scratch_idx++;
             mem_write32(p + 0u, 0u);
             mem_write32(p + 4u, payload);
@@ -1399,15 +1414,93 @@ static int guest_megaflash_crt0_accel(uint32_t pc) {
             mem_write8(p + 9u, (uint8_t)(len >> 8));
             mem_write8(p + 10u, (uint8_t)len);
             mem_write8(p + 11u, (uint8_t)(len >> 8));
-            mem_write8(p + 12u, 0x80u); /* STRUCT_DATA_CONTIGUOUS | heap */
+            mem_write8(p + 12u, 0x80u); /* STRUCT_DATA_CONTIGUOUS | heap src */
             mem_write8(p + 13u, 0u);
             mem_write8(p + 14u, 1u);
             mem_write8(p + 15u, 0u);
             cpu.r[9] = p;
+            cpu.r[0] = p;
             if (!once++) {
                 fprintf(stderr,
                         "[Init] pbuf_alloc fallback → 0x%08X len=%u headroom=%u\n",
-                        p, (unsigned)len, (unsigned)headroom);
+                        p, (unsigned)len, (unsigned)MF_PBUF_SCRATCH_HEAD);
+            }
+        }
+        return 0;
+    }
+    /* Scratch pbufs must not go through newlib free (not heap blocks). */
+    if (pc == 0x1000df60u || pc == 0x100133fcu) { /* __wrap_free / mem_free */
+        if (mf_pbuf_is_scratch(cpu.r[0])) {
+            static int once;
+            if (!once++) {
+                fprintf(stderr, "[Init] skip free of scratch pbuf 0x%08X\n",
+                        cpu.r[0]);
+            }
+            cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+            pc_updated = 1;
+            return 1;
+        }
+        return 0;
+    }
+    if (pc == 0x100126dcu) { /* lwip_htons — avoid any T32 edge in the body */
+        uint32_t v = cpu.r[0] & 0xffffu;
+        cpu.r[0] = ((v & 0xffu) << 8) | (v >> 8);
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        pc_updated = 1;
+        return 1;
+    }
+    if (pc == 0x100126e6u) { /* lwip_htonl */
+        uint32_t v = cpu.r[0];
+        cpu.r[0] = ((v & 0xffu) << 24) | ((v & 0xff00u) << 8) |
+                   ((v >> 8) & 0xff00u) | (v >> 24);
+        cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+        pc_updated = 1;
+        return 1;
+    }
+    if (pc == 0x1001aaa8u || pc == 0x1001aabau) {
+        /* ip4 bl lwip_htons — complete htons in place (skip BL). */
+        uint32_t v = cpu.r[0] & 0xffffu;
+        cpu.r[0] = ((v & 0xffu) << 8) | (v >> 8);
+        cpu.r[15] = (pc + 4u) | 1u;
+        pc_updated = 1;
+        return 1;
+    }
+    /* Trace udp_sendto_if_src → ip4_output when pbuf goes missing. */
+    if (pc == 0x1001811au) { /* udp: ldrb flags — force UDP_FLAGS_NOCHKSUM to
+                                 * skip ip_chksum_pseudo (LDMIA restore smash). */
+        static int once;
+        uint8_t fl = mem_read8(cpu.r[6] + 16u);
+        if ((fl & 1u) == 0u) {
+            mem_write8(cpu.r[6] + 16u, (uint8_t)(fl | 1u));
+            if (once < 4) {
+                once++;
+                fprintf(stderr, "[Init] udp skip chksum (pcb flags |= NOCHKSUM)\n");
+            }
+        }
+        return 0;
+    }
+    if (pc == 0x100181a4u) { /* udp: mov r5, r0 after header alloc */
+        if (cpu.r[0] >= 0x20000000u && cpu.r[0] < 0x20082000u) {
+            mf_udp_tx_pbuf = cpu.r[0];
+        }
+        return 0;
+    }
+    if (pc == 0x10018134u) { /* udp: mov r0, r5 before bl ip4_output */
+        static int once;
+        if (once < 4) {
+            once++;
+            fprintf(stderr,
+                    "[Init] udp→ip4 r5=0x%08X r4=0x%08X r8=0x%08X saved=0x%08X "
+                    "lr=0x%08X\n",
+                    cpu.r[5], cpu.r[4], cpu.r[8], mf_udp_tx_pbuf, cpu.r[14]);
+        }
+        if (cpu.r[5] < 0x20000000u || cpu.r[5] >= 0x20082000u) {
+            if (cpu.r[4] >= 0x20000000u && cpu.r[4] < 0x20082000u) {
+                cpu.r[5] = cpu.r[4];
+            } else if (mf_udp_tx_pbuf >= 0x20000000u &&
+                       mf_udp_tx_pbuf < 0x20082000u) {
+                cpu.r[5] = mf_udp_tx_pbuf;
+                cpu.r[4] = mf_udp_tx_pbuf;
             }
         }
         return 0;
@@ -1415,17 +1508,51 @@ static int guest_megaflash_crt0_accel(uint32_t pc) {
     /* lwIP ip4_output_if_src requires p->ref == 1 (LWIP_NETIF_TX_SINGLE_PBUF).
      * Under emu, refs can be stale; force and skip the assert so DHCP/UDP TX
      * reaches cyw43_send_ethernet → Bramble WLAN (fake DHCP / TAP).
-     * NULL p must not continue — that hit pbuf_add_header → panic → LOCKUP. */
+     *
+     * NULL r0 at entry: only rescue a SRAM pbuf from udp's r5/r4. Flash
+     * constants (e.g. ip_addr_broadcast) must not be treated as pbufs.
+     *
+     * NULL return must NOT jump to the epilogue before the function prologue has
+     * run: that pops garbage into PC (HardFault at a stack address). */
     if (pc == 0x1001aa3cu || pc == 0x1001aa4cu) {
         uint32_t p = cpu.r[0];
+        if (p == 0u && pc == 0x1001aa3cu) {
+            uint32_t cand = 0;
+            if (cpu.r[5] >= 0x20000000u && cpu.r[5] < 0x20082000u) {
+                cand = cpu.r[5];
+            } else if (cpu.r[4] >= 0x20000000u && cpu.r[4] < 0x20082000u) {
+                cand = cpu.r[4];
+            }
+            if (cand != 0u) {
+                static int rescued;
+                if (rescued < 8) {
+                    rescued++;
+                    fprintf(stderr,
+                            "[Init] ip4_output rescued pbuf r0=0 → 0x%08X "
+                            "(r4=0x%08X r5=0x%08X lr=0x%08X)\n",
+                            cand, cpu.r[4], cpu.r[5], cpu.r[14]);
+                }
+                p = cand;
+                cpu.r[0] = p;
+            }
+        }
         if (p == 0u) {
             static int nullp;
             if (nullp < 8) {
                 nullp++;
-                fprintf(stderr, "[Init] ip4_output NULL pbuf → ERR_BUF\n");
+                fprintf(stderr,
+                        "[Init] ip4_output NULL pbuf → ERR_BUF "
+                        "(pc=0x%08X lr=0x%08X r4=0x%08X r5=0x%08X)\n",
+                        pc, cpu.r[14], cpu.r[4], cpu.r[5]);
             }
             cpu.r[0] = 0xfffffffeu; /* ERR_BUF */
-            cpu.r[15] = 0x1001ab04u | 1u;
+            if (pc == 0x1001aa3cu) {
+                /* Prologue not run — return via LR. */
+                cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
+            } else {
+                /* Frame already pushed at 0x1001aa40 — epilogue is safe. */
+                cpu.r[15] = 0x1001ab04u | 1u;
+            }
             pc_updated = 1;
             return 1;
         }

@@ -564,8 +564,10 @@ int rom_intercept(uint32_t pc) {
             static int stray_logged;
             if (!stray_logged++) {
                 fprintf(stderr,
-                        "[ROM] stray execute at lookup stub (LR=0x%08X) — ignoring\n",
-                        cpu.r[14]);
+                        "[ROM] stray execute at lookup stub (LR=0x%08X) — ignoring "
+                        "(r0=%08X r1=%08X r2=%08X r3=%08X sp=%08X)\n",
+                        cpu.r[14], cpu.r[0], cpu.r[1], cpu.r[2], cpu.r[3],
+                        cpu.r[13]);
             }
             /* Advance past stub instead of returning through stale LR. */
             cpu.r[15] = (pc + 2) | 1u;
