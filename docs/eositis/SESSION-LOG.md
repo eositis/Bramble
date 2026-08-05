@@ -943,5 +943,5 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Causes** | (1) UXTAH accumulate mask `FF8F` only matched Rn=1 — Rn=3 in `ip4_output` → bogus ldst → PC=0xFE; (2) T32 LDMIA PC ignored EXC_RETURN; (3) fake DHCP OFFER parse hit ERR_BUF on 4-byte copy at END option |
 | **Actions** | Fix UXTAH mask; LDMIA EXC_RETURN; pad DHCP replies; keep udp pbuf/NOCHKSUM rescues; strip debug traces |
 | **Validate** | `bramble_tests` 323/323; seeded `-wifi` a2bus: DHCP OFFER+ACK, `connect status: 3`, `WIFI connected`, `NTP: EvtStart()` |
-| **Commit** | (this entry) |
+| **Commit** | Bramble `0f061da`; megaflash-vm `d995305` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
