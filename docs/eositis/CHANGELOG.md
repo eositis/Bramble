@@ -7,6 +7,12 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+_(none)_
+
+---
+
+## 2026-08-05 — `a43963d` — CP TestWifi IP strings + soft _exit
+
 | Change | Reason |
 |--------|--------|
 | Host-accel MegaFlash `FormatIPAddr`; dump `dataBuffer` after TestWifi fill | CP showed WIFI/DNS/NTP OK with IP=`AG` / blank netmask/gw/dns — guest `ntoa`+`strcpy` left empty strings |

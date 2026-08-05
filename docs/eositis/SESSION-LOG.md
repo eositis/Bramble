@@ -954,5 +954,5 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | Status codes from PARAM; IP lines from `dataBuffer` via `FormatIPAddr` — guest path left empty/NUL strings (“AG” = leftover screen). Abort’s C++ terminate hits `_exit` BKPT → LOCKUP |
 | **Actions** | Host-accel `FormatIPAddr` (real IP word → ASCII); dump dataBuffer after fill; `_exit` → WFI; rebuild megaflash-vm `bramble`; docs |
 | **Validate** | `bramble_tests` 323/323; overlay rebuild |
-| **Commit** | (pending) |
+| **Commit** | Bramble `a43963d`; megaflash-vm `24ce4dc` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
