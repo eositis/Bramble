@@ -1088,3 +1088,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | megaflash-vm overlay rebuild; bramble_tests 323/323 |
 | **Commit** | megaflash-vm `30aeae6`; Bramble `efeafcd` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-06 — TFTP DoTFTPRun hung in strcmp
+
+| Field | Detail |
+|-------|--------|
+| **Request** | TFTP locked up ~10 min until force-quit MAME; Status/Blocks empty |
+| **Cause** | `StartTFTP(flag=1)` → `SaveTFTPLastServer` → newlib word/IT `strcmp` infinite-loops under Thumb emu (PC stuck `0x1002a5xx`); long_cmd correctly suppressed unstick so MAME froze with BUSY |
+| **Actions** | Host-accel `strcmp`/`strncpy` in Bramble `cpu.c`; a2bus host-complete `SaveTFTPLastServer` + persist config; docs |
+| **Validate** | `bramble_tests` 323/323; megaflash-vm overlay rebuild |
+| **Commit** | Bramble `f068d14`; megaflash-vm `9dbfc29` |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
