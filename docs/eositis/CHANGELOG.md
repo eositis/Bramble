@@ -11,6 +11,14 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-06 — megaflash-vm `30aeae6` — post-TestWifi BusLoop HardFault
+
+| Change | Reason |
+|--------|--------|
+| Docs: end DoTestWifi long_cmd at pop; arm DoTFTPStatus; skip unstick in strcpy/TFTPFormat | Unstick after TestWifi HardFaulted core1 (`PC="RunT…"`); TFTP never ran |
+
+---
+
 ## 2026-08-06 — megaflash-vm `25da8bf` — TestWifi complete from netif
 
 | Change | Reason |
