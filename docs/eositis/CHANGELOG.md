@@ -11,6 +11,14 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-06 — megaflash-vm `c07513e` — host FormatIPAddr for CP IPs
+
+| Change | Reason |
+|--------|--------|
+| Docs: host FormatIPAddr + always fill dataBuffer from testResult/netif | CP still showed `BXX`/`AS` after BUSY-hold fixes |
+
+---
+
 ## 2026-08-06 — megaflash-vm `5f6345c` — unstick hang + NTP success sticky
 
 | Change | Reason |

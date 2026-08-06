@@ -1033,3 +1033,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | overlay rebuild; bramble_tests 323/323 |
 | **Commit** | megaflash-vm `5f6345c`; Bramble `b94aefc` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-06 — Test Wifi IPs still garbled (FormatIPAddr junk)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | No crash on Test Wifi, but IPs still corrupt (`BXX`/`AS`); TFTP still fails |
+| **Cause** | Guest `ip4addr_ntoa`+`strcpy` leave short non-NUL junk; fill-only-if-empty skipped rewrite; CP prints leftovers |
+| **Actions** | Host-complete FormatIPAddr; always rewrite four dataBuffer IP strings from testResult/netif; DoTFTPRun long_cmd |
+| **Validate** | overlay rebuild; bramble_tests 323/323 |
+| **Commit** | megaflash-vm `c07513e`; Bramble docs *(pending)* |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
