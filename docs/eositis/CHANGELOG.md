@@ -11,7 +11,7 @@ Scope: local commits on `main` after clone.
 
 ---
 
-## 2026-08-06 — megaflash-vm host bump malloc (TFTP Starting)
+## 2026-08-06 — `4429abb` + megaflash-vm `be5b894` — host bump malloc (TFTP Starting)
 
 | Change | Reason |
 |--------|--------|
