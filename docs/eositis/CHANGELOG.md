@@ -11,6 +11,14 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-06 — megaflash-vm `4cca457` — DoTestWifi veneer long_cmd
+
+| Change | Reason |
+|--------|--------|
+| Docs: arm long_cmd on DoTestWifi veneer + TestWifi; core0-PC BUSY skip | Unstick mid-test aborted FormatIPAddr |
+
+---
+
 ## 2026-08-06 — megaflash-vm `c56e710` — skip second GetNetworkTime
 
 | Change | Reason |

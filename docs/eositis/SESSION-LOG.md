@@ -1055,3 +1055,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | overlay rebuild; bramble_tests 323/323 |
 | **Commit** | megaflash-vm `c56e710`; Bramble `5482a3a` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-06 — DoTestWifi long_cmd missed (veneer path)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | UI still garbled; log shows TestWifi started then BUSY unstick at sleep_until / abort |
+| **Cause** | BusLoop RAM calls `__DoTestWifi_veneer`; long_cmd only began on flash entry and never stuck → unstick mid-wait |
+| **Actions** | Begin long_cmd on veneer + core0 TestWifi; skip unstick while core0 in TestWifi/RunTestWifi/ConnectWifi |
+| **Validate** | overlay rebuild; bramble_tests 323/323 |
+| **Commit** | megaflash-vm `4cca457`; Bramble docs *(pending)* |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
