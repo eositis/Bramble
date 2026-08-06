@@ -11,6 +11,15 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-06 — `strcmp`/`strncpy` host accel (TFTP SaveLastServer hang)
+
+| Change | Reason |
+|--------|--------|
+| Host-accelerate newlib `strcmp` / `strncpy` in `cpu.c` | Word/IT `strcmp` infinite-looped under Thumb emu; DoTFTPRun `SaveTFTPLastServer` locked MAME for minutes |
+| Docs: megaflash-vm host-completes `SaveTFTPLastServer` | Avoid SPI path; persist last TFTP server to user-config |
+
+---
+
 ## 2026-08-06 — megaflash-vm `30aeae6` — post-TestWifi BusLoop HardFault
 
 | Change | Reason |

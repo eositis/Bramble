@@ -1614,6 +1614,59 @@ static int guest_megaflash_crt0_accel(uint32_t pc) {
         }
         return 1;
     }
+    /* newlib strncpy — word path same class as strcpy/strcmp under Thumb emu. */
+    if (pc == 0x100286ccu) {
+        uint32_t dst = cpu.r[0];
+        uint32_t src = cpu.r[1];
+        uint32_t n = cpu.r[2];
+        uint32_t i;
+        uint8_t hit_nul = 0;
+        if (n > (8u * 1024u * 1024u)) {
+            n = 8u * 1024u * 1024u;
+        }
+        for (i = 0; i < n; i++) {
+            uint8_t c = hit_nul ? 0u : mem_read8(src + i);
+            if (!hit_nul && c == 0u) {
+                hit_nul = 1;
+            }
+            mem_write8(dst + i, c);
+        }
+        /* r0 stays dest. */
+        cpu.r[15] = cpu.r[14] & ~1u;
+        pc_updated = 1;
+        static int logged;
+        if (!logged++) {
+            fprintf(stderr, "[Init] strncpy fast-path active\n");
+        }
+        return 1;
+    }
+    /* newlib strcmp — word/IT path infinite-loops under Thumb emu (DoTFTPRun
+     * SaveTFTPLastServer stuck for minutes with PC in 0x1002a5xx). */
+    if (pc == 0x1002a420u) {
+        uint32_t a = cpu.r[0];
+        uint32_t b = cpu.r[1];
+        uint32_t i;
+        int32_t diff = 0;
+        for (i = 0; i < (8u * 1024u * 1024u); i++) {
+            uint8_t ca = mem_read8(a + i);
+            uint8_t cb = mem_read8(b + i);
+            if (ca != cb) {
+                diff = (int32_t)ca - (int32_t)cb;
+                break;
+            }
+            if (ca == 0u) {
+                break;
+            }
+        }
+        cpu.r[0] = (uint32_t)diff;
+        cpu.r[15] = cpu.r[14] & ~1u;
+        pc_updated = 1;
+        static int logged;
+        if (!logged++) {
+            fprintf(stderr, "[Init] strcmp fast-path active\n");
+        }
+        return 1;
+    }
     /* newlib strcpy — word path corrupts under Thumb emu; FormatIPAddr then
      * leaves dataBuffer empty while TestWifi still reports NETERR_NONE. */
     if (pc == 0x1002a5dcu) {
