@@ -1163,7 +1163,7 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | `cpu_bind_core_context` cleared IT every `dual_core_step` insn (a2bus has no `-jit`); `_Znwj` movcc always forced size=1. Prior JIT-only fix never ran. |
 | **Actions** | Preserve IT across bind; 32-bit IT skip width; host-complete `_Znwj`/`_Znaj` in RunTFTP bump; regression test; MAME-BRIDGE.md |
 | **Validate** | bramble_tests 324/324; megaflash-vm overlay rebuild |
-| **Commit** | (pending) |
+| **Commit** | Bramble `987da61`; megaflash-vm `1dc0b5c` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
 
 ## 2026-08-06 — TFTP abort: JIT IT forced new size=1

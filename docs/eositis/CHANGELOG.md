@@ -7,6 +7,12 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+—
+
+---
+
+## 2026-08-06 — `987da61` + megaflash-vm `1dc0b5c` — preserve Thumb IT across bind
+
 | Change | Reason |
 |--------|--------|
 | Preserve Thumb IT across `cpu_bind_core_context` | `dual_core_step` cleared IT every insn → `_Znwj` movcc always set size=1 → TFTP Idle |
