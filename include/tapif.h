@@ -10,7 +10,7 @@
  * Subnet: guest 192.168.4.2 / host 192.168.4.1 (matches CYW43 DHCP).
  *
  * Usage: ./bramble firmware.uf2 -wifi -tap <ifname>
- * macOS internet: sudo scripts/macos-cyw43-pf-nat.sh enable
+ * macOS: UDP (DNS/NTP/TFTP) uses userspace NAT; pf optional for TCP.
  */
 
 /* Open host interface. Returns fd or -1 on error. */

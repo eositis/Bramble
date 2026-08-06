@@ -1,13 +1,17 @@
 # macOS CYW43 host networking
 
-Bramble’s `-wifi` emulates the Pico W CYW43 radio. With `-tap` / `-net` on macOS, WLAN Ethernet frames are bridged through a **utun** interface so guest IP traffic can reach the host stack and (with pf NAT) the internet.
+Bramble’s `-wifi` emulates the Pico W CYW43 radio. With `-tap` / `-net` on macOS, WLAN Ethernet frames are bridged so guest IP traffic can reach the internet through the host.
 
 ## Model (radio stub → host)
 
 ```
-Guest lwIP / cyw43_arch  ──gSPI──►  Bramble cyw43.c (fake radio)  ──frames──►  tapif (utun)
-                                                                              │
-                                                                     pf NAT → host DNS/NTP/Internet
+Guest lwIP / cyw43_arch  ──gSPI──►  Bramble cyw43.c (fake radio)
+                                         │
+                    ┌────────────────────┴────────────────────┐
+                    │ UDP (DNS/NTP/TFTP): userspace NAT       │
+                    │   host UDP sockets ↔ Ethernet inject    │
+                    │ TCP/ICMP (optional): utun + pf NAT      │
+                    └─────────────────────────────────────────┘
 ```
 
 CYW43 is an API-shaped stub: accept SSID/password, synthesize association, and bridge Ethernet so guest lwIP talks to the world through the host. Full chip fidelity (CLM quirks, advanced radio features) can be filled in later.
@@ -16,31 +20,26 @@ CYW43 is an API-shaped stub: accept SSID/password, synthesize association, and b
 |------|----------|
 | SSID | `WLC_SET_SSID` — empty refused; non-empty joins synthetically |
 | Password | `WLC_SET_WSEC_PMK` — accepted/logged; not validated against a real AP |
-| Addressing | Guest `192.168.4.2/24`, gateway `192.168.4.1`, DNS **`8.8.8.8`** via Bramble fake DHCP (guest `dhcp_start` → gSPI TX → OFFER/ACK RX). DNS is public so queries NAT through the host; the gateway IP has no DNS listener. |
+| Addressing | Guest `192.168.4.2/24`, gateway `192.168.4.1`, DNS **`8.8.8.8`** via Bramble fake DHCP |
+| UDP path | **Userspace NAT** in `tapif.c` — guest UDP payloads are sent on host sockets; replies are injected as WLAN RX. Does **not** require pf. |
+| TCP/ICMP | Best-effort via utun + optional `scripts/macos-cyw43-pf-nat.sh` |
 | Host | Virtual gateway only — does **not** join your Mac’s Wi‑Fi with the guest SSID |
-| a2bus DNS/NTP/TFTP | Same path as DHCP: guest lwIP UDP/TCP through CYW43 to TAP/utun. No host-side DNS/SNTP completion inside the Pico. |
+| a2bus DNS/NTP/TFTP | Guest lwIP owns the protocols; Bramble only forwards packets. No host-side DNS/SNTP completion inside the Pico. |
 
 ## Quick start (stock Bramble)
 
 ```bash
-# Optional: enable NAT so 192.168.4.0/24 reaches the internet
-sudo ./scripts/macos-cyw43-pf-nat.sh enable
+# UDP DNS/NTP work without pf. Optional for TCP:
+# sudo ./scripts/macos-cyw43-pf-nat.sh enable
 
-# Run Pico W firmware
-./bramble firmware.uf2 -wifi -tap bramble0 -arch m33   # -arch as needed
+./bramble firmware.uf2 -wifi -tap bramble0 -arch m33
 ```
 
-`-tap` on macOS opens the next `utunN` (the name argument is ignored for allocation). Bramble configures `192.168.4.1` ↔ peer `192.168.4.2` via `ifconfig` (requires the same elevated session as `-tap`).
+`-tap` on macOS opens the next `utunN` (the name argument is ignored for allocation). Bramble configures `192.168.4.1` ↔ peer `192.168.4.2` via `ifconfig` when elevated (UDP NAT still works if ifconfig fails).
 
 ## MegaFlash + MAME
 
 From **megaflash-vm**, `scripts/run-megaflash-mame.sh` integrates host net into startup (`-wifi -tap` + askpass). Guest Test Wifi / NTP go through CYW43 + this bridge after `cyw43_arch_init` completes and BusLoop is launched. See megaflash-vm `docs/MAME-BRIDGE.md`.
-
-Disable NAT later:
-
-```bash
-sudo ./scripts/macos-cyw43-pf-nat.sh disable
-```
 
 ## Dual-core note
 
@@ -50,12 +49,18 @@ sudo ./scripts/macos-cyw43-pf-nat.sh disable
 
 | Symptom | Check |
 |---------|--------|
-| `utun connect failed` / `ifconfig failed` | Approve the admin dialog; Bramble must run elevated for `-tap` |
-| Guest gets DHCP but no internet / DNS timeout | Confirm log shows `dns 8.8.8.8` and `[CYW43] TAP TX UDP …:53`; then `sudo ./scripts/macos-cyw43-pf-nat.sh status`. Expect `[CYW43] TAP RX UDP` replies. Missing `-tap` logs `drop WLAN TX — no -tap`. |
-| DHCP still says `dns 192.168.4.1` | Rebuild Bramble / megaflash-vm overlay — older builds advertised the gateway as DNS (nothing listens on host `:53`) |
+| `utun connect failed` | Approve the admin dialog if using elevated launcher |
+| DHCP OK, `TAP TX UDP 8.8.8.8:53`, no reply | Need build with userspace UDP NAT. Expect `[TAP] UDP NAT → …` then `[TAP] UDP NAT ← …` and `[CYW43] TAP RX UDP`. |
+| DHCP still says `dns 192.168.4.1` | Rebuild — older builds advertised the gateway as DNS |
 | BusLoop dies / MegaFlash not found | Rebuild overlay; ensure BusLoop launches **after** `cyw43 loaded ok`. Emergency: `BRAMBLE_A2BUS_STUB_WIFI=1` |
 | Admin dialog cancelled | Re-run launcher; or `NO_HOST_NET=1` for radio-only |
 
-## Slirp fallback
+## pf NAT (optional)
 
-If pf is undesirable, a userspace NAT/slirp path can replace utun+pf later behind the same `tapif_*` API. Not implemented yet.
+Kernel pf NAT is **optional** on macOS. UDP (DNS/NTP/TFTP) uses userspace sockets. Enable pf only if you need guest TCP through the tunnel:
+
+```bash
+sudo ./scripts/macos-cyw43-pf-nat.sh enable
+sudo ./scripts/macos-cyw43-pf-nat.sh status
+sudo ./scripts/macos-cyw43-pf-nat.sh disable
+```

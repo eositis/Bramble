@@ -978,3 +978,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | `bramble_tests` 323/323; rebuild Bramble + megaflash-vm overlay |
 | **Commit** | Bramble `fa90f61`; megaflash-vm `ed85cd6` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-07-30 — TAP TX DNS but no RX: userspace UDP NAT
+
+| Field | Detail |
+|-------|--------|
+| **Request** | After public DNS DHCP: still Abort; log shows `TAP TX UDP 8.8.8.8:53` twice, never TAP RX |
+| **Cause** | Writing DNS to utun + pf NAT does not deliver replies on this Mac; guest times out → throw → `_exit` |
+| **Actions** | Darwin tapif userspace UDP NAT (host sockets → inject Ethernet); RX ring; pf optional for TCP; docs |
+| **Validate** | `bramble_tests` 323/323; overlay rebuild; host UDP DNS smoke OK |
+| **Commit** | (pending) |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |

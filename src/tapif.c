@@ -248,6 +248,7 @@ int tapif_write(int fd, const uint8_t *buf, int len) {
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <stdint.h>
+#include <time.h>
 
 /* CYW43 guest default MAC / fake BSSID used as gateway L2 address */
 static const uint8_t k_guest_mac[6] = {0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE};
@@ -255,14 +256,253 @@ static const uint8_t k_gw_mac[6]    = {0x02, 0xCA, 0xFE, 0xBA, 0xBE, 0x01};
 static const uint8_t k_host_ip[4]   = {192, 168, 4, 1};
 
 static char utun_ifname[IFNAMSIZ];
-static uint8_t pending_eth[1518];
-static int pending_eth_len;
 static int darwin_active;
 
+/* RX ring: ARP replies + userspace UDP NAT replies (and optional utun). */
+#define DARWIN_RXQ 16
+static uint8_t darwin_rxq[DARWIN_RXQ][1518];
+static int darwin_rxq_len[DARWIN_RXQ];
+static int darwin_rxq_head, darwin_rxq_tail, darwin_rxq_count;
+
+/* Userspace UDP NAT — pf/utun does not reliably forward guest→internet on macOS. */
+#define DARWIN_UDP_FLOWS 32
+typedef struct {
+    int fd;
+    uint32_t guest_ip;    /* network order */
+    uint16_t guest_port;  /* host order */
+    uint32_t remote_ip;   /* network order */
+    uint16_t remote_port; /* host order */
+    time_t last_used;
+} darwin_udp_flow_t;
+static darwin_udp_flow_t darwin_udp_flows[DARWIN_UDP_FLOWS];
+
 static void queue_pending_eth(const uint8_t *frame, int len) {
-    if (len <= 0 || len > (int)sizeof(pending_eth)) return;
-    memcpy(pending_eth, frame, (size_t)len);
-    pending_eth_len = len;
+    if (len <= 0 || len > 1518) return;
+    if (darwin_rxq_count >= DARWIN_RXQ) {
+        /* Drop oldest */
+        darwin_rxq_head = (darwin_rxq_head + 1) % DARWIN_RXQ;
+        darwin_rxq_count--;
+    }
+    memcpy(darwin_rxq[darwin_rxq_tail], frame, (size_t)len);
+    darwin_rxq_len[darwin_rxq_tail] = len;
+    darwin_rxq_tail = (darwin_rxq_tail + 1) % DARWIN_RXQ;
+    darwin_rxq_count++;
+}
+
+static int dequeue_pending_eth(uint8_t *buf, int maxlen) {
+    if (darwin_rxq_count <= 0) return 0;
+    int n = darwin_rxq_len[darwin_rxq_head];
+    if (n > maxlen) n = maxlen;
+    memcpy(buf, darwin_rxq[darwin_rxq_head], (size_t)n);
+    darwin_rxq_head = (darwin_rxq_head + 1) % DARWIN_RXQ;
+    darwin_rxq_count--;
+    return n;
+}
+
+static uint16_t ipv4_checksum(const uint8_t *hdr, int len) {
+    uint32_t sum = 0;
+    for (int i = 0; i < len; i += 2)
+        sum += ((uint32_t)hdr[i] << 8) | hdr[i + 1];
+    while (sum >> 16)
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    return (uint16_t)(~sum);
+}
+
+static void darwin_udp_nat_close_all(void) {
+    for (int i = 0; i < DARWIN_UDP_FLOWS; i++) {
+        if (darwin_udp_flows[i].fd >= 0) {
+            close(darwin_udp_flows[i].fd);
+            darwin_udp_flows[i].fd = -1;
+        }
+    }
+}
+
+static darwin_udp_flow_t *darwin_udp_flow_find(uint32_t gip, uint16_t gport,
+                                               uint32_t rip, uint16_t rport) {
+    for (int i = 0; i < DARWIN_UDP_FLOWS; i++) {
+        darwin_udp_flow_t *f = &darwin_udp_flows[i];
+        if (f->fd < 0) continue;
+        if (f->guest_ip == gip && f->guest_port == gport &&
+            f->remote_ip == rip && f->remote_port == rport)
+            return f;
+    }
+    return NULL;
+}
+
+static darwin_udp_flow_t *darwin_udp_flow_alloc(void) {
+    for (int i = 0; i < DARWIN_UDP_FLOWS; i++) {
+        if (darwin_udp_flows[i].fd < 0)
+            return &darwin_udp_flows[i];
+    }
+    /* Evict oldest */
+    int oldest = 0;
+    for (int i = 1; i < DARWIN_UDP_FLOWS; i++) {
+        if (darwin_udp_flows[i].last_used < darwin_udp_flows[oldest].last_used)
+            oldest = i;
+    }
+    close(darwin_udp_flows[oldest].fd);
+    darwin_udp_flows[oldest].fd = -1;
+    return &darwin_udp_flows[oldest];
+}
+
+/* Build Ethernet+IPv4+UDP reply toward guest and queue it. */
+static void darwin_queue_udp_reply(uint32_t guest_ip, uint16_t guest_port,
+                                   uint32_t remote_ip, uint16_t remote_port,
+                                   const uint8_t *payload, int payload_len) {
+    if (payload_len < 0 || payload_len > 1400) return;
+
+    uint8_t frame[1518];
+    memset(frame, 0, sizeof(frame));
+    int off = 0;
+
+    memcpy(frame + off, k_guest_mac, 6); off += 6;
+    memcpy(frame + off, k_gw_mac, 6);    off += 6;
+    frame[off++] = 0x08; frame[off++] = 0x00;
+
+    int ip_off = off;
+    frame[off++] = 0x45;
+    frame[off++] = 0x00;
+    int ip_len_off = off; off += 2;
+    frame[off++] = 0x00; frame[off++] = 0x00; /* id */
+    frame[off++] = 0x40; frame[off++] = 0x00; /* DF */
+    frame[off++] = 64;
+    frame[off++] = 17; /* UDP */
+    int ip_csum_off = off; off += 2;
+    memcpy(frame + off, &remote_ip, 4); off += 4;
+    memcpy(frame + off, &guest_ip, 4);  off += 4;
+
+    int udp_off = off;
+    frame[off++] = (uint8_t)(remote_port >> 8);
+    frame[off++] = (uint8_t)(remote_port & 0xFF);
+    frame[off++] = (uint8_t)(guest_port >> 8);
+    frame[off++] = (uint8_t)(guest_port & 0xFF);
+    int udp_len_off = off; off += 2;
+    frame[off++] = 0; frame[off++] = 0; /* UDP checksum = 0 (IPv4 OK) */
+    memcpy(frame + off, payload, (size_t)payload_len);
+    off += payload_len;
+
+    int udp_total = off - udp_off;
+    int ip_total = off - ip_off;
+    frame[udp_len_off]     = (uint8_t)(udp_total >> 8);
+    frame[udp_len_off + 1] = (uint8_t)(udp_total & 0xFF);
+    frame[ip_len_off]      = (uint8_t)(ip_total >> 8);
+    frame[ip_len_off + 1]  = (uint8_t)(ip_total & 0xFF);
+
+    uint16_t csum = ipv4_checksum(frame + ip_off, 20);
+    frame[ip_csum_off]     = (uint8_t)(csum >> 8);
+    frame[ip_csum_off + 1] = (uint8_t)(csum & 0xFF);
+
+    queue_pending_eth(frame, off);
+
+    {
+        static int rx_logged;
+        if (rx_logged < 8) {
+            rx_logged++;
+            const uint8_t *r = (const uint8_t *)&remote_ip;
+            fprintf(stderr,
+                    "[TAP] UDP NAT ← %u.%u.%u.%u:%u (%d payload bytes)\n",
+                    r[0], r[1], r[2], r[3], (unsigned)remote_port, payload_len);
+            fflush(stderr);
+        }
+    }
+}
+
+/* Poll host UDP sockets; queue any replies as Ethernet frames. */
+static void darwin_udp_nat_poll(void) {
+    uint8_t payload[1400];
+    for (int i = 0; i < DARWIN_UDP_FLOWS; i++) {
+        darwin_udp_flow_t *f = &darwin_udp_flows[i];
+        if (f->fd < 0) continue;
+        for (;;) {
+            struct sockaddr_in from;
+            socklen_t fromlen = sizeof(from);
+            ssize_t n = recvfrom(f->fd, payload, sizeof(payload), 0,
+                                 (struct sockaddr *)&from, &fromlen);
+            if (n < 0) {
+                if (errno == EAGAIN || errno == EWOULDBLOCK) break;
+                close(f->fd);
+                f->fd = -1;
+                break;
+            }
+            uint32_t rip = from.sin_addr.s_addr;
+            uint16_t rport = ntohs(from.sin_port);
+            f->last_used = time(NULL);
+            darwin_queue_udp_reply(f->guest_ip, f->guest_port,
+                                   rip, rport, payload, (int)n);
+        }
+    }
+}
+
+/* Forward guest UDP via host socket. Returns 1 if handled. */
+static int darwin_udp_nat_tx(const uint8_t *eth, int len) {
+    if (len < 14 + 20 + 8) return 0;
+    if (eth[12] != 0x08 || eth[13] != 0x00) return 0;
+
+    const uint8_t *ip = eth + 14;
+    if ((ip[0] >> 4) != 4) return 0;
+    int ihl = (ip[0] & 0x0F) * 4;
+    if (ihl < 20 || ip[9] != 17) return 0; /* not UDP */
+    if (len < 14 + ihl + 8) return 0;
+
+    const uint8_t *udp = ip + ihl;
+    uint16_t sport = ((uint16_t)udp[0] << 8) | udp[1];
+    uint16_t dport = ((uint16_t)udp[2] << 8) | udp[3];
+    uint16_t ulen  = ((uint16_t)udp[4] << 8) | udp[5];
+    int payload_len = (int)ulen - 8;
+    if (payload_len < 0) return 0;
+    if (14 + ihl + 8 + payload_len > len)
+        payload_len = len - 14 - ihl - 8;
+
+    uint32_t sip, dip;
+    memcpy(&sip, ip + 12, 4);
+    memcpy(&dip, ip + 16, 4);
+
+    /* Leave packets aimed at the virtual gateway to utun (rare). */
+    if (memcmp(&dip, k_host_ip, 4) == 0)
+        return 0;
+
+    darwin_udp_flow_t *f = darwin_udp_flow_find(sip, sport, dip, dport);
+    if (!f) {
+        f = darwin_udp_flow_alloc();
+        int s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (s < 0) {
+            fprintf(stderr, "[TAP] UDP NAT socket failed: %s\n", strerror(errno));
+            return 1; /* consumed but failed */
+        }
+        int flags = fcntl(s, F_GETFL, 0);
+        if (flags != -1)
+            fcntl(s, F_SETFL, flags | O_NONBLOCK);
+        f->fd = s;
+        f->guest_ip = sip;
+        f->guest_port = sport;
+        f->remote_ip = dip;
+        f->remote_port = dport;
+    }
+    f->last_used = time(NULL);
+
+    struct sockaddr_in dest;
+    memset(&dest, 0, sizeof(dest));
+    dest.sin_family = AF_INET;
+    dest.sin_port = htons(dport);
+    dest.sin_addr.s_addr = dip;
+
+    const uint8_t *payload = udp + 8;
+    ssize_t n = sendto(f->fd, payload, (size_t)payload_len, 0,
+                       (struct sockaddr *)&dest, sizeof(dest));
+    if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+        fprintf(stderr, "[TAP] UDP NAT sendto failed: %s\n", strerror(errno));
+    } else {
+        static int tx_logged;
+        if (tx_logged < 12) {
+            tx_logged++;
+            const uint8_t *d = (const uint8_t *)&dip;
+            fprintf(stderr,
+                    "[TAP] UDP NAT → %u.%u.%u.%u:%u (%d payload bytes)\n",
+                    d[0], d[1], d[2], d[3], (unsigned)dport, payload_len);
+            fflush(stderr);
+        }
+    }
+    return 1;
 }
 
 /* Answer ARP who-has 192.168.4.1 — return 1 if handled. */
@@ -316,11 +556,10 @@ static int darwin_configure_utun(const char *ifname) {
 }
 
 static void darwin_try_pf_nat(void) {
-    /* Prefer project helper script if present beside cwd or via BRAMBLE_PF_NAT. */
+    /* Optional: TCP/ICMP via kernel. UDP uses userspace NAT regardless. */
     const char *script = getenv("BRAMBLE_PF_NAT");
     char local[512];
     if (!script || !script[0]) {
-        /* Try relative to common layouts */
         static const char *candidates[] = {
             "scripts/macos-cyw43-pf-nat.sh",
             "../Bramble/scripts/macos-cyw43-pf-nat.sh",
@@ -336,17 +575,20 @@ static void darwin_try_pf_nat(void) {
     if (script && script[0]) {
         snprintf(local, sizeof(local), "sh '%s' enable 2>/dev/null", script);
         if (run_cmd(local) == 0) {
-            fprintf(stderr, "[TAP] pf NAT enabled via %s\n", script);
+            fprintf(stderr, "[TAP] pf NAT enabled via %s (TCP/ICMP; UDP is userspace)\n",
+                    script);
             return;
         }
     }
-    fprintf(stderr, "[TAP] pf NAT not auto-enabled. For internet access run:\n");
-    fprintf(stderr, "[TAP]   sudo scripts/macos-cyw43-pf-nat.sh enable\n");
-    fprintf(stderr, "[TAP] Guest can still reach host %s on the utun.\n", TAP_HOST_IP);
+    fprintf(stderr, "[TAP] pf NAT optional (UDP DNS/NTP/TFTP use userspace NAT)\n");
 }
 
 int tapif_open(const char *name) {
     (void)name; /* utun unit is assigned by the kernel */
+
+    for (int i = 0; i < DARWIN_UDP_FLOWS; i++)
+        darwin_udp_flows[i].fd = -1;
+    darwin_rxq_head = darwin_rxq_tail = darwin_rxq_count = 0;
 
     int fd = socket(PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL);
     if (fd < 0) {
@@ -391,10 +633,10 @@ int tapif_open(const char *name) {
 
     memset(utun_ifname, 0, sizeof(utun_ifname));
     strncpy(utun_ifname, ifname, sizeof(utun_ifname) - 1);
-    pending_eth_len = 0;
     darwin_active = 1;
 
-    fprintf(stderr, "[TAP] macOS utun '%s' opened (fd=%d) — L3 bridge for CYW43\n",
+    fprintf(stderr,
+            "[TAP] macOS utun '%s' opened (fd=%d) — UDP userspace NAT + L3 bridge\n",
             utun_ifname, fd);
 
     darwin_configure_utun(utun_ifname);
@@ -407,7 +649,8 @@ void tapif_close(int fd) {
         if (darwin_active && utun_ifname[0]) {
             fprintf(stderr, "[TAP] Closed utun '%s'\n", utun_ifname);
         }
-        pending_eth_len = 0;
+        darwin_udp_nat_close_all();
+        darwin_rxq_count = 0;
         darwin_active = 0;
         utun_ifname[0] = '\0';
         close(fd);
@@ -417,15 +660,12 @@ void tapif_close(int fd) {
 int tapif_read(int fd, uint8_t *buf, int maxlen) {
     if (fd < 0) return -1;
 
-    if (pending_eth_len > 0) {
-        int n = pending_eth_len;
-        if (n > maxlen) n = maxlen;
-        memcpy(buf, pending_eth, (size_t)n);
-        pending_eth_len = 0;
-        return n;
-    }
+    darwin_udp_nat_poll();
 
-    /* utun: 4-byte AF family (network order) + IP packet */
+    int q = dequeue_pending_eth(buf, maxlen);
+    if (q > 0) return q;
+
+    /* utun: 4-byte AF family (network order) + IP packet (TCP/ICMP via pf) */
     uint8_t raw[4 + 1500];
     ssize_t n = read(fd, raw, sizeof(raw));
     if (n < 0) {
@@ -460,11 +700,15 @@ int tapif_write(int fd, const uint8_t *buf, int len) {
         return len; /* consumed; reply queued for tapif_read */
     }
 
-    /* IPv4 Ethernet → utun */
     if (buf[12] != 0x08 || buf[13] != 0x00) {
         return len; /* drop non-IPv4 quietly */
     }
 
+    /* UDP (DNS/NTP/TFTP): userspace NAT — does not need pf */
+    if (darwin_udp_nat_tx(buf, len))
+        return len;
+
+    /* Other IPv4 (TCP/ICMP): best-effort via utun + optional pf */
     int ip_len = len - 14;
     if (ip_len < 20) return -1;
 
