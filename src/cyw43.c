@@ -433,9 +433,13 @@ static void cyw43_handle_ioctl(const uint8_t *buf, int len) {
  * Fake DHCP Server (assigns 192.168.4.2 to firmware, no real network needed)
  * ======================================================================== */
 
-/* Fixed IP addressing for the virtual WiFi network */
+/* Fixed IP addressing for the virtual WiFi network.
+ * DNS must be a public resolver — not 192.168.4.1. The host utun address is
+ * only a gateway; nothing listens on :53 there, so guest DNS to the gateway
+ * never gets a reply. With pf/iptables NAT, 8.8.8.8 reaches the internet. */
 static const uint8_t dhcp_client_ip[4]  = {192, 168,   4, 2};
 static const uint8_t dhcp_server_ip[4]  = {192, 168,   4, 1};
+static const uint8_t dhcp_dns_ip[4]     = {8, 8, 8, 8};
 static const uint8_t dhcp_subnet[4]     = {255, 255, 255, 0};
 static const uint8_t dhcp_lease_time[4] = {0, 0, 14, 16};  /* 3600 s */
 
@@ -517,7 +521,7 @@ static void cyw43_send_dhcp_reply(const uint8_t *eth_req, int eth_len, uint8_t r
     frame[off++] =  3; frame[off++] = 4;
     memcpy(frame + off, dhcp_server_ip, 4);     off += 4;  /* router */
     frame[off++] =  6; frame[off++] = 4;
-    memcpy(frame + off, dhcp_server_ip, 4);     off += 4;  /* DNS */
+    memcpy(frame + off, dhcp_dns_ip, 4);        off += 4;  /* DNS (public) */
     frame[off++] = 255;                                    /* end */
     /* lwIP dhcp_parse_reply under Thumb emu issues a 4-byte pbuf_copy_partial
      * at the END option offset (IT/cmp edge). Trailing pad makes that read
@@ -545,12 +549,15 @@ static void cyw43_send_dhcp_reply(const uint8_t *eth_req, int eth_len, uint8_t r
 
     cyw43_queue_rx_data(frame, off);
 
-    fprintf(stderr, "[CYW43] DHCP %s → %d.%d.%d.%d/24 gw/dns %d.%d.%d.%d\n",
+    fprintf(stderr,
+            "[CYW43] DHCP %s → %d.%d.%d.%d/24 gw %d.%d.%d.%d dns %d.%d.%d.%d\n",
             reply_type == 2 ? "OFFER" : "ACK",
             dhcp_client_ip[0], dhcp_client_ip[1],
             dhcp_client_ip[2], dhcp_client_ip[3],
             dhcp_server_ip[0], dhcp_server_ip[1],
-            dhcp_server_ip[2], dhcp_server_ip[3]);
+            dhcp_server_ip[2], dhcp_server_ip[3],
+            dhcp_dns_ip[0], dhcp_dns_ip[1],
+            dhcp_dns_ip[2], dhcp_dns_ip[3]);
     fflush(stderr);
 }
 
@@ -658,11 +665,43 @@ static void cyw43_wlan_tx_complete(void) {
                 }
                 /* Always try fake DHCP first (no real network needed) */
                 if (!cyw43_handle_dhcp(eth, eth_len)) {
-                    /* Not DHCP: forward to TAP interface if available */
+                    /* Not DHCP: forward to TAP/utun if available */
                     if (cyw43.tap_fd >= 0) {
+                        {
+                            static int tap_tx_logged;
+                            if (tap_tx_logged < 12 && eth_len >= 34 &&
+                                eth[12] == 0x08 && eth[13] == 0x00) {
+                                const uint8_t *ip = eth + 14;
+                                int ihl = (ip[0] & 0x0F) * 4;
+                                tap_tx_logged++;
+                                if (ip[9] == 17 && eth_len >= 14 + ihl + 8) {
+                                    const uint8_t *udp = ip + ihl;
+                                    uint16_t dport = ((uint16_t)udp[2] << 8) | udp[3];
+                                    fprintf(stderr,
+                                            "[CYW43] TAP TX UDP %d.%d.%d.%d:%u (%d eth bytes)\n",
+                                            ip[16], ip[17], ip[18], ip[19],
+                                            (unsigned)dport, eth_len);
+                                } else {
+                                    fprintf(stderr,
+                                            "[CYW43] TAP TX IP proto=%u → %d.%d.%d.%d (%d eth bytes)\n",
+                                            ip[9], ip[16], ip[17], ip[18], ip[19],
+                                            eth_len);
+                                }
+                                fflush(stderr);
+                            }
+                        }
                         tapif_write(cyw43.tap_fd, eth, eth_len);
                         if (cpu.debug_enabled)
                             fprintf(stderr, "[CYW43] TAP TX: %d bytes\n", eth_len);
+                    } else {
+                        static int no_tap_warned;
+                        if (no_tap_warned < 3) {
+                            no_tap_warned++;
+                            fprintf(stderr,
+                                    "[CYW43] drop WLAN TX (%d bytes) — no -tap (DNS/NTP need utun+NAT)\n",
+                                    eth_len);
+                            fflush(stderr);
+                        }
                     }
                 }
             }
@@ -764,6 +803,28 @@ void cyw43_tap_poll(void) {
     uint8_t eth_buf[1518];  /* Max Ethernet frame (tapif_read clamps to this) */
     int n = tapif_read(cyw43.tap_fd, eth_buf, (int)sizeof(eth_buf));
     if (n > 0) {
+        {
+            static int tap_rx_logged;
+            if (tap_rx_logged < 8 && n >= 34 &&
+                eth_buf[12] == 0x08 && eth_buf[13] == 0x00) {
+                const uint8_t *ip = eth_buf + 14;
+                int ihl = (ip[0] & 0x0F) * 4;
+                tap_rx_logged++;
+                if (ip[9] == 17 && n >= 14 + ihl + 8) {
+                    const uint8_t *udp = ip + ihl;
+                    uint16_t sport = ((uint16_t)udp[0] << 8) | udp[1];
+                    fprintf(stderr,
+                            "[CYW43] TAP RX UDP %d.%d.%d.%d:%u → guest (%d eth bytes)\n",
+                            ip[12], ip[13], ip[14], ip[15],
+                            (unsigned)sport, n);
+                } else {
+                    fprintf(stderr,
+                            "[CYW43] TAP RX IP proto=%u from %d.%d.%d.%d (%d eth bytes)\n",
+                            ip[9], ip[12], ip[13], ip[14], ip[15], n);
+                }
+                fflush(stderr);
+            }
+        }
         cyw43_queue_rx_data(eth_buf, n);
         if (cpu.debug_enabled)
             fprintf(stderr, "[CYW43] TAP RX: %d bytes queued\n", n);

@@ -5,6 +5,16 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-07-30 — `dba9821` — Fake DHCP DNS → 8.8.8.8 (TAP NAT path)
+
+| Change | Reason |
+|--------|--------|
+| Fake DHCP option 6 advertises `8.8.8.8` (not gateway) | Guest DNS to `192.168.4.1:53` never replies — host utun has no DNS listener; queries must NAT to a public resolver |
+| Always-on TAP TX/RX UDP logging (first packets); warn if WLAN TX dropped with no `-tap` | Prove DNS leaves and replies return; distinguish missing TAP from NAT failure |
+| MACOS-WIFI troubleshooting for DNS timeout / old `dns 192.168.4.1` builds | Match log symptoms from CP TestWifi Abort after DNS wait |
+
+---
+
 ## Unreleased
 
 _(none)_

@@ -967,3 +967,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | `bramble_tests` 323/323; megaflash-vm overlay rebuild |
 | **Commit** | Bramble `4c31c9d`; megaflash-vm `77eb5b6` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-07-30 — DNS never replies: fake DHCP pointed at gateway
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Functionally no improvement after credit/sprintf fixes; log shows WIFI OK, DNS wait, Abort, core1 HardFault |
+| **Cause** | Fake DHCP advertised DNS=`192.168.4.1`; TAP/ARP works but nothing listens on host `:53`, so guest DNS times out → throw → `_exit` |
+| **Actions** | Advertise DNS `8.8.8.8` via DHCP; log TAP TX/RX UDP; warn on no-`-tap` drops; update MACOS-WIFI + megaflash-vm MAME-BRIDGE |
+| **Validate** | `bramble_tests` 323/323; rebuild Bramble + megaflash-vm overlay |
+| **Commit** | Bramble `dba9821`; megaflash-vm `ed85cd6` |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
