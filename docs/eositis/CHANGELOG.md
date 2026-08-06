@@ -11,6 +11,15 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-06 — megaflash-vm host bump malloc (TFTP Starting)
+
+| Change | Reason |
+|--------|--------|
+| Docs: freelist+stubbed check_alloc → PC in configBuffer | NAT OK (DNS/NTP); no RRQ because ctor never finished |
+| (megaflash-vm) Host `__wrap_malloc` bump allocator | Bypass corrupted newlib freelist for CTFTP* `new` |
+
+---
+
 ## 2026-08-06 — `406a21e` + megaflash-vm `b826443` — TFTP CS hang (status stuck Starting)
 
 | Change | Reason |

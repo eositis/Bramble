@@ -1132,3 +1132,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | bramble_tests 323/323; megaflash-vm overlay rebuild |
 | **Commit** | Bramble `406a21e`; megaflash-vm `b826443` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-06 — TFTP Starting: bad malloc → configBuffer (NAT OK)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Same Starting stall; question whether NAT reaches 192.168.0.x TFTP server |
+| **Finding** | DNS/NTP TAP UDP NAT works; no packet to `:69` yet. Hang before EvtStart; core0 PC in configBuffer — freelist + stubbed check_alloc returned BSS pointers |
+| **Actions** | megaflash-vm: host bump `__wrap_malloc`/`free`; ctor/CS/EvtStart logs; docs on NAT vs pre-RRQ hang |
+| **Validate** | bramble_tests 323/323; megaflash-vm overlay rebuild |
+| **Commit** | (pending) |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
