@@ -11,6 +11,16 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-06 —  + megaflash-vm  — TFTP mallinfo hang
+
+| Change | Reason |
+|--------|--------|
+| Skip  freelist walk | RunTFTP stuck at Starting; no guest UDP to TFTP server |
+| Docs: stub DebugPrintHeapState; Status without long_cmd | Status poll spam + heap dump starved core0 |
+
+---
+
+
 ## 2026-08-06 — megaflash-vm `825862a` — DoTFTPStatus host-complete
 
 | Change | Reason |
