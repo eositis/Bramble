@@ -1042,5 +1042,5 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | Guest `ip4addr_ntoa`+`strcpy` leave short non-NUL junk; fill-only-if-empty skipped rewrite; CP prints leftovers |
 | **Actions** | Host-complete FormatIPAddr; always rewrite four dataBuffer IP strings from testResult/netif; DoTFTPRun long_cmd |
 | **Validate** | overlay rebuild; bramble_tests 323/323 |
-| **Commit** | megaflash-vm `c07513e`; Bramble docs *(pending)* |
+| **Commit** | megaflash-vm `c07513e`; Bramble `e71aff0` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
