@@ -7,6 +7,12 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
+_(none)_
+
+---
+
+## 2026-08-05 — `4c31c9d` — SDPCM credits + sprintf (drop FormatIPAddr stub)
+
 | Change | Reason |
 |--------|--------|
 | CYW43: SDPCM credit refresh (+ window 8) after every WLAN TX | Guest `STALL(0;N-N)` / `send_ethernet failed: -2` after DHCP — no RX means credits never advance, DNS TX dies |

@@ -965,5 +965,5 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Causes** | (1) SDPCM TX credits stall after DHCP when no RX → DNS `send_ethernet -2` → throw → `_exit`; (2) BUSY unstick mid-DoTestWifi before FormatIPAddr; (3) `_svfprintf_r` stub return 0 empties sprintf (TFTP Status leftover `192.`) |
 | **Actions** | Credit refresh after WLAN TX; skip unstick during DoTestWifi/sleep/TFTP; host sprintf into guest RAM + `%f`; remove FormatIPAddr stub |
 | **Validate** | `bramble_tests` 323/323; megaflash-vm overlay rebuild |
-| **Commit** | (pending) |
+| **Commit** | Bramble `4c31c9d`; megaflash-vm `77eb5b6` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
