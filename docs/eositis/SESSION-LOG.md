@@ -1066,3 +1066,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | overlay rebuild; bramble_tests 323/323 |
 | **Commit** | megaflash-vm `4cca457`; Bramble `7597cbc` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-06 — TestWifi C++ abort; complete from netif
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Test Wifi stalled ~3 min then same garbled IPs; TFTP fails |
+| **Cause** | long_cmd held BUSY correctly; core0 still aborted in RunTestWifi (EH); then unstick after _exit left empty dataBuffer |
+| **Actions** | Host-complete TestWifi from live netif when link UP+RTC; recover _exit during long_cmd → core0Loop; force cmp when RTC set |
+| **Validate** | overlay rebuild; bramble_tests 323/323 |
+| **Commit** | megaflash-vm `25da8bf`; Bramble docs *(pending)* |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |

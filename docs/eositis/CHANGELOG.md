@@ -11,6 +11,14 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-06 — megaflash-vm `25da8bf` — TestWifi complete from netif
+
+| Change | Reason |
+|--------|--------|
+| Docs: TestWifi host-complete from lease when UP; _exit→core0Loop during long_cmd | C++ EH abort left CP with garbled IPs after 3 min BUSY wait |
+
+---
+
 ## 2026-08-06 — megaflash-vm `4cca457` — DoTestWifi veneer long_cmd
 
 | Change | Reason |
