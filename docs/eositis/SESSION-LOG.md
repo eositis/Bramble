@@ -1099,3 +1099,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | `bramble_tests` 323/323; megaflash-vm overlay rebuild |
 | **Commit** | Bramble `f068d14`; megaflash-vm `9dbfc29` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-06 — DoTFTPStatus HardFault (PC=RunT…)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | TFTP improved past SaveTFTP but still breaks; Status stuck on Starting |
+| **Cause** | Native DoTFTPStatus (critical_section + Format*) HardFaults core1 with PC=0x546E7552 ("RunT…") / LOCKUP |
+| **Actions** | megaflash-vm: host-complete DoTFTPStatus from tftp_state (param + five dataBuffer strings) |
+| **Validate** | megaflash-vm overlay rebuild |
+| **Commit** | megaflash-vm `825862a` |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
