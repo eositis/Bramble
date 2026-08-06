@@ -11,6 +11,14 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-06 — megaflash-vm `5f6345c` — unstick hang + NTP success sticky
+
+| Change | Reason |
+|--------|--------|
+| Docs: narrow BUSY skip to long_cmd only; drop ConnectWifi warm-up skip; core0Loop GetNTP force | Prior fix hung MAME (force-quit); second NTP aborted |
+
+---
+
 ## 2026-08-06 — megaflash-vm `79b4b52` — DoTestWifi BUSY hold through FormatIPAddr
 
 | Change | Reason |
