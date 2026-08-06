@@ -11,11 +11,11 @@ Scope: local commits on `main` after clone.
 
 ---
 
-## 2026-08-06 —  + megaflash-vm  — TFTP mallinfo hang
+## 2026-08-06 — `b1a1229` + megaflash-vm `aa26c10` — TFTP mallinfo hang
 
 | Change | Reason |
 |--------|--------|
-| Skip  freelist walk | RunTFTP stuck at Starting; no guest UDP to TFTP server |
+| Skip `__malloc_update_mallinfo` freelist walk | RunTFTP stuck at Starting; no guest UDP to TFTP server |
 | Docs: stub DebugPrintHeapState; Status without long_cmd | Status poll spam + heap dump starved core0 |
 
 ---

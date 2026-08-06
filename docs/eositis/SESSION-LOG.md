@@ -1119,5 +1119,5 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | RunTFTP → DebugPrintHeapState → mallinfo freelist hang (core0 PC≈0x1002ABAA); Status long_cmd spam starved core0; no TAP UDP :69 |
 | **Actions** | Skip __malloc_update_mallinfo; stub DebugPrintHeapState; DoTFTPStatus host-complete without long_cmd |
 | **Validate** | bramble_tests 323/323; megaflash-vm overlay rebuild |
-| **Commit** | Bramble ; megaflash-vm  |
+| **Commit** | Bramble `b1a1229`; megaflash-vm `aa26c10` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
