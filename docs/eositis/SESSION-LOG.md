@@ -1163,5 +1163,5 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | JIT executed `it cc; movcc r0,#1` in `_Znwj` without IT predicates → every operator new was 1 byte → ctor/abort |
 | **Actions** | Honor `thumb_it_should_execute` in `jit_execute`; docs; rebuild overlay |
 | **Validate** | bramble_tests 323/323; megaflash-vm overlay rebuild |
-| **Commit** | (pending) |
+| **Commit** | Bramble `ef5bab2` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |

@@ -11,7 +11,7 @@ Scope: local commits on `main` after clone.
 
 ---
 
-## 2026-08-06 — JIT honors Thumb IT (operator new size=1)
+## 2026-08-06 — `ef5bab2` — JIT honors Thumb IT (operator new size=1)
 
 | Change | Reason |
 |--------|--------|
