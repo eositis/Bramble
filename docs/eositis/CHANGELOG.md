@@ -5,6 +5,22 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## Unreleased
+
+| Change | Reason |
+|--------|--------|
+| Docs: megaflash-vm `79b4b52` DoTestWifi long-cmd BUSY hold | Skip window missed `sleep_until` → garbled CP IPs / abort |
+
+---
+
+## 2026-08-06 — megaflash-vm `79b4b52` — DoTestWifi BUSY hold through FormatIPAddr
+
+| Change | Reason |
+|--------|--------|
+| Docs: long-cmd flag + `sleep_until` skip; ConnectWifi warm-up skip when UP | CP Test Wifi OK with garbled `BXX`/`AN` IPs after early BUSY clear |
+
+---
+
 ## 2026-07-30 — megaflash-vm `e7bf0c9` — keep core0 after NTP for TestWifi
 
 | Change | Reason |
