@@ -1143,3 +1143,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | bramble_tests 323/323; megaflash-vm overlay rebuild |
 | **Commit** | Bramble `4429abb`; megaflash-vm `be5b894` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-06 — MegaFlash not found after global bump-malloc
+
+| Field | Detail |
+|-------|--------|
+| **Request** | MegaFlash not found; MAME fails to boot from MegaFlash storage |
+| **Cause** | Global `__wrap_malloc` bump + no-op free leaked through cyw43/lwIP (~125KB HeapLimit) and broke SmartPort/flash bring-up |
+| **Actions** | Scope bump-malloc to RunTFTP only; restore native malloc for boot/WiFi; docs |
+| **Validate** | bramble_tests 323/323; megaflash-vm overlay rebuild |
+| **Commit** | megaflash-vm `4da4aac`; Bramble docs (this commit) |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |

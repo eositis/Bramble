@@ -11,6 +11,15 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-06 — `docs` + megaflash-vm `4da4aac` — scope TFTP bump-malloc
+
+| Change | Reason |
+|--------|--------|
+| Docs: global bump-malloc broke MegaFlash detect/boot | No-op free exhausted heap during cyw43; SmartPort “not found” |
+| (megaflash-vm) Enable bump malloc only inside RunTFTP | Boot/flash/lwIP keep native freelist |
+
+---
+
 ## 2026-08-06 — `4429abb` + megaflash-vm `be5b894` — host bump malloc (TFTP Starting)
 
 | Change | Reason |
