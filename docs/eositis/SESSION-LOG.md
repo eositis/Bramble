@@ -1009,5 +1009,5 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | `GetNetworkTime` keeps `NETERR_NONE` in r6 across `InitRTC`→`aon_timer`; emu clobbers r6 → garbage return → core0Loop retries NTP → throw → `_exit`; TestWifi/TFTP IPC never runs; dataBuffer never filled |
 | **Actions** | megaflash-vm: repair GetNetworkTime return after NTP InitRTC; dump/fill dataBuffer after FormatIPAddr; widen BUSY skip for timer_busy_wait |
 | **Validate** | overlay rebuild; bramble_tests 323/323 |
-| **Commit** | megaflash-vm  |
+| **Commit** | megaflash-vm `e7bf0c9` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
