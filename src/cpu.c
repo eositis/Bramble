@@ -2118,9 +2118,14 @@ pc_valid:
         printf("[CPU] Step %3u: PC=0x%08X instr=0x%04X\n", cpu.step_count, pc, instr);
     }
 
-    /* Thumb IT block: skip this instruction if the predicate is false */
+    /* 32-bit Thumb: top 5 bits = 11101/11110/11111 */
+    uint8_t top5 = instr >> 11;
+    uint32_t insn_bytes = (top5 >= 0x1D) ? 4u : 2u;
+
+    /* Thumb IT block: skip this instruction if the predicate is false.
+     * Advance by the full instruction width (16 or 32-bit). */
     if (!thumb_it_should_execute(get_active_core())) {
-        cpu.r[15] = pc + 2;
+        cpu.r[15] = pc + insn_bytes;
         timing_tick(1);
         return;
     }
@@ -2132,8 +2137,6 @@ pc_valid:
         return;
     }
 
-    /* 32-bit instructions: top 5 bits = 11101/11110/11111 */
-    uint8_t top5 = instr >> 11;
     if (top5 >= 0x1D) {  /* 0xE800+ is a 32-bit instruction */
         uint16_t instr2 = cpu_fetch16_fast(pc + 2);
         pc_updated = 0;
@@ -2316,12 +2319,9 @@ int cpu_bind_core_context(int core_id, cpu_bind_context_t *ctx) {
     cpu.faultmask     = cores[core_id].faultmask;
     cpu.control       = cores[core_id].control;
 
-    /* IT state is per-core; stale IT on bind causes predicated NOP-sliding (PC+=2). */
-    cpu_state_dual_t *bound = &cores[core_id];
-    bound->it_remaining = 0;
-    bound->it_total = 0;
-    bound->it_mask = 0;
-    bound->it_cond = 0;
+    /* Preserve Thumb IT state across bind. dual_core_step() bind/unbinds every
+     * instruction; clearing IT here made `it cc; movcc r0,#1` in operator new
+     * (_Znwj) always execute → malloc(1) → CTFTP ctor abort / TFTP Idle. */
 
     cpu_set_active_ram_for_exec();
     set_active_core(core_id);

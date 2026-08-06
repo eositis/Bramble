@@ -7,7 +7,12 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
-—
+| Change | Reason |
+|--------|--------|
+| Preserve Thumb IT across `cpu_bind_core_context` | `dual_core_step` cleared IT every insn → `_Znwj` movcc always set size=1 → TFTP Idle |
+| IT skip advances 32-bit insn width | Predicated Thumb-2 must skip 4 bytes, not 2 |
+| Test `test_thumb_it_survives_bind_unbind` | Regression for operator-new size under bind/unbind |
+| (megaflash-vm) Host-complete `_Znwj`/`_Znaj` during RunTFTP bump | Defense in depth; log real `new` sizes before clamp |
 
 ---
 

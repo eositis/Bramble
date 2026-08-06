@@ -511,6 +511,38 @@ TEST(test_cpu_bind_core_context_roundtrip) {
     PASS();
 }
 
+/*
+ * dual_core_step() bind/unbinds every instruction. IT state must survive that,
+ * or `_Znwj`'s `it cc; movcc r0,#1` always forces operator-new size to 1.
+ */
+TEST(test_thumb_it_survives_bind_unbind) {
+    reset_cpu();
+    dual_core_init();
+    jit_enable(0);
+
+    /* cmp r0,#1; it cc; movcc r0,#1; movs r1,#0x55; b . */
+    uint16_t prog[] = { 0x2801, 0xBF38, 0x2001, 0x2155, 0xE7FE };
+    memcpy(&cpu.flash[0x300], prog, sizeof(prog));
+
+    cores[CORE0].r[0] = 184;
+    cores[CORE0].r[1] = 0;
+    cores[CORE0].r[15] = FLASH_BASE + 0x300;
+    cores[CORE0].xpsr = 0x01000000;
+    cores[CORE0].is_halted = 0;
+
+    for (int i = 0; i < 4; i++) {
+        cpu_bind_context_t ctx;
+        ASSERT_TRUE(cpu_bind_core_context(CORE0, &ctx), "bind before IT step");
+        cpu_step();
+        cpu_unbind_core_context(CORE0, &ctx);
+    }
+
+    ASSERT_EQ(184, cores[CORE0].r[0],
+              "IT movcc must not run when r0>=1 across bind/unbind");
+    ASSERT_EQ(0x55, cores[CORE0].r[1], "instruction after IT block must run");
+    PASS();
+}
+
 /* ========================================================================
  * ELF Loader Tests
  * ======================================================================== */
@@ -4829,6 +4861,7 @@ int main(void) {
     RUN_TEST(test_dual_core_shared_flash);
     RUN_TEST(test_dual_core_shared_ram);
     RUN_TEST(test_cpu_bind_core_context_roundtrip);
+    RUN_TEST(test_thumb_it_survives_bind_unbind);
     END_CATEGORY("Dual-Core Memory");
 
     BEGIN_CATEGORY("UF2 Loader");
