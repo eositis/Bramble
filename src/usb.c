@@ -2595,15 +2595,19 @@ void usb_console_guest_stdio_hook(void) {
         uint32_t base = cpu.r[0];
         uint32_t start = cpu.r[2];
         uint32_t end = cpu.r[3];
-        if (start <= end) {
-            uint32_t byte = start >> 3;
-            uint8_t mask = (uint8_t)(1u << (start & 7u));
+        uint32_t bit;
+        uint32_t found = 0xffffffffu;
+        for (bit = start; bit <= end; bit++) {
+            uint32_t byte = bit >> 3;
+            uint8_t mask = (uint8_t)(1u << (bit & 7u));
             uint8_t v = mem_read8(base + byte);
-            mem_write8(base + byte, v | mask);
-            cpu.r[0] = start;
-        } else {
-            cpu.r[0] = 0xffffffffu;
+            if ((v & mask) == 0u) {
+                mem_write8(base + byte, (uint8_t)(v | mask));
+                found = bit;
+                break;
+            }
         }
+        cpu.r[0] = found;
         cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
         return;
     }

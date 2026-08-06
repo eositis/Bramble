@@ -11,6 +11,15 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-06 — TFTP CS hang (status stuck Starting)
+
+| Change | Reason |
+|--------|--------|
+| Fix `hw_claim_unused` to scan free spin-lock bits (usb.c) | Always returning range start left late CS inits with bad locks |
+| Docs: tftp_cs enter hang after mallinfo fix | Status stayed Starting; no UDP :69; PC wandered into configBuffer |
+
+---
+
 ## 2026-08-06 — `b1a1229` + megaflash-vm `aa26c10` — TFTP mallinfo hang
 
 | Change | Reason |
