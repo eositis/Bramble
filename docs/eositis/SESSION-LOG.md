@@ -1064,5 +1064,5 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | BusLoop RAM calls `__DoTestWifi_veneer`; long_cmd only began on flash entry and never stuck → unstick mid-wait |
 | **Actions** | Begin long_cmd on veneer + core0 TestWifi; skip unstick while core0 in TestWifi/RunTestWifi/ConnectWifi |
 | **Validate** | overlay rebuild; bramble_tests 323/323 |
-| **Commit** | megaflash-vm `4cca457`; Bramble docs *(pending)* |
+| **Commit** | megaflash-vm `4cca457`; Bramble `7597cbc` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
