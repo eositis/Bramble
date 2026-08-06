@@ -11,7 +11,7 @@ Scope: local commits on `main` after clone.
 
 ---
 
-## 2026-08-06 — `docs` + megaflash-vm `4da4aac` — scope TFTP bump-malloc
+## 2026-08-06 — `f7b073b` + megaflash-vm `4da4aac` — scope TFTP bump-malloc
 
 | Change | Reason |
 |--------|--------|
