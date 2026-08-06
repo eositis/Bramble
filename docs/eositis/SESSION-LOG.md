@@ -1154,3 +1154,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | bramble_tests 323/323; megaflash-vm overlay rebuild |
 | **Commit** | Bramble `f7b073b`; megaflash-vm `4da4aac` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-06 — TFTP abort: JIT IT forced new size=1
+
+| Field | Detail |
+|-------|--------|
+| **Request** | TFTP got further then Status=Idle; log shows malloc(1) and guest _exit from abort |
+| **Cause** | JIT executed `it cc; movcc r0,#1` in `_Znwj` without IT predicates → every operator new was 1 byte → ctor/abort |
+| **Actions** | Honor `thumb_it_should_execute` in `jit_execute`; docs; rebuild overlay |
+| **Validate** | bramble_tests 323/323; megaflash-vm overlay rebuild |
+| **Commit** | (pending) |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |

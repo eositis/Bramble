@@ -412,6 +412,7 @@ static void __attribute__((hot)) jit_execute(jit_block_t *block) {
     const int len = block->length;
     const uint16_t *instrs = block->instrs;
     int i;
+    int core_id = get_active_core();
 
     for (i = 0; i < len - 1; i++) {
         /* Non-terminal instructions: no branch check needed.
@@ -419,6 +420,15 @@ static void __attribute__((hot)) jit_execute(jit_block_t *block) {
         const uint16_t instr = instrs[i];
         cpu.r[15] = pc;
         pc_updated = 0;
+
+        /* Honor Thumb IT predicates — skipping this made `it cc; movcc r0,#1`
+         * in operator new (_Znwj) always force size=1 → 1-byte CTFTP objects →
+         * abort/_exit and TFTP stuck at Idle. */
+        if (!thumb_it_should_execute(core_id)) {
+            total_cycles += 1;
+            pc += 2;
+            continue;
+        }
 
         dispatch_table[instr >> 8](instr);
 
@@ -443,6 +453,13 @@ static void __attribute__((hot)) jit_execute(jit_block_t *block) {
         const uint16_t instr = instrs[i];
         cpu.r[15] = pc;
         pc_updated = 0;
+
+        if (!thumb_it_should_execute(core_id)) {
+            total_cycles += 1;
+            i++;
+            cpu.r[15] = pc + 2;
+            goto done;
+        }
 
         dispatch_table[instr >> 8](instr);
 

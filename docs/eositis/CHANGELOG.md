@@ -11,6 +11,14 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-06 — JIT honors Thumb IT (operator new size=1)
+
+| Change | Reason |
+|--------|--------|
+| `jit_execute` calls `thumb_it_should_execute` | JIT always ran `it cc; movcc r0,#1` in `_Znwj` → 1-byte `new` → abort; TFTP Idle after ctor |
+
+---
+
 ## 2026-08-06 — `f7b073b` + megaflash-vm `4da4aac` — scope TFTP bump-malloc
 
 | Change | Reason |
