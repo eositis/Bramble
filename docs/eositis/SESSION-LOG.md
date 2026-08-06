@@ -987,5 +987,5 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | Writing DNS to utun + pf NAT does not deliver replies on this Mac; guest times out → throw → `_exit` |
 | **Actions** | Darwin tapif userspace UDP NAT (host sockets → inject Ethernet); RX ring; pf optional for TCP; docs |
 | **Validate** | `bramble_tests` 323/323; overlay rebuild; host UDP DNS smoke OK |
-| **Commit** | (pending) |
+| **Commit** | Bramble `c1884e7`; megaflash-vm `eea7bf0` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |

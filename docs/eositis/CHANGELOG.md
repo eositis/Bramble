@@ -5,6 +5,15 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-07-30 — `c1884e7` — macOS userspace UDP NAT
+
+| Change | Reason |
+|--------|--------|
+| Darwin `tapif`: userspace UDP NAT (host sockets → Ethernet inject); RX ring | `TAP TX UDP 8.8.8.8:53` with no RX — utun+pf never returned replies; DNS timeout → Abort |
+| MACOS-WIFI: UDP path primary; pf optional for TCP only | Match working bring-up without relying on pf anchors |
+
+---
+
 ## 2026-07-30 — `fa90f61` — Fake DHCP DNS → 8.8.8.8 (TAP NAT path)
 
 | Change | Reason |
@@ -12,12 +21,6 @@ Scope: local commits on `main` after clone.
 | Fake DHCP option 6 advertises `8.8.8.8` (not gateway) | Guest DNS to `192.168.4.1:53` never replies — host utun has no DNS listener; queries must NAT to a public resolver |
 | Always-on TAP TX/RX UDP logging (first packets); warn if WLAN TX dropped with no `-tap` | Prove DNS leaves and replies return; distinguish missing TAP from NAT failure |
 | MACOS-WIFI troubleshooting for DNS timeout / old `dns 192.168.4.1` builds | Match log symptoms from CP TestWifi Abort after DNS wait |
-
----
-
-## Unreleased
-
-_(none)_
 
 ---
 
