@@ -7,9 +7,7 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
-| Change | Reason |
-|--------|--------|
-| Docs: megaflash-vm `79b4b52` DoTestWifi long-cmd BUSY hold | Skip window missed `sleep_until` → garbled CP IPs / abort |
+—
 
 ---
 
