@@ -1086,5 +1086,5 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | `long_cmd` ended at DoTestWifi cleanup start while BUSY still set; STATUS unstick mid-strcpy/DoTFTPStatus → HardFault `PC=0x546E7552` ("RunT…") / LOCKUP; BusLoop dead so TFTP Status left leftover `192.` |
 | **Actions** | End long_cmd at DoTestWifi pop `0x10001d46`; arm long_cmd for DoTFTPStatus (+ veneer); skip unstick in strcmp/strcpy/TFTPFormat/timer_time_us_64; fill dataBuffer at cleanup |
 | **Validate** | megaflash-vm overlay rebuild; bramble_tests 323/323 |
-| **Commit** | megaflash-vm `30aeae6`; Bramble (this entry) |
+| **Commit** | megaflash-vm `30aeae6`; Bramble `efeafcd` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
