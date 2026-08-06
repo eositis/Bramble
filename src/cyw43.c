@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <errno.h>
 #include <arpa/inet.h>
 #include "cyw43.h"
 #include "tapif.h"
@@ -698,7 +699,8 @@ static void cyw43_wlan_tx_complete(void) {
                         if (no_tap_warned < 3) {
                             no_tap_warned++;
                             fprintf(stderr,
-                                    "[CYW43] drop WLAN TX (%d bytes) — no -tap (DNS/NTP need utun+NAT)\n",
+                                    "[CYW43] drop WLAN TX (%d bytes) — no host bridge "
+                                    "(-tap / UDP NAT)\n",
                                     eth_len);
                             fflush(stderr);
                         }
@@ -829,10 +831,15 @@ void cyw43_tap_poll(void) {
         if (cpu.debug_enabled)
             fprintf(stderr, "[CYW43] TAP RX: %d bytes queued\n", n);
     } else if (n < 0) {
-        /* Persistent error — close TAP to avoid spin-polling a dead fd */
-        fprintf(stderr, "[CYW43] TAP read error, closing interface\n");
-        tapif_close(cyw43.tap_fd);
-        cyw43.tap_fd = -1;
+        /* Do not tear down the bridge: on macOS UDP NAT/ARP still need tap_fd.
+         * Closing here killed DNS after a transient utun read error. */
+        static int tap_err_logged;
+        if (tap_err_logged < 3) {
+            tap_err_logged++;
+            fprintf(stderr, "[CYW43] TAP read error (%s) — keeping bridge\n",
+                    strerror(errno));
+            fflush(stderr);
+        }
     }
 }
 

@@ -257,6 +257,7 @@ static const uint8_t k_host_ip[4]   = {192, 168, 4, 1};
 
 static char utun_ifname[IFNAMSIZ];
 static int darwin_active;
+static int darwin_utun_rx_ok; /* 0 = skip utun read; UDP NAT still active */
 
 /* RX ring: ARP replies + userspace UDP NAT replies (and optional utun). */
 #define DARWIN_RXQ 16
@@ -634,6 +635,7 @@ int tapif_open(const char *name) {
     memset(utun_ifname, 0, sizeof(utun_ifname));
     strncpy(utun_ifname, ifname, sizeof(utun_ifname) - 1);
     darwin_active = 1;
+    darwin_utun_rx_ok = 1;
 
     fprintf(stderr,
             "[TAP] macOS utun '%s' opened (fd=%d) — UDP userspace NAT + L3 bridge\n",
@@ -665,12 +667,28 @@ int tapif_read(int fd, uint8_t *buf, int maxlen) {
     int q = dequeue_pending_eth(buf, maxlen);
     if (q > 0) return q;
 
-    /* utun: 4-byte AF family (network order) + IP packet (TCP/ICMP via pf) */
+    /* utun RX is optional (TCP/ICMP via pf). UDP NAT does not need it.
+     * A hard utun read error must not kill the bridge — that dropped ARP/DNS. */
+    if (!darwin_utun_rx_ok)
+        return 0;
+
     uint8_t raw[4 + 1500];
     ssize_t n = read(fd, raw, sizeof(raw));
     if (n < 0) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
-        return -1;
+        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+            return 0;
+        static int utun_err_logged;
+        if (utun_err_logged < 3) {
+            utun_err_logged++;
+            fprintf(stderr,
+                    "[TAP] utun read: %s — continuing with UDP NAT only\n",
+                    strerror(errno));
+            fflush(stderr);
+        }
+        if (errno == EBADF)
+            return -1;
+        darwin_utun_rx_ok = 0;
+        return 0;
     }
     if (n <= 4) return 0;
 

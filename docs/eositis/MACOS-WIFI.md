@@ -50,7 +50,8 @@ From **megaflash-vm**, `scripts/run-megaflash-mame.sh` integrates host net into 
 | Symptom | Check |
 |---------|--------|
 | `utun connect failed` | Approve the admin dialog if using elevated launcher |
-| DHCP OK, `TAP TX UDP 8.8.8.8:53`, no reply | Need build with userspace UDP NAT. Expect `[TAP] UDP NAT → …` then `[TAP] UDP NAT ← …` and `[CYW43] TAP RX UDP`. |
+| `TAP read error, closing interface` then `drop WLAN TX` | Fixed in current tree — do not close bridge on utun read errors (kills UDP NAT). Rebuild. |
+| DHCP OK, ARP/DNS dropped | Expect `[TAP] UDP NAT →` / `←` and `[CYW43] TAP RX UDP`. At worst: `utun read: … continuing with UDP NAT only`. |
 | DHCP still says `dns 192.168.4.1` | Rebuild — older builds advertised the gateway as DNS |
 | BusLoop dies / MegaFlash not found | Rebuild overlay; ensure BusLoop launches **after** `cyw43 loaded ok`. Emergency: `BRAMBLE_A2BUS_STUB_WIFI=1` |
 | Admin dialog cancelled | Re-run launcher; or `NO_HOST_NET=1` for radio-only |

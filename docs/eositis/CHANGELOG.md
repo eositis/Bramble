@@ -5,6 +5,16 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-07-30 — KEEP_HASH — keep TAP bridge after utun read errors
+
+| Change | Reason |
+|--------|--------|
+| Do not close tap_fd on TAP read error; Darwin skips further utun RX | Closing killed userspace UDP NAT → ARP/DNS `drop WLAN TX` after JOIN |
+| Log errno; MACOS-WIFI troubleshooting | Diagnose utun failure without tearing down NAT |
+
+---
+
+
 ## 2026-07-30 — `c1884e7` — macOS userspace UDP NAT
 
 | Change | Reason |
