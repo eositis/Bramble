@@ -1031,5 +1031,5 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | (1) Blanket skip of `busy_wait` PCs with `long_cmd depth=0` left STATUS BUSY forever after core0 abort; (2) ConnectWifi warm-up skip broke second RunNTP → Abort/_exit; (3) GetNTP success not sticky in core0Loop `r4` |
 | **Actions** | Skip unstick only when long_cmd active (or DoTestWifi/DoTFTP PC); unstick if core0 at `_exit`/WFI; remove ConnectWifi skip; force core0Loop GetNTP success after InitRTC |
 | **Validate** | overlay rebuild; bramble_tests 323/323 |
-| **Commit** | megaflash-vm `5f6345c`; Bramble docs *(pending)* |
+| **Commit** | megaflash-vm `5f6345c`; Bramble `b94aefc` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
