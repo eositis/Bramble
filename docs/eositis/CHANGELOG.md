@@ -5,11 +5,11 @@ Scope: local commits on `main` after clone.
 
 ---
 
-## 2026-07-30 — megaflash-vm  — keep core0 after NTP for TestWifi
+## 2026-07-30 — megaflash-vm `e7bf0c9` — keep core0 after NTP for TestWifi
 
 | Change | Reason |
 |--------|--------|
-| Overlay: repair  return to NETERR_NONE after NTP InitRTC | r6 clobber → garbage err → immediate NTP retry → abort → TestWifi IP strings never filled |
+| Overlay: repair `GetNetworkTime` return to NETERR_NONE after NTP InitRTC | r6 clobber → garbage err → immediate NTP retry → abort → TestWifi IP strings never filled |
 | Dump/fill dataBuffer after FormatIPAddr; widen BUSY skip for timer_busy_wait | CP garbled IP lines; TFTP needs live core0 IPC |
 
 ---
