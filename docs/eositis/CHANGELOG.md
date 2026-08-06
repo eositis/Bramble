@@ -5,7 +5,7 @@ Scope: local commits on `main` after clone.
 
 ---
 
-## 2026-07-30 — `dba9821` — Fake DHCP DNS → 8.8.8.8 (TAP NAT path)
+## 2026-07-30 — `fa90f61` — Fake DHCP DNS → 8.8.8.8 (TAP NAT path)
 
 | Change | Reason |
 |--------|--------|

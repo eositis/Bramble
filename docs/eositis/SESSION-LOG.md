@@ -976,5 +976,5 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | Fake DHCP advertised DNS=`192.168.4.1`; TAP/ARP works but nothing listens on host `:53`, so guest DNS times out → throw → `_exit` |
 | **Actions** | Advertise DNS `8.8.8.8` via DHCP; log TAP TX/RX UDP; warn on no-`-tap` drops; update MACOS-WIFI + megaflash-vm MAME-BRIDGE |
 | **Validate** | `bramble_tests` 323/323; rebuild Bramble + megaflash-vm overlay |
-| **Commit** | Bramble `dba9821`; megaflash-vm `ed85cd6` |
+| **Commit** | Bramble `fa90f61`; megaflash-vm `ed85cd6` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
