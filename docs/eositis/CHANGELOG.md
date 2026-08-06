@@ -11,7 +11,7 @@ Scope: local commits on `main` after clone.
 
 ---
 
-## 2026-08-06 — TFTP CS hang (status stuck Starting)
+## 2026-08-06 — `406a21e` + megaflash-vm `b826443` — TFTP CS hang (status stuck Starting)
 
 | Change | Reason |
 |--------|--------|

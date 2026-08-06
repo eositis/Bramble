@@ -1130,5 +1130,5 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | After mallinfo skip, `UpdateTFTPState` hung in `tftp_critical_section_enter_blocking` (bad/null spin_lock*); status never left STARTING; core0 later executed configBuffer data |
 | **Actions** | Host-complete tftp CS enter/exit + ensure lock byte; fix `hw_claim_unused` free-bit scan; restore r6=dir after printf; EvtStart/StartTransfer logs; docs |
 | **Validate** | bramble_tests 323/323; megaflash-vm overlay rebuild |
-| **Commit** | (pending) |
+| **Commit** | Bramble `406a21e`; megaflash-vm `b826443` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
