@@ -1614,6 +1614,18 @@ static int guest_megaflash_crt0_accel(uint32_t pc) {
         }
         return 1;
     }
+    /* newlib __malloc_update_mallinfo — freelist walk infinite-loops under Thumb
+     * emu once bins are busy (RunTFTP DebugPrintHeapState → mallinfo stuck at
+     * 0x1002ABAA; TFTP never progresses past status=Starting). Skip the walk. */
+    if (pc == 0x1002ab78u) {
+        cpu.r[15] = cpu.r[14] & ~1u;
+        pc_updated = 1;
+        static int logged;
+        if (!logged++) {
+            fprintf(stderr, "[Init] mallinfo update skipped (freelist walk)\n");
+        }
+        return 1;
+    }
     /* newlib strncpy — word path same class as strcpy/strcmp under Thumb emu. */
     if (pc == 0x100286ccu) {
         uint32_t dst = cpu.r[0];
