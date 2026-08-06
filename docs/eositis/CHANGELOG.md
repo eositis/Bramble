@@ -11,7 +11,7 @@ Scope: local commits on `main` after clone.
 
 ---
 
-## 2026-08-06 — `strcmp`/`strncpy` host accel (TFTP SaveLastServer hang)
+## 2026-08-06 — `f068d14` + megaflash-vm `9dbfc29` — strcmp/strncpy TFTP hang
 
 | Change | Reason |
 |--------|--------|
