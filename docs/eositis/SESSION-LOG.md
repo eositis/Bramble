@@ -1044,3 +1044,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | overlay rebuild; bramble_tests 323/323 |
 | **Commit** | megaflash-vm `c07513e`; Bramble `e71aff0` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-06 — core0 abort from second GetNetworkTime (printf clobbers r4)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Test Wifi still garbled; log shows second GetNetworkTime then abort before any TestWifi/FormatIPAddr |
+| **Cause** | Host `__wrap_printf` clobbers callee-saved `r4` after GetNTP; `cmp r4,#11` fails → 5‑min retry → second RunNTP → abort → core0 `_exit`; FormatIPAddr never runs |
+| **Actions** | Force `r4` at core0Loop cmp (after printf); skip GetNetworkTime while RTC already running |
+| **Validate** | overlay rebuild; bramble_tests 323/323 |
+| **Commit** | megaflash-vm `c56e710`; Bramble docs *(pending)* |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |

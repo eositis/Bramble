@@ -11,6 +11,14 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-06 — megaflash-vm `c56e710` — skip second GetNetworkTime
+
+| Change | Reason |
+|--------|--------|
+| Docs: skip GetNetworkTime when RTC set; force r4 at cmp after printf | Second RunNTP aborted core0; TestWifi never ran |
+
+---
+
 ## 2026-08-06 — megaflash-vm `c07513e` — host FormatIPAddr for CP IPs
 
 | Change | Reason |
