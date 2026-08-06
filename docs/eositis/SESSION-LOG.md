@@ -1020,5 +1020,5 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | BUSY unstick skip window started at `sleep_ms` (`0x1000be78`) and missed `sleep_until` (`0x1000BE42`); force-clear BUSY before `FormatIPAddr` + reset core1 mid-wait → Apple reads empty `dataBuffer`, then abort cascade |
 | **Actions** | megaflash-vm: `a2bus_long_cmd_begin/end` around DoTestWifi; widen skip to full `sleep_until`+wait helpers; extra pump while BUSY without clearing; skip already-UP ConnectWifi warm-up; docs |
 | **Validate** | overlay `bramble` rebuild; Bramble `bramble_tests` 323/323 |
-| **Commit** | megaflash-vm `79b4b52`; Bramble docs *(pending)* |
+| **Commit** | megaflash-vm `79b4b52`; Bramble `9ef5f6a` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
