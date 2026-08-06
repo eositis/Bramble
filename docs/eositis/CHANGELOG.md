@@ -5,7 +5,7 @@ Scope: local commits on `main` after clone.
 
 ---
 
-## 2026-07-30 — 5bb16e5 — keep TAP bridge after utun read errors
+## 2026-07-30 — `5bb16e5` — keep TAP bridge after utun read errors
 
 | Change | Reason |
 |--------|--------|
