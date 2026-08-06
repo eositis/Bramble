@@ -1166,6 +1166,17 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Commit** | Bramble `987da61`; megaflash-vm `1dc0b5c` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
 
+## 2026-08-06 — TestWifi IP "AG" / TFTP dead: WFI unstick
+
+| Field | Detail |
+|-------|--------|
+| **Request** | WiFi test broken again (IP "AG", blank mask/gw/dns); no TFTP download activity |
+| **Cause** | `a2bus_busy_is_long_command` returned 0 on core0 `is_wfi` before long_cmd/DoTFTPRun checks → BUSY timeout unstick mid-DoTestWifi and mid-DoTFTPRun |
+| **Actions** | long_cmd + PC ranges win over WFI; only `_exit` forces unstick; clear long_cmd on real unstick; MAME-BRIDGE note |
+| **Validate** | megaflash-vm overlay rebuild |
+| **Commit** | megaflash-vm `9158154` |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
 ## 2026-08-06 — TFTP abort: JIT IT forced new size=1
 
 | Field | Detail |

@@ -11,6 +11,15 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-06 — megaflash-vm `9158154` — WFI must not override long_cmd BUSY hold
+
+| Change | Reason |
+|--------|--------|
+| Docs: core0 WFI must not override long_cmd BUSY hold | False unstick mid-DoTestWifi → IP "AG"; killed TFTP |
+| (megaflash-vm) Fix `a2bus_busy_is_long_command` WFI order; clear long_cmd on unstick | TestWifi/TFTP sleep on core0 while BUSY |
+
+---
+
 ## 2026-08-06 — `987da61` + megaflash-vm `1dc0b5c` — preserve Thumb IT across bind
 
 | Change | Reason |
