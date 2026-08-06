@@ -998,5 +998,5 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | cyw43_tap_poll closed tap_fd on any utun read error; tore down UDP NAT; ARP/DNS dropped |
 | **Actions** | Keep bridge on read errors; Darwin disables utun RX only; log errno; docs |
 | **Validate** | bramble_tests 323/323; overlay rebuild |
-| **Commit** | (pending) |
+| **Commit** | Bramble  |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
