@@ -7,7 +7,12 @@ Scope: local commits on `main` after clone.
 
 ## Unreleased
 
-_(none)_
+| Change | Reason |
+|--------|--------|
+| CYW43: SDPCM credit refresh (+ window 8) after every WLAN TX | Guest `STALL(0;N-N)` / `send_ethernet failed: -2` after DHCP — no RX means credits never advance, DNS TX dies |
+| Remove FormatIPAddr host stub; keep strcpy accel | Papering over empty dataBuffer; real fix is DoTestWifi completing + strcpy |
+| Host `sprintf` writes into guest RAM (`%f` too) | Prior `_svfprintf_r`→return 0 left TFTP Status as leftover hostname |
+| Guest `_exit` → WFI (keep) | BKPT LOCKUP after uncaught terminate |
 
 ---
 

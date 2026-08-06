@@ -1063,6 +1063,21 @@ int usb_guest_host_vprintf(uint32_t fmt, uint32_t ap) {
                 tx((uint8_t)*p);
                 total++;
             }
+        } else if (c == 'f' || c == 'F' || c == 'g' || c == 'G' || c == 'e' ||
+                   c == 'E') {
+            /* Soft-float / AAPCS: float→double as two little-endian words. */
+            union {
+                uint32_t w[2];
+                double d;
+            } u;
+            u.w[0] = mem_read32(ap);
+            u.w[1] = mem_read32(ap + 4u);
+            ap += 8u;
+            snprintf(out, sizeof(out), spec, u.d);
+            for (char *p = out; *p != '\0'; p++) {
+                tx((uint8_t)*p);
+                total++;
+            }
         } else {
             for (int i = 0; spec[i] != '\0'; i++) {
                 tx((uint8_t)spec[i]);
@@ -1071,6 +1086,46 @@ int usb_guest_host_vprintf(uint32_t fmt, uint32_t ap) {
         }
     }
     return total;
+}
+
+/* sprintf into guest RAM — newlib _svfprintf_r hangs under Thumb emu; returning
+ * 0 from that stub left dest empty (TFTP Status showed leftover "192."). */
+static uint32_t usb_guest_sprintf_dest;
+static uint32_t usb_guest_sprintf_pos;
+static uint32_t usb_guest_sprintf_cap;
+
+static void usb_guest_sprintf_tx(uint8_t ch) {
+    if (usb_guest_sprintf_pos + 1u < usb_guest_sprintf_cap) {
+        mem_write8(usb_guest_sprintf_dest + usb_guest_sprintf_pos, ch);
+        usb_guest_sprintf_pos++;
+    }
+}
+
+uint32_t usb_guest_sprintf_make_ap(uint32_t sp) {
+    /* sprintf(dest, fmt, ...): args start at r2/r3 then stack (pre-entry SP). */
+    uint32_t ap = sp - 32u;
+    mem_write32(ap, cpu.r[2]);
+    mem_write32(ap + 4u, cpu.r[3]);
+    for (int i = 0; i < 6; i++) {
+        mem_write32(ap + 8u + (uint32_t)i * 4u, mem_read32(sp + (uint32_t)i * 4u));
+    }
+    return ap;
+}
+
+int usb_guest_host_sprintf(uint32_t dest, uint32_t fmt, uint32_t ap, uint32_t cap) {
+    if (dest == 0u || fmt == 0u) {
+        return 0;
+    }
+    if (cap == 0u || cap > (8u * 1024u * 1024u)) {
+        cap = 4096u;
+    }
+    usb_guest_sprintf_dest = dest;
+    usb_guest_sprintf_pos = 0;
+    usb_guest_sprintf_cap = cap;
+    usb_guest_set_vprintf_tx(usb_guest_sprintf_tx);
+    int n = usb_guest_host_vprintf(fmt, ap);
+    mem_write8(dest + (uint32_t)n, 0);
+    return n;
 }
 
 static void usb_console_guest_tx_buf(uint32_t buf, uint32_t len) {
@@ -2621,7 +2676,16 @@ void usb_console_guest_stdio_hook(void) {
         usb_guest_return_to_lr(cpu.r[0]);
         return;
     }
-    /* Skip newlib locale/wchar / sprintf string FILE path under emu. */
+    /* Skip newlib locale/wchar / sprintf string FILE path under emu.
+     * sprintf itself is host-formatted into guest RAM (empty stub broke TFTP). */
+    if (pc == 0x10028040u) {
+        uint32_t dest = cpu.r[0];
+        uint32_t fmt = cpu.r[1];
+        uint32_t ap = usb_guest_sprintf_make_ap(cpu.r[13]);
+        int n = usb_guest_host_sprintf(dest, fmt, ap, 4096u);
+        usb_guest_return_to_lr((uint32_t)n);
+        return;
+    }
     if (pc == USB_GUEST_VFPRINTF_R ||
         pc == USB_GUEST_SVFPRINTF_R ||
         pc == USB_GUEST_SVFIPRINTF_R) {

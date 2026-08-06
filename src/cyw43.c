@@ -90,6 +90,12 @@ static void rx_queue_pop(void) {
  * SDPCM Frame Construction Helpers
  * ======================================================================== */
 
+/* Firmware stalls TX while last_bus_data_credit == next TX sequence
+ * (cyw43_ll sdpcm_send_common). Credits advance only via RX SDPCM headers.
+ * After DHCP, DNS/NTP TX with no RX exhausts the window → STALL timeout.
+ * Offer a window of 8 ahead of the last firmware TX sequence. */
+#define CYW43_SDPCM_CREDIT_WINDOW 8
+
 static void sdpcm_fill_header(uint8_t *buf, int total_size, uint8_t channel, uint8_t hdr_len) {
     sdpcm_header_t *h = (sdpcm_header_t *)buf;
     memset(h, 0, sizeof(*h));
@@ -98,7 +104,19 @@ static void sdpcm_fill_header(uint8_t *buf, int total_size, uint8_t channel, uin
     h->sequence = cyw43.tx_seq++;
     h->channel_and_flags = channel;
     h->header_length = hdr_len;
-    h->bus_data_credit = (uint8_t)(cyw43.last_fw_seq + 4);
+    h->bus_data_credit = (uint8_t)(cyw43.last_fw_seq + CYW43_SDPCM_CREDIT_WINDOW);
+}
+
+/* SDPCM header-only frame: firmware updates credits then ignores as data. */
+static void cyw43_queue_credit_refresh(void) {
+    uint8_t frame[12];
+    sdpcm_fill_header(frame, 12, SDPCM_CONTROL_CHANNEL, 12);
+    if (rx_queue_push(frame, 12) < 0) {
+        static int once;
+        if (!once++) {
+            fprintf(stderr, "[CYW43] credit refresh dropped (RX queue full)\n");
+        }
+    }
 }
 
 /* Build an IOCTL response and queue it */
@@ -659,6 +677,8 @@ static void cyw43_wlan_tx_complete(void) {
     }
 
     cyw43.wlan_tx_offset = 0;
+    /* Keep SDPCM TX credits ahead of firmware seq even when TAP is quiet. */
+    cyw43_queue_credit_refresh();
 }
 
 /* Forward declarations for PIO gSPI state (defined in PIO section below) */

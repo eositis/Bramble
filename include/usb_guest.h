@@ -9,6 +9,8 @@ void usb_guest_return_to_lr(uint32_t ret);
 void usb_guest_set_vprintf_tx(void (*tx)(uint8_t ch));
 uint32_t usb_guest_uart_make_ap(uint32_t sp);
 int usb_guest_host_vprintf(uint32_t fmt, uint32_t ap);
+uint32_t usb_guest_sprintf_make_ap(uint32_t sp);
+int usb_guest_host_sprintf(uint32_t dest, uint32_t fmt, uint32_t ap, uint32_t cap);
 
 void usb_guest_hw_claim_bootstrap(void);
 void usb_guest_init_default_config(void);
