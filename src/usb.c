@@ -1997,8 +1997,9 @@ void usb_guest_stub_write_block(void) {
     cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
 }
 
-static void usb_guest_stub_write_block_for_image_transfer(void) {
-    uint32_t unit = cpu.r[0];
+void usb_guest_stub_write_block_for_image_transfer(void) {
+    uint32_t logical = cpu.r[0];
+    uint32_t unit = usb_guest_map_flash_medium_unit(logical);
     uint32_t block = cpu.r[1];
     uint32_t src = cpu.r[2];
     uint8_t buffer[USB_GUEST_FLASH_BLOCK_BYTES];
@@ -2011,9 +2012,10 @@ static void usb_guest_stub_write_block_for_image_transfer(void) {
     }
 
     int ok = usb_guest_flash_write_block_data(unit, block, buffer);
-    if (ok && image_write_log_count < 4u) {
-        fprintf(stderr, "[USB] XMODEM write unit %u block %u -> backing store\n",
-                unit, block);
+    if (image_write_log_count < 8u || (block % 256u) == 0u) {
+        fprintf(stderr,
+                "[USB] image write unit %u (logical %u) block %u -> backing %s\n",
+                unit, logical, block, ok ? "ok" : "FAIL");
         image_write_log_count++;
     }
     cpu.r[0] = ok ? 1u : 0u;

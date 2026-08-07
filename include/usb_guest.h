@@ -29,5 +29,6 @@ void usb_guest_stub_get_volume_info(void);
 void usb_guest_stub_copy_memory_entry(void);
 void usb_guest_stub_read_block(void);
 void usb_guest_stub_write_block(void);
+void usb_guest_stub_write_block_for_image_transfer(void);
 
 #endif /* USB_GUEST_H */

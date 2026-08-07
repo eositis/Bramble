@@ -1307,3 +1307,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | `make -C build bramble bramble_tests` (324/324); megaflash-vm overlay rebuild |
 | **Next** | User retest — expect host-ACK logs and Blocks climbing |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-07 — TFTP assert at ~block 12 after host-ACK progress
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Host-ACK worked (Blocks~10) then stall; guest assert |
+| **Cause** | `WriteBlockForImageTransfer` assert 64k-align (InitSpi skipped); also proxy filled q=512 then server timed out |
+| **Actions** | a2bus host-complete image write to SPI backing; windowed host-ACK (32); drop ERROR while proxying |
+| **Validate** | build + 324/324 tests; megaflash-vm overlay |
+| **Next** | Retest — expect `[USB] image write` logs and Blocks well past 16 |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |

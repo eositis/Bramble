@@ -283,7 +283,8 @@ static darwin_udp_flow_t darwin_udp_flows[DARWIN_UDP_FLOWS];
  * Host ACKs the server immediately, buffers blocks, and paces delivery to the
  * guest one DATA/OACK at a time (guest ACK advances the queue; not forwarded).
  */
-#define TFTP_PROXY_QMAX 512 /* ~256KB of 512B blocks */
+#define TFTP_PROXY_QMAX 256 /* buffered blocks awaiting guest */
+#define TFTP_PROXY_WINDOW 32 /* max host-ACKed ahead of guest (keep tftpd alive) */
 typedef struct {
     uint32_t remote_ip;   /* network order */
     uint16_t remote_port; /* host order (server TID) */
@@ -406,8 +407,8 @@ static void tftp_proxy_poll_flow(darwin_udp_flow_t *f) {
         uint16_t op, blk, rport;
         uint32_t rip;
 
-        if (tftp_proxy_q_count >= TFTP_PROXY_QMAX)
-            break; /* backpressure: leave in kernel until guest catches up */
+        if (tftp_proxy_q_count >= TFTP_PROXY_WINDOW)
+            break; /* don't host-ACK further until guest catches up */
 
         n = recvfrom(f->fd, payload, sizeof(payload), 0,
                      (struct sockaddr *)&from, &fromlen);
@@ -470,9 +471,17 @@ static void tftp_proxy_poll_flow(darwin_udp_flow_t *f) {
             continue;
         }
         if (op == 5) {
-            /* Deliver ERROR to guest (abort path). */
-            darwin_queue_udp_reply(f->guest_ip, f->guest_port, rip, rport,
-                                   payload, (int)n);
+            /* Server Timeout/Unknown TID while we are the ACK authority —
+             * do not inject into guest (one-slot UDP RX would clobber DATA). */
+            static int err_drop;
+            if (err_drop < 8) {
+                err_drop++;
+                fprintf(stderr,
+                        "[TAP] TFTP drop ERROR from server while proxying "
+                        "(%zd bytes)\n",
+                        n);
+                fflush(stderr);
+            }
             continue;
         }
         /* Unexpected: pass through. */

@@ -11,6 +11,15 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-07 — TFTP WriteBlockForImageTransfer + ACK window
+
+| Change | Reason |
+|--------|--------|
+| Export/host `WriteBlockForImageTransfer` stub; a2bus hooks it | Guest assert mediaaccess.c:409 at ~block 12 (SPI erase w/ InitSpi skipped) |
+| `tapif.c`: host-ACK window 32; drop server ERROR while proxying | Filling 512 then stopping killed tftpd; ERROR clobbered guest RX |
+
+---
+
 ## 2026-08-07 — TFTP host-ACK proxy (emu too slow for tftpd)
 
 | Change | Reason |
