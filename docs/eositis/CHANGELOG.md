@@ -11,6 +11,15 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-06 — megaflash-vm `8941c95` — core0Loop for NTP/TFTP
+
+| Change | Reason |
+|--------|--------|
+| Docs: core0Loop starve → no NTP / TFTP FIFO wait | r4 clobber + UserTerminal parked core0 |
+| (megaflash-vm) Force core0Loop; stub USB; kick ExecuteTFTP | Clock/NTP + DoTFTPRun unstall |
+
+---
+
 ## 2026-08-06 — megaflash-vm `1d21794` — DoTestWifi host-complete
 
 | Change | Reason |

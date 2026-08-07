@@ -1188,6 +1188,17 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Commit** | megaflash-vm `1d21794` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
 
+## 2026-08-06 — No NTP / TFTP stall (core0Loop)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | NTP/clock not updating; WiFi test OK; TFTP Status blank / skip-unstick at DoTFTPRun wait |
+| **Cause** | core0 never reached core0Loop (r4 clobber after InitPicoLed → USB wait / UserTerminal); no GetNetworkTime; DoTFTPRun FIFO wait never sees taskid |
+| **Actions** | Force r4 at cbz; stub stdio_usb_connected/UserTerminal; force core0Loop after BusLoop; kick ExecuteTFTP on DoTFTPRun wait; docs |
+| **Validate** | megaflash-vm overlay rebuild |
+| **Commit** | megaflash-vm `8941c95` |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
 ## 2026-08-06 — TFTP abort: JIT IT forced new size=1
 
 | Field | Detail |
