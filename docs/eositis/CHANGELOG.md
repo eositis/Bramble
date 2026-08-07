@@ -11,6 +11,15 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-07 — TFTP pace RX so ACK beats server timeout
+
+| Change | Reason |
+|--------|--------|
+| `tapif.c`: one DATA/OACK in flight until ACK; drain stale ERROR/retransmits after ACK; reuse :69 NAT socket for ephemeral TID | Transfer stuck at Blocks:1; late ACK → Unknown transfer ID |
+| (megaflash-vm) don't force core0 out of GetNTPClientEnabled | Avoid mid-GetNetworkTime yank |
+
+---
+
 ## 2026-08-07 — TFTP DATA overwritten by ERROR Timeout
 
 | Change | Reason |

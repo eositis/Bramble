@@ -1285,3 +1285,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | rebuild Bramble + megaflash-vm |
 | **Commit** | megaflash-vm `835b9c6`; Bramble (tapif+docs) |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-07 — TFTP stalls at Transferring / Blocks:1
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Transferring + block 1 then stall |
+| **Cause** | DATA1 retransmits + Timeout flooded guest before ACK; late ACK → Unknown transfer ID; no block 2 |
+| **Actions** | TAP: pace one DATA until ACK; drain stale ERROR/retransmits after ACK; reuse :69 socket for TID; a2bus: don't force core0 out of GetNTPClientEnabled |
+| **Validate** | `make -C build bramble bramble_tests` (324/324); megaflash-vm overlay rebuild |
+| **Next** | User retest TFTP download — expect Blocks > 1 |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |

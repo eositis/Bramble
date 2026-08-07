@@ -277,6 +277,82 @@ typedef struct {
 } darwin_udp_flow_t;
 static darwin_udp_flow_t darwin_udp_flows[DARWIN_UDP_FLOWS];
 
+/*
+ * TFTP is lock-step: guest must ACK DATA before more blocks arrive. Under emu,
+ * flooding the CYW43 RX queue delays ACK until the server times out → late ACK
+ * gets "Unknown transfer ID" and the transfer stalls at block 1. Hold further
+ * RX on the TFTP NAT flow until we see an ACK (or a new RRQ/WRQ).
+ */
+static int tftp_awaiting_ack;
+static int tftp_pace_fd = -1;
+
+static int eth_is_tftp_data_or_oack(const uint8_t *payload, int len) {
+    if (len < 4) return 0;
+    uint16_t op = ((uint16_t)payload[0] << 8) | payload[1];
+    return (op == 3 || op == 6); /* DATA or OACK */
+}
+
+static void darwin_queue_udp_reply(uint32_t guest_ip, uint16_t guest_port,
+                                   uint32_t remote_ip, uint16_t remote_port,
+                                   const uint8_t *payload, int payload_len);
+
+/* After guest ACK, discard Timeout/ERROR and retransmits of already-ACKed
+ * blocks that piled up in the host socket while we were pacing. */
+static void darwin_tftp_drain_stale(int fd, uint16_t acked_block) {
+    uint8_t payload[1400];
+    if (fd < 0) return;
+    for (;;) {
+        struct sockaddr_in from;
+        socklen_t fromlen = sizeof(from);
+        ssize_t n = recvfrom(fd, payload, sizeof(payload), 0,
+                             (struct sockaddr *)&from, &fromlen);
+        if (n < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) break;
+            break;
+        }
+        if (n < 2) continue;
+        uint16_t op = ((uint16_t)payload[0] << 8) | payload[1];
+        if (op == 5) {
+            fprintf(stderr, "[TAP] TFTP drop stale ERROR while draining after ACK\n");
+            fflush(stderr);
+            continue;
+        }
+        if (op == 3 && n >= 4) {
+            uint16_t blk = ((uint16_t)payload[2] << 8) | payload[3];
+            if (blk <= acked_block) {
+                fprintf(stderr,
+                        "[TAP] TFTP drop retransmit DATA block %u (acked %u)\n",
+                        (unsigned)blk, (unsigned)acked_block);
+                fflush(stderr);
+                continue;
+            }
+            /* Next block — find flow and inject. */
+            for (int i = 0; i < DARWIN_UDP_FLOWS; i++) {
+                darwin_udp_flow_t *f = &darwin_udp_flows[i];
+                if (f->fd != fd) continue;
+                uint16_t rport = ntohs(from.sin_port);
+                if (f->remote_port == 69u && rport != 69u)
+                    f->remote_port = rport;
+                darwin_queue_udp_reply(f->guest_ip, f->guest_port,
+                                       from.sin_addr.s_addr, rport,
+                                       payload, (int)n);
+                tftp_awaiting_ack = 1;
+                tftp_pace_fd = fd;
+                fprintf(stderr,
+                        "[TAP] TFTP RX paced DATA block %u (%zd bytes)\n",
+                        (unsigned)blk, n);
+                fflush(stderr);
+                return;
+            }
+            continue;
+        }
+        /* Other opcodes: drop during drain. */
+        fprintf(stderr, "[TAP] TFTP drop op=%u during post-ACK drain\n",
+                (unsigned)op);
+        fflush(stderr);
+    }
+}
+
 static void queue_pending_eth(const uint8_t *frame, int len) {
     if (len <= 0 || len > 1518) return;
     if (darwin_rxq_count >= DARWIN_RXQ) {
@@ -316,6 +392,8 @@ static void darwin_udp_nat_close_all(void) {
             darwin_udp_flows[i].fd = -1;
         }
     }
+    tftp_awaiting_ack = 0;
+    tftp_pace_fd = -1;
 }
 
 static darwin_udp_flow_t *darwin_udp_flow_find(uint32_t gip, uint16_t gport,
@@ -326,6 +404,19 @@ static darwin_udp_flow_t *darwin_udp_flow_find(uint32_t gip, uint16_t gport,
         if (f->guest_ip == gip && f->guest_port == gport &&
             f->remote_ip == rip && f->remote_port == rport)
             return f;
+    }
+    /* TFTP TID: server replies from ephemeral port; reuse the :69 socket so
+     * host source port stays the same (else server returns Unknown transfer ID). */
+    if (rport != 69u) {
+        for (int i = 0; i < DARWIN_UDP_FLOWS; i++) {
+            darwin_udp_flow_t *f = &darwin_udp_flows[i];
+            if (f->fd < 0) continue;
+            if (f->guest_ip == gip && f->guest_port == gport &&
+                f->remote_ip == rip && f->remote_port == 69u) {
+                f->remote_port = rport;
+                return f;
+            }
+        }
     }
     return NULL;
 }
@@ -414,6 +505,9 @@ static void darwin_udp_nat_poll(void) {
     for (int i = 0; i < DARWIN_UDP_FLOWS; i++) {
         darwin_udp_flow_t *f = &darwin_udp_flows[i];
         if (f->fd < 0) continue;
+        /* Pace TFTP: don't inject more on this flow until guest ACKs. */
+        if (tftp_awaiting_ack && f->fd == tftp_pace_fd)
+            continue;
         for (;;) {
             struct sockaddr_in from;
             socklen_t fromlen = sizeof(from);
@@ -421,6 +515,10 @@ static void darwin_udp_nat_poll(void) {
                                  (struct sockaddr *)&from, &fromlen);
             if (n < 0) {
                 if (errno == EAGAIN || errno == EWOULDBLOCK) break;
+                if (f->fd == tftp_pace_fd) {
+                    tftp_awaiting_ack = 0;
+                    tftp_pace_fd = -1;
+                }
                 close(f->fd);
                 f->fd = -1;
                 break;
@@ -428,27 +526,36 @@ static void darwin_udp_nat_poll(void) {
             uint32_t rip = from.sin_addr.s_addr;
             uint16_t rport = ntohs(from.sin_port);
             f->last_used = time(NULL);
+            /* Track actual server TID on the flow. */
+            if (f->remote_port == 69u && rport != 69u)
+                f->remote_port = rport;
             darwin_queue_udp_reply(f->guest_ip, f->guest_port,
                                    rip, rport, payload, (int)n);
-            /* TFTP: original flow was to :69; reply may use ephemeral TID. */
-            if (f->remote_port == 69u && n >= 2 && n <= 1500) {
-                static int tftp_rx_hex;
-                if (tftp_rx_hex < 12) {
-                    tftp_rx_hex++;
-                    uint16_t op = ((uint16_t)payload[0] << 8) | payload[1];
-                    int i, hn = n < 48 ? (int)n : 48;
-                    fprintf(stderr,
-                            "[TAP] TFTP RX from :%u op=%u (%zd bytes) hex:",
-                            (unsigned)rport, (unsigned)op, n);
-                    for (i = 0; i < hn; i++)
-                        fprintf(stderr, " %02x", payload[i]);
-                    if (n > hn)
-                        fprintf(stderr, " …");
-                    if (op == 5 && n > 4)
-                        fprintf(stderr, " msg='%.*s'", (int)n - 4,
-                                (const char *)payload + 4);
-                    fprintf(stderr, "\n");
-                    fflush(stderr);
+            if (n >= 2 && n <= 1500) {
+                uint16_t op = ((uint16_t)payload[0] << 8) | payload[1];
+                if (op >= 1 && op <= 6) {
+                    static int tftp_rx_hex;
+                    if (tftp_rx_hex < 24) {
+                        tftp_rx_hex++;
+                        int hi, hn = n < 48 ? (int)n : 48;
+                        fprintf(stderr,
+                                "[TAP] TFTP RX from :%u op=%u (%zd bytes) hex:",
+                                (unsigned)rport, (unsigned)op, n);
+                        for (hi = 0; hi < hn; hi++)
+                            fprintf(stderr, " %02x", payload[hi]);
+                        if (n > hn)
+                            fprintf(stderr, " …");
+                        if (op == 5 && n > 4)
+                            fprintf(stderr, " msg='%.*s'", (int)n - 4,
+                                    (const char *)payload + 4);
+                        fprintf(stderr, "\n");
+                        fflush(stderr);
+                    }
+                    if (eth_is_tftp_data_or_oack(payload, (int)n)) {
+                        tftp_awaiting_ack = 1;
+                        tftp_pace_fd = f->fd;
+                        break; /* one DATA/OACK at a time */
+                    }
                 }
             }
         }
@@ -509,29 +616,52 @@ static int darwin_udp_nat_tx(const uint8_t *eth, int len) {
     dest.sin_addr.s_addr = dip;
 
     const uint8_t *payload = udp + 8;
+    int pace_fd = tftp_pace_fd;
+    uint16_t acked_block = 0;
+    int clear_tftp_pace = 0;
+    if (payload_len >= 2) {
+        uint16_t op = ((uint16_t)payload[0] << 8) | payload[1];
+        if (op == 1 || op == 2) {
+            /* New request — reset pace; do not drain (new transfer). */
+            tftp_awaiting_ack = 0;
+            tftp_pace_fd = -1;
+            pace_fd = -1;
+        } else if (op == 4 && payload_len >= 4) {
+            acked_block = ((uint16_t)payload[2] << 8) | payload[3];
+            tftp_awaiting_ack = 0;
+            tftp_pace_fd = -1;
+            clear_tftp_pace = 1;
+        }
+    }
     ssize_t n = sendto(f->fd, payload, (size_t)payload_len, 0,
                        (struct sockaddr *)&dest, sizeof(dest));
     if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
         fprintf(stderr, "[TAP] UDP NAT sendto failed: %s\n", strerror(errno));
     } else {
         static int tx_logged;
-        if (tx_logged < 12) {
-            tx_logged++;
+        int is_tftp = (dport == 69u) ||
+                      (payload_len >= 2 &&
+                       (((uint16_t)payload[0] << 8) | payload[1]) <= 6);
+        if (tx_logged < 24 || is_tftp) {
+            if (tx_logged < 24)
+                tx_logged++;
             const uint8_t *d = (const uint8_t *)&dip;
             fprintf(stderr,
                     "[TAP] UDP NAT → %u.%u.%u.%u:%u (%d payload bytes)\n",
                     d[0], d[1], d[2], d[3], (unsigned)dport, payload_len);
-            if (dport == 69u && payload_len > 0) {
-                int i, n = payload_len < 48 ? payload_len : 48;
+            if (is_tftp && payload_len > 0) {
+                int i, hn = payload_len < 48 ? payload_len : 48;
                 fprintf(stderr, "[TAP] TFTP TX hex:");
-                for (i = 0; i < n; i++)
+                for (i = 0; i < hn; i++)
                     fprintf(stderr, " %02x", payload[i]);
-                if (payload_len > n)
+                if (payload_len > hn)
                     fprintf(stderr, " …");
                 fprintf(stderr, "\n");
             }
             fflush(stderr);
         }
+        if (clear_tftp_pace && pace_fd >= 0)
+            darwin_tftp_drain_stale(pace_fd, acked_block);
     }
     return 1;
 }
