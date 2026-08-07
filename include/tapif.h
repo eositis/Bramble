@@ -25,6 +25,10 @@ int tapif_read(int fd, uint8_t *buf, int maxlen);
 /* Write an Ethernet frame. Returns bytes written or -1 on error. */
 int tapif_write(int fd, const uint8_t *buf, int len);
 
+/* Service UDP NAT / TFTP host-ACK without requiring a TAP Ethernet read.
+ * Safe to call often; used when guest radio is asleep but TFTP still runs. */
+void tapif_service(int fd);
+
 /*
  * Optional TFTP DATA fast-path (a2bus): if set, called after host-ACK for each
  * DATA/OACK. Return 1 if the payload was applied on the host (do not deliver

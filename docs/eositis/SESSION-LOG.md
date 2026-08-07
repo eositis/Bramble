@@ -1329,3 +1329,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | build + 324/324; megaflash-vm overlay |
 | **Next** | Retest — expect host-apply logs and rapid Blocks / Completed |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-07 — TFTP stall ~37k blocks after kso_set(0) failed
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Fast host-apply to ~half volume then stall; log shows cyw43_kso_set(0): failed |
+| **Cause** | SLEEPCSR always returned 0x03 → guest KSO-clear busy-loop; TAP/UDP NAT poll starved → no more host-ACKs |
+| **Actions** | Track SLEEPCSR; tapif_service always; a2bus NAT service during TFTP; larger SO_RCVBUF |
+| **Validate** | build + 324/324; megaflash-vm overlay |
+| **Next** | Retest full download to Completed |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |

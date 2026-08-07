@@ -236,6 +236,10 @@ int tapif_write(int fd, const uint8_t *buf, int len) {
     return total;
 }
 
+void tapif_service(int fd) {
+    (void)fd;
+}
+
 #elif defined(__APPLE__)
 
 #include <sys/ioctl.h>
@@ -728,6 +732,10 @@ static int darwin_udp_nat_tx(const uint8_t *eth, int len) {
         int flags = fcntl(s, F_GETFL, 0);
         if (flags != -1)
             fcntl(s, F_SETFL, flags | O_NONBLOCK);
+        {
+            int rcv = 1 << 20; /* 1MB — large TFTP downloads need headroom */
+            setsockopt(s, SOL_SOCKET, SO_RCVBUF, &rcv, sizeof(rcv));
+        }
         f->fd = s;
         f->guest_ip = sip;
         f->guest_port = sport;
@@ -961,6 +969,12 @@ void tapif_close(int fd) {
     }
 }
 
+void tapif_service(int fd) {
+    (void)fd;
+    if (fd < 0) return;
+    darwin_udp_nat_poll();
+}
+
 int tapif_read(int fd, uint8_t *buf, int maxlen) {
     if (fd < 0) return -1;
 
@@ -1073,6 +1087,14 @@ int tapif_read(int fd, uint8_t *buf, int maxlen) {
 int tapif_write(int fd, const uint8_t *buf, int len) {
     (void)fd; (void)buf; (void)len;
     return -1;
+}
+
+void tapif_service(int fd) {
+    (void)fd;
+}
+
+void tapif_set_tftp_data_apply(tapif_tftp_data_apply_fn fn) {
+    (void)fn;
 }
 
 #endif

@@ -235,6 +235,7 @@ typedef struct {
     /* Backplane (function 1) */
     uint32_t bp_window;
     uint32_t chipclkcsr;
+    uint32_t sleepcsr;           /* SBSDIO_FUNC1_SLEEPCSR (KSO) */
 
     /* WiFi state */
     int wifi_state;

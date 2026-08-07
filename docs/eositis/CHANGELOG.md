@@ -11,6 +11,16 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-07 — TFTP mid-transfer stall: SLEEPCSR / KSO
+
+| Change | Reason |
+|--------|--------|
+| `cyw43.c`: track SLEEPCSR so `kso_set(0)` succeeds | Guest loop after ~37k blocks starved TAP poll |
+| `tapif_service` + always-on NAT poll; a2bus services during RunTFTP | Keep host-ACK alive if guest sleeps radio |
+| Larger UDP SO_RCVBUF for NAT flows | Headroom for large downloads |
+
+---
+
 ## 2026-08-07 — TFTP host-apply fast path (skip gSPI)
 
 | Change | Reason |

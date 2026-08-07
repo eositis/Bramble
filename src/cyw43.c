@@ -761,6 +761,7 @@ void cyw43_reset(void) {
     strcpy(cyw43.country, "XX");
     cyw43.wifi_state = CYW43_WIFI_OFF;
     cyw43.chipclkcsr = CYW43_HT_AVAIL | CYW43_ALP_AVAIL;
+    cyw43.sleepcsr = 0x03; /* KSO_SET | DEV_ON — awake after reset */
     cyw43.pio_num = -1;
     cyw43.pio_sm = -1;
     pio_init_swap_remaining = 2;  /* First 2 commands use SWAP32 encoding */
@@ -799,6 +800,14 @@ void cyw43_tap_close(void) {
 
 void cyw43_tap_poll(void) {
     if (cyw43.tap_fd < 0) return;
+
+    /*
+     * Always service UDP NAT (DNS/NTP/TFTP host-ACK) even if the guest has
+     * put the radio to sleep — otherwise long TFTP stalls when kso_set(0)
+     * runs and guest stops calling into the WLAN RX path.
+     */
+    tapif_service(cyw43.tap_fd);
+
     if (cyw43.wifi_state != CYW43_WIFI_CONNECTED) return;
 
     /* Read Ethernet frames from TAP and queue for firmware */
@@ -928,8 +937,9 @@ static uint32_t cyw43_backplane_read(uint32_t addr) {
 
     /* SDIO func1 direct registers (full 17-bit address, no windowing) */
     if (addr == 0x1001F) {
-        /* SBSDIO_FUNC1_SLEEPCSR (KSO): always return KSO_SET | DEVICE_ON = 0x03 */
-        return 0x03;
+        /* SBSDIO_FUNC1_SLEEPCSR — track KSO; always-0x03 made cyw43_kso_set(0)
+         * fail forever and stall long TFTP (guest busy-loops, TAP poll starves). */
+        return cyw43.sleepcsr & 0xFFu;
     }
 
     /* Windowed backplane access: reconstruct full address from window + offset */
@@ -969,6 +979,17 @@ static void cyw43_backplane_write(uint32_t addr, uint32_t val) {
     /* CHIPCLKCSR write (SDIO func1 direct register) */
     if (addr == CYW43_BP_CHIPCLKCSR) {
         cyw43.chipclkcsr = val | CYW43_HT_AVAIL | CYW43_ALP_AVAIL;
+        return;
+    }
+    if (addr == 0x1001F) {
+        static int kso_logged;
+        cyw43.sleepcsr = val & 0xFFu;
+        if (kso_logged < 8) {
+            kso_logged++;
+            fprintf(stderr, "[CYW43] SLEEPCSR write → 0x%02X\n",
+                    (unsigned)cyw43.sleepcsr);
+            fflush(stderr);
+        }
         return;
     }
 
