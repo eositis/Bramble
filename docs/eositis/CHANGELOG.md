@@ -11,6 +11,15 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-07 — TFTP plain RRQ + TAP hex dump
+
+| Change | Reason |
+|--------|--------|
+| `tapif.c`: hex-dump TFTP TX/RX on UDP NAT | Diagnose server ERROR payloads |
+| Docs: 41-byte optioned RRQ → ERROR 0 | (megaflash-vm) force plain RRQ under a2bus |
+
+---
+
 ## 2026-08-06 — megaflash-vm `ef8838e` — fifo_pop_timeout force spam
 
 | Change | Reason |

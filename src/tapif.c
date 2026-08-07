@@ -397,7 +397,7 @@ static void darwin_queue_udp_reply(uint32_t guest_ip, uint16_t guest_port,
 
     {
         static int rx_logged;
-        if (rx_logged < 8) {
+        if (rx_logged < 12) {
             rx_logged++;
             const uint8_t *r = (const uint8_t *)&remote_ip;
             fprintf(stderr,
@@ -430,6 +430,27 @@ static void darwin_udp_nat_poll(void) {
             f->last_used = time(NULL);
             darwin_queue_udp_reply(f->guest_ip, f->guest_port,
                                    rip, rport, payload, (int)n);
+            /* TFTP: original flow was to :69; reply may use ephemeral TID. */
+            if (f->remote_port == 69u && n >= 2 && n <= 512) {
+                static int tftp_rx_hex;
+                if (tftp_rx_hex < 8) {
+                    tftp_rx_hex++;
+                    uint16_t op = ((uint16_t)payload[0] << 8) | payload[1];
+                    int i, hn = n < 48 ? (int)n : 48;
+                    fprintf(stderr,
+                            "[TAP] TFTP RX from :%u op=%u (%zd bytes) hex:",
+                            (unsigned)rport, (unsigned)op, n);
+                    for (i = 0; i < hn; i++)
+                        fprintf(stderr, " %02x", payload[i]);
+                    if (n > hn)
+                        fprintf(stderr, " …");
+                    if (op == 5 && n > 4)
+                        fprintf(stderr, " msg='%.*s'", (int)n - 4,
+                                (const char *)payload + 4);
+                    fprintf(stderr, "\n");
+                    fflush(stderr);
+                }
+            }
         }
     }
 }
@@ -500,6 +521,15 @@ static int darwin_udp_nat_tx(const uint8_t *eth, int len) {
             fprintf(stderr,
                     "[TAP] UDP NAT → %u.%u.%u.%u:%u (%d payload bytes)\n",
                     d[0], d[1], d[2], d[3], (unsigned)dport, payload_len);
+            if (dport == 69u && payload_len > 0) {
+                int i, n = payload_len < 48 ? payload_len : 48;
+                fprintf(stderr, "[TAP] TFTP TX hex:");
+                for (i = 0; i < n; i++)
+                    fprintf(stderr, " %02x", payload[i]);
+                if (payload_len > n)
+                    fprintf(stderr, " …");
+                fprintf(stderr, "\n");
+            }
             fflush(stderr);
         }
     }
