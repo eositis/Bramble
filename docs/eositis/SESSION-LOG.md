@@ -1177,6 +1177,17 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Commit** | megaflash-vm `9158154` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
 
+## 2026-08-06 — TestWifi lockup (skip-unstick forever)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Locked up on Test Wifi; skip unstick loops; MAME killed |
+| **Cause** | DoTestWifi waits on core0 FIFO IPC; core0 never services (boot NTP / not in core0Loop); refusing WFI-unstick left BUSY forever |
+| **Actions** | Host-complete DoTestWifi (TestResult + IP strings + clear BUSY); always host-complete TestWifi IPC; docs |
+| **Validate** | megaflash-vm overlay rebuild |
+| **Commit** | megaflash-vm `1d21794` |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
 ## 2026-08-06 — TFTP abort: JIT IT forced new size=1
 
 | Field | Detail |

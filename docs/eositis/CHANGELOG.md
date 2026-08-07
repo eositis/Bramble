@@ -11,6 +11,15 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-06 — megaflash-vm `1d21794` — DoTestWifi host-complete
+
+| Change | Reason |
+|--------|--------|
+| Docs: DoTestWifi IPC deadlock → host-complete | Skip-unstick lockup when core0 busy with boot NTP |
+| (megaflash-vm) Host-complete DoTestWifi + TestWifi IPC | Fill IPs/BUSY clear; no FIFO wait on core0 |
+
+---
+
 ## 2026-08-06 — megaflash-vm `9158154` — WFI must not override long_cmd BUSY hold
 
 | Change | Reason |
