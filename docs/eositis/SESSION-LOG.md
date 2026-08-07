@@ -1340,3 +1340,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | build + 324/324; megaflash-vm overlay |
 | **Next** | Retest full download to Completed |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-07 — TFTP ~41k stall + Time stuck at 3s (kso_set(1))
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Further progress (~41547) then stall; Time not incrementing (RTC/timer priority) |
+| **Cause** | Wake needs SLEEPCSR 0x03 (KSO\|DEVON); we stored 0x01 → kso_set(1) failed → delay_ms loops; host-apply starved guest TIMER so Time stayed ~3s |
+| **Actions** | OR DEVON on KSO set; wall-clock TIMER0 during RunTFTP; more frequent tapif_service; skip WINDOW under host-apply |
+| **Validate** | build + tests |
+| **Next** | Retest — expect Time to climb and transfer past 41k to Completed |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |

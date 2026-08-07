@@ -11,6 +11,16 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-07 — TFTP kso_set(1) + stuck Time
+
+| Change | Reason |
+|--------|--------|
+| SLEEPCSR wake sets KSO\|DEVON (0x03) | `kso_set(1)` polls for both bits; 0x01 made wake fail |
+| a2bus: wall-clock TIMER0 during RunTFTP/host-apply | DoTFTPStatus Time stuck ~3s; delay_ms starved |
+| Skip TFTP proxy WINDOW when host-apply active | Defensive — queue gate must not pause ACKs |
+
+---
+
 ## 2026-08-07 — TFTP mid-transfer stall: SLEEPCSR / KSO
 
 | Change | Reason |

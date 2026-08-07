@@ -937,8 +937,7 @@ static uint32_t cyw43_backplane_read(uint32_t addr) {
 
     /* SDIO func1 direct registers (full 17-bit address, no windowing) */
     if (addr == 0x1001F) {
-        /* SBSDIO_FUNC1_SLEEPCSR — track KSO; always-0x03 made cyw43_kso_set(0)
-         * fail forever and stall long TFTP (guest busy-loops, TAP poll starves). */
+        /* SBSDIO_FUNC1_SLEEPCSR — see write path (KSO clear + KSO|DEVON wake). */
         return cyw43.sleepcsr & 0xFFu;
     }
 
@@ -982,8 +981,16 @@ static void cyw43_backplane_write(uint32_t addr, uint32_t val) {
         return;
     }
     if (addr == 0x1001F) {
+        /* cyw43_kso_set(1) polls until (SLEEPCSR & 0x03) == 0x03 (KSO|DEVON).
+         * Hardware sets DEVON after KSO; storing write-as-is (0x01) made wake
+         * fail → 64× delay_ms busy-loops that starve TFTP host-ACK. */
         static int kso_logged;
-        cyw43.sleepcsr = val & 0xFFu;
+        uint8_t v = (uint8_t)(val & 0xFFu);
+        if (v & 0x01u)
+            v |= 0x02u;
+        else
+            v &= (uint8_t)~0x03u;
+        cyw43.sleepcsr = v;
         if (kso_logged < 8) {
             kso_logged++;
             fprintf(stderr, "[CYW43] SLEEPCSR write → 0x%02X\n",

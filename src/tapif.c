@@ -416,7 +416,9 @@ static void tftp_proxy_poll_flow(darwin_udp_flow_t *f) {
         uint16_t op, blk, rport;
         uint32_t rip;
 
-        if (tftp_proxy_q_count >= TFTP_PROXY_WINDOW)
+        /* Host-apply path never enqueues — skip the guest catch-up gate so a
+         * full proxy queue cannot pause ACKs mid-download. */
+        if (!tftp_data_apply && tftp_proxy_q_count >= TFTP_PROXY_WINDOW)
             break; /* don't host-ACK further until guest catches up */
 
         n = recvfrom(f->fd, payload, sizeof(payload), 0,
