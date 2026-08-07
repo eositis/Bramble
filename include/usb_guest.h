@@ -30,5 +30,8 @@ void usb_guest_stub_copy_memory_entry(void);
 void usb_guest_stub_read_block(void);
 void usb_guest_stub_write_block(void);
 void usb_guest_stub_write_block_for_image_transfer(void);
+/* Write one ProDOS block for TFTP/XMODEM image path (logical unit). */
+int usb_guest_flash_write_image_block(uint32_t logical_unit, uint32_t block,
+                                      const uint8_t *data);
 
 #endif /* USB_GUEST_H */

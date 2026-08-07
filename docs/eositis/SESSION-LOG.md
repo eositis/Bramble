@@ -1318,3 +1318,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | build + 324/324 tests; megaflash-vm overlay |
 | **Next** | Retest — expect `[USB] image write` logs and Blocks well past 16 |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-07 — TFTP host-apply to fix ~3 blk/s gSPI crawl
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Transfer works but extremely slow (~34 blocks / 11s, retransmits) |
+| **Cause** | Each DATA still went guest CYW43/gSPI under Thumb emu |
+| **Actions** | TAP apply callback; a2bus writes flash + updates tftp_state/task; Complete on EOF; skip guest DATA delivery |
+| **Validate** | build + 324/324; megaflash-vm overlay |
+| **Next** | Retest — expect host-apply logs and rapid Blocks / Completed |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |

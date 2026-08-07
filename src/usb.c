@@ -2022,6 +2022,26 @@ void usb_guest_stub_write_block_for_image_transfer(void) {
     cpu.r[15] = (cpu.r[14] & ~1u) | 1u;
 }
 
+int usb_guest_flash_write_image_block(uint32_t logical_unit, uint32_t block,
+                                      const uint8_t *data) {
+    uint32_t unit = usb_guest_map_flash_medium_unit(logical_unit);
+    uint8_t buffer[USB_GUEST_FLASH_BLOCK_BYTES];
+    static uint32_t fast_write_log;
+
+    if (data == NULL)
+        return 0;
+    memcpy(buffer, data, USB_GUEST_FLASH_BLOCK_BYTES);
+    if (!usb_guest_flash_write_block_data(unit, block, buffer))
+        return 0;
+    if (fast_write_log < 4u || (block % 512u) == 0u) {
+        fprintf(stderr,
+                "[USB] TFTP fast-write unit %u (logical %u) block %u\n",
+                unit, logical_unit, block);
+        fast_write_log++;
+    }
+    return 1;
+}
+
 static void usb_guest_xmodem_clamp_copy_chunk(void) {
     uint32_t in_buf = mem_read32(USB_GUEST_PARTS_IN_BUFFER);
     uint32_t chunk = in_buf < 4u ? 4u - in_buf : 0u;

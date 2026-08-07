@@ -11,6 +11,16 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-07 — TFTP host-apply fast path (skip gSPI)
+
+| Change | Reason |
+|--------|--------|
+| `tapif`: optional DATA apply callback after host-ACK | Guest CYW43 delivery ~3 blk/s |
+| a2bus: write SPI + update tftp_state/CTFTPRXTask; Complete on EOF | Usable download speed under emu |
+| `usb_guest_flash_write_image_block` export | Shared write helper |
+
+---
+
 ## 2026-08-07 — TFTP WriteBlockForImageTransfer + ACK window
 
 | Change | Reason |

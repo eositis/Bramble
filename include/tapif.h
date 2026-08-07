@@ -25,4 +25,13 @@ int tapif_read(int fd, uint8_t *buf, int maxlen);
 /* Write an Ethernet frame. Returns bytes written or -1 on error. */
 int tapif_write(int fd, const uint8_t *buf, int len);
 
+/*
+ * Optional TFTP DATA fast-path (a2bus): if set, called after host-ACK for each
+ * DATA/OACK. Return 1 if the payload was applied on the host (do not deliver
+ * through guest CYW43); 0 to use the normal guest delivery path.
+ */
+typedef int (*tapif_tftp_data_apply_fn)(const uint8_t *payload, int len,
+                                        uint16_t server_port);
+void tapif_set_tftp_data_apply(tapif_tftp_data_apply_fn fn);
+
 #endif /* TAPIF_H */

@@ -306,6 +306,11 @@ static unsigned tftp_proxy_host_acks;
 static unsigned tftp_proxy_guest_acks;
 static uint16_t tftp_proxy_last_enqueued; /* last DATA/OACK block buffered */
 static int tftp_proxy_have_enqueued;
+static tapif_tftp_data_apply_fn tftp_data_apply;
+
+void tapif_set_tftp_data_apply(tapif_tftp_data_apply_fn fn) {
+    tftp_data_apply = fn;
+}
 
 static void tftp_proxy_reset(void) {
     tftp_proxy_q_head = 0;
@@ -452,14 +457,20 @@ static void tftp_proxy_poll_flow(darwin_udp_flow_t *f) {
         }
 
         if (op == 3 || op == 6) {
-            /* DATA or OACK — ACK server now; feed guest later. */
+            /* DATA or OACK — ACK server now; feed guest later (or host-apply). */
             blk = (op == 6) ? 0u : (((uint16_t)payload[2] << 8) | payload[3]);
             if (n > 516)
                 n = 516;
             tftp_proxy_host_ack(f->fd, rip, rport, blk);
-            /* Drop retransmits already buffered (host already ACKed). */
+            /* Drop retransmits already buffered/applied. */
             if (tftp_proxy_have_enqueued && blk <= tftp_proxy_last_enqueued)
                 continue;
+            if (tftp_data_apply &&
+                tftp_data_apply(payload, (int)n, rport)) {
+                tftp_proxy_last_enqueued = blk;
+                tftp_proxy_have_enqueued = 1;
+                continue; /* host wrote flash + updated guest state */
+            }
             if (!tftp_proxy_enqueue(rip, rport, payload, (int)n)) {
                 fprintf(stderr, "[TAP] TFTP proxy queue full — drop block %u\n",
                         (unsigned)blk);
