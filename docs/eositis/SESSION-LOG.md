@@ -1253,3 +1253,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | megaflash-vm overlay rebuild |
 | **Commit** | megaflash-vm `ef8838e` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-07 — TFTP ERROR code 0 despite file on server
+
+| Field | Detail |
+|-------|--------|
+| **Request** | NTP OK; TFTP still Completed with error code 0; RRQ reaches :69 |
+| **Cause** | Likely optioned RRQ (41 bytes: blksize/tsize with enable1k=1); many tftpd reply ERROR 0 |
+| **Actions** | a2bus force GetTFTPEnable1kBlockSize→0; TAP TFTP hex dump; U2_MonPollFlush not force-preempted |
+| **Validate** | rebuild Bramble + megaflash-vm overlay |
+| **Commit** | megaflash-vm `0c4ca0d`; Bramble (tapif+docs) |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
