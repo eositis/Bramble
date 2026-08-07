@@ -1296,3 +1296,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | `make -C build bramble bramble_tests` (324/324); megaflash-vm overlay rebuild |
 | **Next** | User retest TFTP download — expect Blocks > 1 |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-07 — TFTP host-ACK proxy after pace still Unknown TID
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Still Transferring / Blocks:1 (~1s); pace dropped retransmits but ACK still Unknown TID |
+| **Cause** | Guest ACK latency > tftpd timeout even with single-DATA pacing |
+| **Actions** | TAP host-ACKs server immediately, queues blocks, paces to guest, suppresses guest ACK wire send |
+| **Validate** | `make -C build bramble bramble_tests` (324/324); megaflash-vm overlay rebuild |
+| **Next** | User retest — expect host-ACK logs and Blocks climbing |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |

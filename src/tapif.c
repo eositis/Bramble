@@ -278,79 +278,208 @@ typedef struct {
 static darwin_udp_flow_t darwin_udp_flows[DARWIN_UDP_FLOWS];
 
 /*
- * TFTP is lock-step: guest must ACK DATA before more blocks arrive. Under emu,
- * flooding the CYW43 RX queue delays ACK until the server times out → late ACK
- * gets "Unknown transfer ID" and the transfer stalls at block 1. Hold further
- * RX on the TFTP NAT flow until we see an ACK (or a new RRQ/WRQ).
+ * TFTP ACK proxy: guest Thumb emu is too slow to ACK before tftpd times out
+ * (even one DATA→ACK round-trip can exceed the server timeout → Unknown TID).
+ * Host ACKs the server immediately, buffers blocks, and paces delivery to the
+ * guest one DATA/OACK at a time (guest ACK advances the queue; not forwarded).
  */
-static int tftp_awaiting_ack;
-static int tftp_pace_fd = -1;
+#define TFTP_PROXY_QMAX 512 /* ~256KB of 512B blocks */
+typedef struct {
+    uint32_t remote_ip;   /* network order */
+    uint16_t remote_port; /* host order (server TID) */
+    uint16_t len;
+    uint8_t payload[516];
+} tftp_proxy_pkt_t;
 
-static int eth_is_tftp_data_or_oack(const uint8_t *payload, int len) {
-    if (len < 4) return 0;
-    uint16_t op = ((uint16_t)payload[0] << 8) | payload[1];
-    return (op == 3 || op == 6); /* DATA or OACK */
+static tftp_proxy_pkt_t tftp_proxy_q[TFTP_PROXY_QMAX];
+static int tftp_proxy_q_head;
+static int tftp_proxy_q_count;
+static int tftp_proxy_active;
+static int tftp_proxy_fd = -1;
+static int tftp_proxy_guest_inflight; /* 1 = guest has unacked DATA/OACK */
+static uint16_t tftp_proxy_last_guest_ack;
+static uint32_t tftp_proxy_guest_ip;
+static uint16_t tftp_proxy_guest_port;
+static uint32_t tftp_proxy_remote_ip;
+static unsigned tftp_proxy_host_acks;
+static unsigned tftp_proxy_guest_acks;
+static uint16_t tftp_proxy_last_enqueued; /* last DATA/OACK block buffered */
+static int tftp_proxy_have_enqueued;
+
+static void tftp_proxy_reset(void) {
+    tftp_proxy_q_head = 0;
+    tftp_proxy_q_count = 0;
+    tftp_proxy_active = 0;
+    tftp_proxy_fd = -1;
+    tftp_proxy_guest_inflight = 0;
+    tftp_proxy_last_guest_ack = 0;
+    tftp_proxy_guest_ip = 0;
+    tftp_proxy_guest_port = 0;
+    tftp_proxy_remote_ip = 0;
+    tftp_proxy_host_acks = 0;
+    tftp_proxy_guest_acks = 0;
+    tftp_proxy_last_enqueued = 0;
+    tftp_proxy_have_enqueued = 0;
 }
 
 static void darwin_queue_udp_reply(uint32_t guest_ip, uint16_t guest_port,
                                    uint32_t remote_ip, uint16_t remote_port,
                                    const uint8_t *payload, int payload_len);
 
-/* After guest ACK, discard Timeout/ERROR and retransmits of already-ACKed
- * blocks that piled up in the host socket while we were pacing. */
-static void darwin_tftp_drain_stale(int fd, uint16_t acked_block) {
+static void tftp_proxy_host_ack(int fd, uint32_t remote_ip, uint16_t remote_port,
+                                uint16_t block) {
+    uint8_t ack[4];
+    struct sockaddr_in dest;
+    ack[0] = 0;
+    ack[1] = 4; /* ACK */
+    ack[2] = (uint8_t)(block >> 8);
+    ack[3] = (uint8_t)(block & 0xFF);
+    memset(&dest, 0, sizeof(dest));
+    dest.sin_family = AF_INET;
+    dest.sin_port = htons(remote_port);
+    dest.sin_addr.s_addr = remote_ip;
+    if (sendto(fd, ack, 4, 0, (struct sockaddr *)&dest, sizeof(dest)) < 0) {
+        fprintf(stderr, "[TAP] TFTP host-ACK block %u failed: %s\n",
+                (unsigned)block, strerror(errno));
+    } else {
+        tftp_proxy_host_acks++;
+        if (tftp_proxy_host_acks <= 8 || (tftp_proxy_host_acks % 64) == 0) {
+            fprintf(stderr, "[TAP] TFTP host-ACK block %u → :%u (#%u)\n",
+                    (unsigned)block, (unsigned)remote_port,
+                    tftp_proxy_host_acks);
+            fflush(stderr);
+        }
+    }
+}
+
+static void tftp_proxy_deliver_one(void) {
+    tftp_proxy_pkt_t *p;
+    if (tftp_proxy_guest_inflight || tftp_proxy_q_count <= 0)
+        return;
+    p = &tftp_proxy_q[tftp_proxy_q_head];
+    darwin_queue_udp_reply(tftp_proxy_guest_ip, tftp_proxy_guest_port,
+                           p->remote_ip, p->remote_port,
+                           p->payload, (int)p->len);
+    tftp_proxy_guest_inflight = 1;
+    {
+        uint16_t op = ((uint16_t)p->payload[0] << 8) | p->payload[1];
+        uint16_t blk = ((uint16_t)p->payload[2] << 8) | p->payload[3];
+        static int del_logged;
+        if (del_logged < 12 || (blk % 64) == 1) {
+            del_logged++;
+            fprintf(stderr,
+                    "[TAP] TFTP deliver to guest op=%u block %u (%u bytes) q=%d\n",
+                    (unsigned)op, (unsigned)blk, (unsigned)p->len,
+                    tftp_proxy_q_count);
+            fflush(stderr);
+        }
+    }
+    tftp_proxy_q_head = (tftp_proxy_q_head + 1) % TFTP_PROXY_QMAX;
+    tftp_proxy_q_count--;
+}
+
+static int tftp_proxy_enqueue(uint32_t rip, uint16_t rport,
+                              const uint8_t *payload, int len) {
+    tftp_proxy_pkt_t *p;
+    int tail;
+    if (len < 4 || len > 516)
+        return 0;
+    if (tftp_proxy_q_count >= TFTP_PROXY_QMAX)
+        return 0;
+    tail = (tftp_proxy_q_head + tftp_proxy_q_count) % TFTP_PROXY_QMAX;
+    p = &tftp_proxy_q[tail];
+    p->remote_ip = rip;
+    p->remote_port = rport;
+    p->len = (uint16_t)len;
+    memcpy(p->payload, payload, (size_t)len);
+    tftp_proxy_q_count++;
+    return 1;
+}
+
+/* Recv TFTP on the proxy flow: host-ACK, buffer, pace to guest. */
+static void tftp_proxy_poll_flow(darwin_udp_flow_t *f) {
     uint8_t payload[1400];
-    if (fd < 0) return;
     for (;;) {
         struct sockaddr_in from;
         socklen_t fromlen = sizeof(from);
-        ssize_t n = recvfrom(fd, payload, sizeof(payload), 0,
-                             (struct sockaddr *)&from, &fromlen);
+        ssize_t n;
+        uint16_t op, blk, rport;
+        uint32_t rip;
+
+        if (tftp_proxy_q_count >= TFTP_PROXY_QMAX)
+            break; /* backpressure: leave in kernel until guest catches up */
+
+        n = recvfrom(f->fd, payload, sizeof(payload), 0,
+                     (struct sockaddr *)&from, &fromlen);
         if (n < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) break;
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+                break;
+            close(f->fd);
+            f->fd = -1;
+            tftp_proxy_reset();
             break;
         }
-        if (n < 2) continue;
-        uint16_t op = ((uint16_t)payload[0] << 8) | payload[1];
-        if (op == 5) {
-            fprintf(stderr, "[TAP] TFTP drop stale ERROR while draining after ACK\n");
-            fflush(stderr);
+        rip = from.sin_addr.s_addr;
+        rport = ntohs(from.sin_port);
+        f->last_used = time(NULL);
+        if (f->remote_port == 69u && rport != 69u)
+            f->remote_port = rport;
+        tftp_proxy_remote_ip = rip;
+
+        if (n < 2)
             continue;
-        }
-        if (op == 3 && n >= 4) {
-            uint16_t blk = ((uint16_t)payload[2] << 8) | payload[3];
-            if (blk <= acked_block) {
+        op = ((uint16_t)payload[0] << 8) | payload[1];
+
+        {
+            static int tftp_rx_hex;
+            if (tftp_rx_hex < 16 && op >= 1 && op <= 6) {
+                int hi, hn = n < 48 ? (int)n : 48;
+                tftp_rx_hex++;
                 fprintf(stderr,
-                        "[TAP] TFTP drop retransmit DATA block %u (acked %u)\n",
-                        (unsigned)blk, (unsigned)acked_block);
+                        "[TAP] TFTP RX from :%u op=%u (%zd bytes) hex:",
+                        (unsigned)rport, (unsigned)op, n);
+                for (hi = 0; hi < hn; hi++)
+                    fprintf(stderr, " %02x", payload[hi]);
+                if (n > hn)
+                    fprintf(stderr, " …");
+                if (op == 5 && n > 4)
+                    fprintf(stderr, " msg='%.*s'", (int)n - 4,
+                            (const char *)payload + 4);
+                fprintf(stderr, "\n");
                 fflush(stderr);
+            }
+        }
+
+        if (op == 3 || op == 6) {
+            /* DATA or OACK — ACK server now; feed guest later. */
+            blk = (op == 6) ? 0u : (((uint16_t)payload[2] << 8) | payload[3]);
+            if (n > 516)
+                n = 516;
+            tftp_proxy_host_ack(f->fd, rip, rport, blk);
+            /* Drop retransmits already buffered (host already ACKed). */
+            if (tftp_proxy_have_enqueued && blk <= tftp_proxy_last_enqueued)
                 continue;
-            }
-            /* Next block — find flow and inject. */
-            for (int i = 0; i < DARWIN_UDP_FLOWS; i++) {
-                darwin_udp_flow_t *f = &darwin_udp_flows[i];
-                if (f->fd != fd) continue;
-                uint16_t rport = ntohs(from.sin_port);
-                if (f->remote_port == 69u && rport != 69u)
-                    f->remote_port = rport;
-                darwin_queue_udp_reply(f->guest_ip, f->guest_port,
-                                       from.sin_addr.s_addr, rport,
-                                       payload, (int)n);
-                tftp_awaiting_ack = 1;
-                tftp_pace_fd = fd;
-                fprintf(stderr,
-                        "[TAP] TFTP RX paced DATA block %u (%zd bytes)\n",
-                        (unsigned)blk, n);
+            if (!tftp_proxy_enqueue(rip, rport, payload, (int)n)) {
+                fprintf(stderr, "[TAP] TFTP proxy queue full — drop block %u\n",
+                        (unsigned)blk);
                 fflush(stderr);
-                return;
+            } else {
+                tftp_proxy_last_enqueued = blk;
+                tftp_proxy_have_enqueued = 1;
             }
             continue;
         }
-        /* Other opcodes: drop during drain. */
-        fprintf(stderr, "[TAP] TFTP drop op=%u during post-ACK drain\n",
-                (unsigned)op);
-        fflush(stderr);
+        if (op == 5) {
+            /* Deliver ERROR to guest (abort path). */
+            darwin_queue_udp_reply(f->guest_ip, f->guest_port, rip, rport,
+                                   payload, (int)n);
+            continue;
+        }
+        /* Unexpected: pass through. */
+        darwin_queue_udp_reply(f->guest_ip, f->guest_port, rip, rport,
+                               payload, (int)n);
     }
+    tftp_proxy_deliver_one();
 }
 
 static void queue_pending_eth(const uint8_t *frame, int len) {
@@ -392,8 +521,7 @@ static void darwin_udp_nat_close_all(void) {
             darwin_udp_flows[i].fd = -1;
         }
     }
-    tftp_awaiting_ack = 0;
-    tftp_pace_fd = -1;
+    tftp_proxy_reset();
 }
 
 static darwin_udp_flow_t *darwin_udp_flow_find(uint32_t gip, uint16_t gport,
@@ -416,6 +544,16 @@ static darwin_udp_flow_t *darwin_udp_flow_find(uint32_t gip, uint16_t gport,
                 f->remote_port = rport;
                 return f;
             }
+        }
+    }
+    /* Guest still ACKs to :69 after we rebound the flow to the server TID. */
+    if (rport == 69u && tftp_proxy_active && tftp_proxy_fd >= 0) {
+        for (int i = 0; i < DARWIN_UDP_FLOWS; i++) {
+            darwin_udp_flow_t *f = &darwin_udp_flows[i];
+            if (f->fd != tftp_proxy_fd) continue;
+            if (f->guest_ip == gip && f->guest_port == gport &&
+                f->remote_ip == rip)
+                return f;
         }
     }
     return NULL;
@@ -505,9 +643,10 @@ static void darwin_udp_nat_poll(void) {
     for (int i = 0; i < DARWIN_UDP_FLOWS; i++) {
         darwin_udp_flow_t *f = &darwin_udp_flows[i];
         if (f->fd < 0) continue;
-        /* Pace TFTP: don't inject more on this flow until guest ACKs. */
-        if (tftp_awaiting_ack && f->fd == tftp_pace_fd)
+        if (tftp_proxy_active && f->fd == tftp_proxy_fd) {
+            tftp_proxy_poll_flow(f);
             continue;
+        }
         for (;;) {
             struct sockaddr_in from;
             socklen_t fromlen = sizeof(from);
@@ -515,10 +654,6 @@ static void darwin_udp_nat_poll(void) {
                                  (struct sockaddr *)&from, &fromlen);
             if (n < 0) {
                 if (errno == EAGAIN || errno == EWOULDBLOCK) break;
-                if (f->fd == tftp_pace_fd) {
-                    tftp_awaiting_ack = 0;
-                    tftp_pace_fd = -1;
-                }
                 close(f->fd);
                 f->fd = -1;
                 break;
@@ -526,38 +661,10 @@ static void darwin_udp_nat_poll(void) {
             uint32_t rip = from.sin_addr.s_addr;
             uint16_t rport = ntohs(from.sin_port);
             f->last_used = time(NULL);
-            /* Track actual server TID on the flow. */
             if (f->remote_port == 69u && rport != 69u)
                 f->remote_port = rport;
             darwin_queue_udp_reply(f->guest_ip, f->guest_port,
                                    rip, rport, payload, (int)n);
-            if (n >= 2 && n <= 1500) {
-                uint16_t op = ((uint16_t)payload[0] << 8) | payload[1];
-                if (op >= 1 && op <= 6) {
-                    static int tftp_rx_hex;
-                    if (tftp_rx_hex < 24) {
-                        tftp_rx_hex++;
-                        int hi, hn = n < 48 ? (int)n : 48;
-                        fprintf(stderr,
-                                "[TAP] TFTP RX from :%u op=%u (%zd bytes) hex:",
-                                (unsigned)rport, (unsigned)op, n);
-                        for (hi = 0; hi < hn; hi++)
-                            fprintf(stderr, " %02x", payload[hi]);
-                        if (n > hn)
-                            fprintf(stderr, " …");
-                        if (op == 5 && n > 4)
-                            fprintf(stderr, " msg='%.*s'", (int)n - 4,
-                                    (const char *)payload + 4);
-                        fprintf(stderr, "\n");
-                        fflush(stderr);
-                    }
-                    if (eth_is_tftp_data_or_oack(payload, (int)n)) {
-                        tftp_awaiting_ack = 1;
-                        tftp_pace_fd = f->fd;
-                        break; /* one DATA/OACK at a time */
-                    }
-                }
-            }
         }
     }
 }
@@ -616,52 +723,67 @@ static int darwin_udp_nat_tx(const uint8_t *eth, int len) {
     dest.sin_addr.s_addr = dip;
 
     const uint8_t *payload = udp + 8;
-    int pace_fd = tftp_pace_fd;
-    uint16_t acked_block = 0;
-    int clear_tftp_pace = 0;
+    int suppress_send = 0;
     if (payload_len >= 2) {
         uint16_t op = ((uint16_t)payload[0] << 8) | payload[1];
         if (op == 1 || op == 2) {
-            /* New request — reset pace; do not drain (new transfer). */
-            tftp_awaiting_ack = 0;
-            tftp_pace_fd = -1;
-            pace_fd = -1;
-        } else if (op == 4 && payload_len >= 4) {
-            acked_block = ((uint16_t)payload[2] << 8) | payload[3];
-            tftp_awaiting_ack = 0;
-            tftp_pace_fd = -1;
-            clear_tftp_pace = 1;
+            /* New RRQ/WRQ — arm proxy on this flow. */
+            tftp_proxy_reset();
+            tftp_proxy_active = 1;
+            tftp_proxy_fd = f->fd;
+            tftp_proxy_guest_ip = sip;
+            tftp_proxy_guest_port = sport;
+            tftp_proxy_remote_ip = dip;
+            fprintf(stderr, "[TAP] TFTP proxy armed (RRQ/WRQ → :%u)\n",
+                    (unsigned)dport);
+            fflush(stderr);
+        } else if (op == 4 && payload_len >= 4 && tftp_proxy_active &&
+                   f->fd == tftp_proxy_fd) {
+            /* Guest ACK — already host-ACKed; advance guest queue only. */
+            uint16_t blk = ((uint16_t)payload[2] << 8) | payload[3];
+            tftp_proxy_last_guest_ack = blk;
+            tftp_proxy_guest_acks++;
+            tftp_proxy_guest_inflight = 0;
+            suppress_send = 1;
+            if (tftp_proxy_guest_acks <= 8 || (tftp_proxy_guest_acks % 64) == 0) {
+                fprintf(stderr,
+                        "[TAP] TFTP guest-ACK block %u (host already ACKed; "
+                        "q=%d)\n",
+                        (unsigned)blk, tftp_proxy_q_count);
+                fflush(stderr);
+            }
+            tftp_proxy_deliver_one();
         }
     }
-    ssize_t n = sendto(f->fd, payload, (size_t)payload_len, 0,
-                       (struct sockaddr *)&dest, sizeof(dest));
-    if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
-        fprintf(stderr, "[TAP] UDP NAT sendto failed: %s\n", strerror(errno));
-    } else {
-        static int tx_logged;
-        int is_tftp = (dport == 69u) ||
-                      (payload_len >= 2 &&
-                       (((uint16_t)payload[0] << 8) | payload[1]) <= 6);
-        if (tx_logged < 24 || is_tftp) {
-            if (tx_logged < 24)
-                tx_logged++;
-            const uint8_t *d = (const uint8_t *)&dip;
-            fprintf(stderr,
-                    "[TAP] UDP NAT → %u.%u.%u.%u:%u (%d payload bytes)\n",
-                    d[0], d[1], d[2], d[3], (unsigned)dport, payload_len);
-            if (is_tftp && payload_len > 0) {
-                int i, hn = payload_len < 48 ? payload_len : 48;
-                fprintf(stderr, "[TAP] TFTP TX hex:");
-                for (i = 0; i < hn; i++)
-                    fprintf(stderr, " %02x", payload[i]);
-                if (payload_len > hn)
-                    fprintf(stderr, " …");
-                fprintf(stderr, "\n");
+    if (!suppress_send) {
+        ssize_t n = sendto(f->fd, payload, (size_t)payload_len, 0,
+                           (struct sockaddr *)&dest, sizeof(dest));
+        if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+            fprintf(stderr, "[TAP] UDP NAT sendto failed: %s\n", strerror(errno));
+        } else {
+            static int tx_logged;
+            int is_tftp = (dport == 69u) ||
+                          (payload_len >= 2 &&
+                           (((uint16_t)payload[0] << 8) | payload[1]) <= 6);
+            if (tx_logged < 24 || is_tftp) {
+                if (tx_logged < 24)
+                    tx_logged++;
+                const uint8_t *d = (const uint8_t *)&dip;
+                fprintf(stderr,
+                        "[TAP] UDP NAT → %u.%u.%u.%u:%u (%d payload bytes)\n",
+                        d[0], d[1], d[2], d[3], (unsigned)dport, payload_len);
+                if (is_tftp && payload_len > 0) {
+                    int i, hn = payload_len < 48 ? payload_len : 48;
+                    fprintf(stderr, "[TAP] TFTP TX hex:");
+                    for (i = 0; i < hn; i++)
+                        fprintf(stderr, " %02x", payload[i]);
+                    if (payload_len > hn)
+                        fprintf(stderr, " …");
+                    fprintf(stderr, "\n");
+                }
+                fflush(stderr);
             }
-            fflush(stderr);
         }
-        if (clear_tftp_pace && pace_fd >= 0)
-            darwin_tftp_drain_stale(pace_fd, acked_block);
     }
     return 1;
 }

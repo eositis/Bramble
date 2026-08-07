@@ -11,6 +11,15 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-07 — TFTP host-ACK proxy (emu too slow for tftpd)
+
+| Change | Reason |
+|--------|--------|
+| `tapif.c`: host-ACK DATA immediately; buffer + pace to guest; suppress guest ACK on wire | Pacing alone still late; Unknown transfer ID after ACK |
+| Docs: MAME-BRIDGE TFTP stall note | (megaflash-vm) |
+
+---
+
 ## 2026-08-07 — TFTP pace RX so ACK beats server timeout
 
 | Change | Reason |
