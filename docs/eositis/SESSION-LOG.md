@@ -1274,3 +1274,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Actions** | Restored `flash/megaflash-user-config.bin` lastserver to `192.168.0.10` |
 | **Outcome** | User should re-enter `192.168.0.10` in CP and retry |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-07 — TFTP DATA then server Timeout (no ACK)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Correct IP; plain RRQ; still fails with server ERROR msg=Timeout |
+| **Cause** | TAP delivered 516B DATA then ERROR before pump; `NotifyUdpReceived` last-wins → only Timeout processed, no ACK |
+| **Actions** | a2bus: if udpCallbackInvoked set, drop late packet; TAP hex for DATA; docs |
+| **Validate** | rebuild Bramble + megaflash-vm |
+| **Commit** | megaflash-vm `835b9c6`; Bramble (tapif+docs) |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |

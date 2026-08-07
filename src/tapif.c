@@ -431,9 +431,9 @@ static void darwin_udp_nat_poll(void) {
             darwin_queue_udp_reply(f->guest_ip, f->guest_port,
                                    rip, rport, payload, (int)n);
             /* TFTP: original flow was to :69; reply may use ephemeral TID. */
-            if (f->remote_port == 69u && n >= 2 && n <= 512) {
+            if (f->remote_port == 69u && n >= 2 && n <= 1500) {
                 static int tftp_rx_hex;
-                if (tftp_rx_hex < 8) {
+                if (tftp_rx_hex < 12) {
                     tftp_rx_hex++;
                     uint16_t op = ((uint16_t)payload[0] << 8) | payload[1];
                     int i, hn = n < 48 ? (int)n : 48;

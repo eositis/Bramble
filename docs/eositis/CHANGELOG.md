@@ -11,6 +11,15 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-07 — TFTP DATA overwritten by ERROR Timeout
+
+| Change | Reason |
+|--------|--------|
+| `tapif.c`: log TFTP RX up to 1500 bytes | See DATA op=3 (516B) not only ERROR |
+| Docs: one-slot NotifyUdpReceived last-wins | (megaflash-vm) keep pending RX under a2bus |
+
+---
+
 ## 2026-08-07 — TFTP plain RRQ + TAP hex dump
 
 | Change | Reason |
