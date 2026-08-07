@@ -1242,3 +1242,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | megaflash-vm overlay rebuild |
 | **Commit** | megaflash-vm `515f5aa` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-06 — fifo-stuck force spam / GetNTP err junk
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Thousands of force core0 [fifo-stuck] + GetNTP err=53740… lines; NTP/clock OK; TFTP still ERROR |
+| **Cause** | Rescue range included `multicore_fifo_pop_timeout_us` (normal IPC); unlimited force → core0Loop corrupted SP |
+| **Actions** | Rescue only `fifo_pop_blocking` discard; treat pop_timeout as network work; skip/repair GetNetworkTime when RTC valid |
+| **Validate** | megaflash-vm overlay rebuild |
+| **Commit** | megaflash-vm `ef8838e` |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |

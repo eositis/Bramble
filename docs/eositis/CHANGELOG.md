@@ -11,6 +11,15 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-06 — megaflash-vm `ef8838e` — fifo_pop_timeout force spam
+
+| Change | Reason |
+|--------|--------|
+| Docs: GetNTP err junk + force [fifo-stuck] flood | Mis-rescued pop_timeout as discard loop |
+| (megaflash-vm) Only rescue fifo_pop_blocking; skip GetNetworkTime when RTC valid | Stop SP corruption / log spam |
+
+---
+
 ## 2026-08-06 — megaflash-vm NTP/clock: CheckPicoW + TFTP heap
 
 | Change | Reason |
