@@ -1209,3 +1209,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | bramble_tests 323/323; megaflash-vm overlay rebuild |
 | **Commit** | Bramble `ef5bab2` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-06 — TFTP stalls after WiFi: hashtable OOM
+
+| Field | Detail |
+|-------|--------|
+| **Request** | WiFi test works; TFTP download stalls immediately at Idle |
+| **Cause** | After JOIN/DHCP in RunTFTP, NetworkPump udp session hashtable rehash SoftFloat/UDIV → `operator new(~1GB)` → OOM; Status never leaves Idle |
+| **Actions** | During RunTFTP bump-malloc: host-complete `_M_need_rehash`/`_M_next_bkt`/`_M_allocate_buckets`; clamp `_M_rehash` n; reject oversized bump; recover bucket new from lr `0x1000147a`; CheckPicoW in wifi hooks; sync kick ExecuteTFTP to active CORE0; docs |
+| **Validate** | `make -C ../megaflash-vm/build bramble` |
+| **Commit** | megaflash-vm `0049694` |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |

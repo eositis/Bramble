@@ -11,6 +11,15 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-06 — megaflash-vm `0049694` — TFTP hashtable rehash OOM
+
+| Change | Reason |
+|--------|--------|
+| Docs: TFTP Idle after WiFi from ~1GB hashtable `new` | SoftFloat/UDIV rehash under Thumb emu |
+| (megaflash-vm) Host-complete/clamp need_rehash/next_bkt/allocate_buckets during RunTFTP bump | Reach EvtStart / RRQ :69 instead of OOM |
+
+---
+
 ## 2026-08-06 — megaflash-vm `8941c95` — core0Loop for NTP/TFTP
 
 | Change | Reason |
