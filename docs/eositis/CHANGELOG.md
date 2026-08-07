@@ -11,6 +11,15 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-06 — megaflash-vm NTP/clock: CheckPicoW + TFTP heap
+
+| Change | Reason |
+|--------|--------|
+| Docs: blank CP clock / no boot NTP; post-TFTP NTP HardFault | CheckPicoW cached 0 during bridge gap; bump poisoned heap |
+| (megaflash-vm) Force CheckPicoW+cache without bridge; restore heap_end after TFTP bump | Boot GetNetworkTime + live CP clock |
+
+---
+
 ## 2026-08-06 — TFTP server_port=0 assert after REQUEST
 
 | Change | Reason |

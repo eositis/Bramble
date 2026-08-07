@@ -1231,3 +1231,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | bramble_tests 324/324; megaflash-vm overlay rebuild |
 | **Commit** | Bramble `28e4657`; megaflash-vm `0d1344f` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-06 — NTP/clock dead; TFTP ERROR then NTP HardFault
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Clock not updating / blank on CP; TFTP gets ERROR and exits; then core0 HardFault in NTP |
+| **Cause** | (1) Bridge disconnect window ran real CheckPicoW ADC → cached 0 → fifo_pop, no boot GetNetworkTime. (2) TFTP bump left poisoned heap_end → post-TFTP pbuf_alloc HardFault. TFTP ERROR code 0 is from the LAN server reply (RRQ reached :69). |
+| **Actions** | Force CheckPicoW+BSS cache without bridge; rescue fifo-stuck; restore heap_end on bump end; docs |
+| **Validate** | megaflash-vm overlay rebuild |
+| **Commit** | megaflash-vm `515f5aa` |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
