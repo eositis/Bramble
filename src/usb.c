@@ -851,6 +851,14 @@ static void usb_log_cdc_active_once(void) {
 #define USB_GUEST_CONFIG_BUFFER_SIZE  512u
 #define USB_GUEST_CONFIG_HOST_PATH    "flash/megaflash-user-config.bin"
 #define USB_GUEST_CONFIG_FD_FLAGS_OFF 0xe2u
+/* Config_t advanced settings — matches MegaFlash userconfig.h / tftp.h defaults. */
+#define USB_GUEST_CONFIG_TFTP_PORT_OFF     0x7cu
+#define USB_GUEST_CONFIG_TFTP_TIMEOUT_OFF  0x7eu
+#define USB_GUEST_CONFIG_TFTP_MAXATT_OFF   0x80u
+#define USB_GUEST_CONFIG_TFTP_1K_OFF       0x81u
+#define USB_GUEST_TFTP_PORT_DEFAULT       69u
+#define USB_GUEST_TFTP_TIMEOUT_DEFAULT    2000u
+#define USB_GUEST_TFTP_MAXATT_DEFAULT     6u
 #define USB_GUEST_SETTINGS_NOT_FLASH  0x2006161fu
 #define USB_GUEST_FLASH_SIZE0         0x2000d1ccu
 #define USB_GUEST_FLASH_SIZE1         0x2000d1d0u
@@ -1602,9 +1610,41 @@ void usb_guest_spi_flash_close(void) {
     }
 }
 
+/* Host-persisted configs often omit InitAdvancedSettings (port stayed 0 →
+ * CTFTPTask::SendPacket assert server_port!=0 → RRQ never sent). */
+static int usb_guest_ensure_tftp_defaults(void) {
+    uint16_t port = mem_read16(USB_GUEST_CONFIG_BUFFER + USB_GUEST_CONFIG_TFTP_PORT_OFF);
+    uint16_t timeout = mem_read16(USB_GUEST_CONFIG_BUFFER + USB_GUEST_CONFIG_TFTP_TIMEOUT_OFF);
+    uint8_t maxatt = mem_read8(USB_GUEST_CONFIG_BUFFER + USB_GUEST_CONFIG_TFTP_MAXATT_OFF);
+    int blank = (port == 0u && timeout == 0u && maxatt == 0u);
+    int fixed = 0;
+    if (port == 0u) {
+        mem_write16(USB_GUEST_CONFIG_BUFFER + USB_GUEST_CONFIG_TFTP_PORT_OFF,
+                    (uint16_t)USB_GUEST_TFTP_PORT_DEFAULT);
+        fixed = 1;
+    }
+    if (timeout == 0u) {
+        mem_write16(USB_GUEST_CONFIG_BUFFER + USB_GUEST_CONFIG_TFTP_TIMEOUT_OFF,
+                    (uint16_t)USB_GUEST_TFTP_TIMEOUT_DEFAULT);
+        fixed = 1;
+    }
+    if (maxatt == 0u) {
+        mem_write8(USB_GUEST_CONFIG_BUFFER + USB_GUEST_CONFIG_TFTP_MAXATT_OFF,
+                   (uint8_t)USB_GUEST_TFTP_MAXATT_DEFAULT);
+        fixed = 1;
+    }
+    /* MegaFlash InitAdvancedSettings default: enable1kblock=true. */
+    if (blank) {
+        mem_write8(USB_GUEST_CONFIG_BUFFER + USB_GUEST_CONFIG_TFTP_1K_OFF, 1u);
+        fixed = 1;
+    }
+    return fixed;
+}
+
 void usb_guest_persist_config_to_host(void) {
     uint8_t buf[USB_GUEST_CONFIG_BUFFER_SIZE];
     uint32_t i;
+    (void)usb_guest_ensure_tftp_defaults();
     for (i = 0; i < USB_GUEST_CONFIG_BUFFER_SIZE; i++) {
         buf[i] = mem_read8(USB_GUEST_CONFIG_BUFFER + i);
     }
@@ -1649,6 +1689,15 @@ static int usb_guest_try_load_full_config(void) {
                 mem_write8(USB_GUEST_CONFIG_BUFFER + i, buf[i]);
             }
             mem_write8(USB_GUEST_SETTINGS_NOT_FLASH, 0u);
+            if (usb_guest_ensure_tftp_defaults()) {
+                fprintf(stderr,
+                        "[A2Bus] repaired TFTP defaults in loaded config "
+                        "(port=%u timeout=%u maxatt=%u)\n",
+                        mem_read16(USB_GUEST_CONFIG_BUFFER + USB_GUEST_CONFIG_TFTP_PORT_OFF),
+                        mem_read16(USB_GUEST_CONFIG_BUFFER + USB_GUEST_CONFIG_TFTP_TIMEOUT_OFF),
+                        mem_read8(USB_GUEST_CONFIG_BUFFER + USB_GUEST_CONFIG_TFTP_MAXATT_OFF));
+                usb_guest_persist_config_to_host();
+            }
             fprintf(stderr,
                     "[A2Bus] loaded config from %s (SSID='%s')\n",
                     USB_GUEST_CONFIG_HOST_PATH,
@@ -1679,6 +1728,13 @@ void usb_guest_init_default_config(void) {
     mem_write8(USB_GUEST_CONFIG_BUFFER + 6u, 0x01u);
     mem_write8(USB_GUEST_CONFIG_BUFFER + 7u, 0x0eu);
     mem_write8(USB_GUEST_CONFIG_BUFFER + USB_GUEST_CONFIG_FD_FLAGS_OFF, 0xffu);
+    mem_write16(USB_GUEST_CONFIG_BUFFER + USB_GUEST_CONFIG_TFTP_PORT_OFF,
+                (uint16_t)USB_GUEST_TFTP_PORT_DEFAULT);
+    mem_write16(USB_GUEST_CONFIG_BUFFER + USB_GUEST_CONFIG_TFTP_TIMEOUT_OFF,
+                (uint16_t)USB_GUEST_TFTP_TIMEOUT_DEFAULT);
+    mem_write8(USB_GUEST_CONFIG_BUFFER + USB_GUEST_CONFIG_TFTP_MAXATT_OFF,
+               (uint8_t)USB_GUEST_TFTP_MAXATT_DEFAULT);
+    mem_write8(USB_GUEST_CONFIG_BUFFER + USB_GUEST_CONFIG_TFTP_1K_OFF, 1u);
     mem_write8(USB_GUEST_SETTINGS_NOT_FLASH, 0u);
 
     /* Restore prior a2bus SaveUserSettings / SaveWifiSettings if present. */

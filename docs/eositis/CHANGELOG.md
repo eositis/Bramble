@@ -11,6 +11,15 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-06 — TFTP server_port=0 assert after REQUEST
+
+| Change | Reason |
+|--------|--------|
+| `usb.c`: seed/repair TFTP port/timeout/maxattempt on config load/persist | Host config had port 0 → SendPacket assert → Idle |
+| (megaflash-vm) Repair `server_port` at SendPacket; widen core0Loop work PCs | RRQ must reach TAP :69 |
+
+---
+
 ## 2026-08-06 — megaflash-vm `0049694` — TFTP hashtable rehash OOM
 
 | Change | Reason |
