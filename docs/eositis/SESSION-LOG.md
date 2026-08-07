@@ -1229,5 +1229,5 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Cause** | `flash/megaflash-user-config.bin` had `tftp_serverport=0` (advanced defaults never written). `CTFTPTask::SendPacket` asserts; a2bus `__assert_func` returns into literal pool → no RRQ / status→Idle |
 | **Actions** | Repair TFTP defaults on config load/persist in `usb.c`; SendPacket entry patch; core0Loop veneer/gpio work ranges; patched on-disk config; docs |
 | **Validate** | bramble_tests 324/324; megaflash-vm overlay rebuild |
-| **Commit** | (this session) |
+| **Commit** | Bramble `28e4657`; megaflash-vm `0d1344f` |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
