@@ -1264,3 +1264,13 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | rebuild Bramble + megaflash-vm overlay |
 | **Commit** | megaflash-vm `0c4ca0d`; Bramble (tapif+docs) |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-07 — TFTP stall: wrong server IP 102.168.0.10
+
+| Field | Detail |
+|-------|--------|
+| **Request** | NTP OK; TFTP stuck at Requesting Server |
+| **Cause** | CP/server field was `102.168.0.10` (typo); plain RRQ TX OK, zero replies → TIMEOUT. Not an emulator NAT bug. |
+| **Actions** | Restored `flash/megaflash-user-config.bin` lastserver to `192.168.0.10` |
+| **Outcome** | User should re-enter `192.168.0.10` in CP and retry |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
