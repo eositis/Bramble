@@ -240,6 +240,9 @@ void tapif_service(int fd) {
     (void)fd;
 }
 
+void tapif_tftp_transfer_done(void) {
+}
+
 #elif defined(__APPLE__)
 
 #include <sys/ioctl.h>
@@ -314,10 +317,16 @@ static uint16_t tftp_proxy_last_acked; /* last block host-ACKed (keepalive) */
 static uint16_t tftp_proxy_server_tid; /* server ephemeral port */
 static struct timespec tftp_proxy_last_rx;
 static int tftp_proxy_last_rx_armed;
+static int tftp_proxy_transfer_done;
 static tapif_tftp_data_apply_fn tftp_data_apply;
 
 void tapif_set_tftp_data_apply(tapif_tftp_data_apply_fn fn) {
     tftp_data_apply = fn;
+}
+
+void tapif_tftp_transfer_done(void) {
+    tftp_proxy_transfer_done = 1;
+    tftp_proxy_last_rx_armed = 0;
 }
 
 static void tftp_proxy_reset(void) {
@@ -337,6 +346,19 @@ static void tftp_proxy_reset(void) {
     tftp_proxy_last_acked = 0;
     tftp_proxy_server_tid = 0;
     tftp_proxy_last_rx_armed = 0;
+    tftp_proxy_transfer_done = 0;
+}
+
+/* True if blk is a retransmit of last (handles uint16 wrap; 0 after 65535
+ * is the *next* block, not a retransmit of 65535). */
+static int tftp_proxy_is_retransmit(uint16_t blk) {
+    uint16_t behind;
+    if (!tftp_proxy_have_enqueued)
+        return 0;
+    if (blk == tftp_proxy_last_enqueued)
+        return 1;
+    behind = (uint16_t)(tftp_proxy_last_enqueued - blk);
+    return behind >= 1u && behind <= 32u;
 }
 
 static void darwin_queue_udp_reply(uint32_t guest_ip, uint16_t guest_port,
@@ -481,8 +503,8 @@ static void tftp_proxy_poll_flow(darwin_udp_flow_t *f) {
             if (n > 516)
                 n = 516;
             tftp_proxy_host_ack(f->fd, rip, rport, blk);
-            /* Drop retransmits already buffered/applied. */
-            if (tftp_proxy_have_enqueued && blk <= tftp_proxy_last_enqueued)
+            /* Drop retransmits already buffered/applied (wrap-safe). */
+            if (tftp_proxy_is_retransmit(blk))
                 continue;
             if (tftp_data_apply &&
                 tftp_data_apply(payload, (int)n, rport)) {
@@ -501,15 +523,21 @@ static void tftp_proxy_poll_flow(darwin_udp_flow_t *f) {
             continue;
         }
         if (op == 5) {
-            /* Server Timeout/Unknown TID while we are the ACK authority —
-             * do not inject into guest (one-slot UDP RX would clobber DATA). */
+            /* Server ERROR while proxying. If transfer already done, ignore;
+             * otherwise log (often follows uint16 wrap / Illegal TFTP op). */
             static int err_drop;
+            if (tftp_proxy_transfer_done)
+                continue;
             if (err_drop < 8) {
                 err_drop++;
                 fprintf(stderr,
                         "[TAP] TFTP drop ERROR from server while proxying "
-                        "(%zd bytes)\n",
+                        "(%zd bytes)",
                         n);
+                if (n > 4)
+                    fprintf(stderr, " msg='%.*s'", (int)n - 4,
+                            (const char *)payload + 4);
+                fprintf(stderr, "\n");
                 fflush(stderr);
             }
             continue;
@@ -520,9 +548,9 @@ static void tftp_proxy_poll_flow(darwin_udp_flow_t *f) {
     }
     /* Keepalive: re-ACK last block if idle so tftpd does not give up while
      * host-apply is between packets or guest core0 has aborted. */
-    if (!got && tftp_data_apply && tftp_proxy_have_enqueued &&
-        tftp_proxy_last_rx_armed && tftp_proxy_server_tid != 0u &&
-        f->fd >= 0) {
+    if (!got && !tftp_proxy_transfer_done && tftp_data_apply &&
+        tftp_proxy_have_enqueued && tftp_proxy_last_rx_armed &&
+        tftp_proxy_server_tid != 0u && f->fd >= 0) {
         struct timespec now;
         uint64_t idle_ms;
         if (clock_gettime(CLOCK_MONOTONIC, &now) == 0) {
@@ -1165,6 +1193,9 @@ void tapif_service(int fd) {
 
 void tapif_set_tftp_data_apply(tapif_tftp_data_apply_fn fn) {
     (void)fn;
+}
+
+void tapif_tftp_transfer_done(void) {
 }
 
 #endif

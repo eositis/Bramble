@@ -1362,3 +1362,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | build + tests |
 | **Next** | Retest full download to Completed without abort |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-07 — TFTP 65535 Transferring (uint16 wrap)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Full download reached 65535 but Status stayed Transferring; server ERROR + keepalive |
+| **Cause** | TFTP block wrap: blk 0 after 65535 treated as retransmit; expected 0 coerced to 1 |
+| **Actions** | Wrap-safe retransmit; honor expect 0; COMPLETE on capacity; stop keepalive on done |
+| **Validate** | build + tests |
+| **Next** | Retest — expect Completed (65536 or empty EOF) |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |

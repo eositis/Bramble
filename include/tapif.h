@@ -38,4 +38,7 @@ typedef int (*tapif_tftp_data_apply_fn)(const uint8_t *payload, int len,
                                         uint16_t server_port);
 void tapif_set_tftp_data_apply(tapif_tftp_data_apply_fn fn);
 
+/* Stop TFTP keepalive / proxy after host-apply marks the transfer complete. */
+void tapif_tftp_transfer_done(void);
+
 #endif /* TAPIF_H */

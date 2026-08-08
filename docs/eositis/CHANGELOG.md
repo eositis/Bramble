@@ -11,6 +11,16 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-07 — TFTP uint16 wrap: close session at 65536
+
+| Change | Reason |
+|--------|--------|
+| Wrap-safe retransmit detect (`behind` 1..32) | `blk <= last` treated block 0 after 65535 as dup |
+| Host-apply: keep expect 0 after wrap; COMPLETE on capacity | Status stuck Transferring at 65535 |
+| `tapif_tftp_transfer_done` stops keepalive | Endless ACK/ERROR after done |
+
+---
+
 ## 2026-08-07 — TFTP stall after abort: no TIMER spike + keepalive
 
 | Change | Reason |
