@@ -11,6 +11,17 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-07 — TFTP stall after abort: no TIMER spike + keepalive
+
+| Change | Reason |
+|--------|--------|
+| DoTFTPStatus Time from host clock only | Wall TIMER advance caused abort/_exit mid-TFTP |
+| Drop guest TFTP ERROR while host-proxying | Guest timeout ERROR kills tftpd session |
+| Protect TFTP UDP flow from NAT eviction | Closed socket → silent stall |
+| Keepalive re-ACK when RX idle ≥400ms | Survive gaps / core0 abort |
+
+---
+
 ## 2026-08-07 — TFTP kso_set(1) + stuck Time
 
 | Change | Reason |

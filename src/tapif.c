@@ -310,6 +310,10 @@ static unsigned tftp_proxy_host_acks;
 static unsigned tftp_proxy_guest_acks;
 static uint16_t tftp_proxy_last_enqueued; /* last DATA/OACK block buffered */
 static int tftp_proxy_have_enqueued;
+static uint16_t tftp_proxy_last_acked; /* last block host-ACKed (keepalive) */
+static uint16_t tftp_proxy_server_tid; /* server ephemeral port */
+static struct timespec tftp_proxy_last_rx;
+static int tftp_proxy_last_rx_armed;
 static tapif_tftp_data_apply_fn tftp_data_apply;
 
 void tapif_set_tftp_data_apply(tapif_tftp_data_apply_fn fn) {
@@ -330,6 +334,9 @@ static void tftp_proxy_reset(void) {
     tftp_proxy_guest_acks = 0;
     tftp_proxy_last_enqueued = 0;
     tftp_proxy_have_enqueued = 0;
+    tftp_proxy_last_acked = 0;
+    tftp_proxy_server_tid = 0;
+    tftp_proxy_last_rx_armed = 0;
 }
 
 static void darwin_queue_udp_reply(uint32_t guest_ip, uint16_t guest_port,
@@ -353,6 +360,7 @@ static void tftp_proxy_host_ack(int fd, uint32_t remote_ip, uint16_t remote_port
                 (unsigned)block, strerror(errno));
     } else {
         tftp_proxy_host_acks++;
+        tftp_proxy_last_acked = block;
         if (tftp_proxy_host_acks <= 8 || (tftp_proxy_host_acks % 64) == 0) {
             fprintf(stderr, "[TAP] TFTP host-ACK block %u → :%u (#%u)\n",
                     (unsigned)block, (unsigned)remote_port,
@@ -409,6 +417,7 @@ static int tftp_proxy_enqueue(uint32_t rip, uint16_t rport,
 /* Recv TFTP on the proxy flow: host-ACK, buffer, pace to guest. */
 static void tftp_proxy_poll_flow(darwin_udp_flow_t *f) {
     uint8_t payload[1400];
+    int got = 0;
     for (;;) {
         struct sockaddr_in from;
         socklen_t fromlen = sizeof(from);
@@ -431,12 +440,16 @@ static void tftp_proxy_poll_flow(darwin_udp_flow_t *f) {
             tftp_proxy_reset();
             break;
         }
+        got = 1;
         rip = from.sin_addr.s_addr;
         rport = ntohs(from.sin_port);
         f->last_used = time(NULL);
         if (f->remote_port == 69u && rport != 69u)
             f->remote_port = rport;
         tftp_proxy_remote_ip = rip;
+        tftp_proxy_server_tid = rport;
+        clock_gettime(CLOCK_MONOTONIC, &tftp_proxy_last_rx);
+        tftp_proxy_last_rx_armed = 1;
 
         if (n < 2)
             continue;
@@ -504,6 +517,45 @@ static void tftp_proxy_poll_flow(darwin_udp_flow_t *f) {
         /* Unexpected: pass through. */
         darwin_queue_udp_reply(f->guest_ip, f->guest_port, rip, rport,
                                payload, (int)n);
+    }
+    /* Keepalive: re-ACK last block if idle so tftpd does not give up while
+     * host-apply is between packets or guest core0 has aborted. */
+    if (!got && tftp_data_apply && tftp_proxy_have_enqueued &&
+        tftp_proxy_last_rx_armed && tftp_proxy_server_tid != 0u &&
+        f->fd >= 0) {
+        struct timespec now;
+        uint64_t idle_ms;
+        if (clock_gettime(CLOCK_MONOTONIC, &now) == 0) {
+            idle_ms = (uint64_t)(now.tv_sec - tftp_proxy_last_rx.tv_sec) * 1000ull;
+            if (now.tv_nsec >= tftp_proxy_last_rx.tv_nsec)
+                idle_ms += (uint64_t)(now.tv_nsec - tftp_proxy_last_rx.tv_nsec)
+                           / 1000000ull;
+            else {
+                idle_ms -= 1000ull;
+                idle_ms += (uint64_t)(now.tv_nsec + 1000000000L
+                                     - tftp_proxy_last_rx.tv_nsec)
+                           / 1000000ull;
+            }
+            if (idle_ms >= 400ull) {
+                static unsigned ka;
+                tftp_proxy_host_ack(f->fd, tftp_proxy_remote_ip
+                                            ? tftp_proxy_remote_ip
+                                            : f->remote_ip,
+                                    tftp_proxy_server_tid,
+                                    tftp_proxy_last_acked
+                                        ? tftp_proxy_last_acked
+                                        : tftp_proxy_last_enqueued);
+                clock_gettime(CLOCK_MONOTONIC, &tftp_proxy_last_rx);
+                if (ka < 8u || (ka % 32u) == 0u) {
+                    fprintf(stderr,
+                            "[TAP] TFTP keepalive ACK block %u (idle %llums)\n",
+                            (unsigned)tftp_proxy_last_acked,
+                            (unsigned long long)idle_ms);
+                    fflush(stderr);
+                }
+                ka++;
+            }
+        }
     }
     tftp_proxy_deliver_one();
 }
@@ -590,12 +642,17 @@ static darwin_udp_flow_t *darwin_udp_flow_alloc(void) {
         if (darwin_udp_flows[i].fd < 0)
             return &darwin_udp_flows[i];
     }
-    /* Evict oldest */
-    int oldest = 0;
-    for (int i = 1; i < DARWIN_UDP_FLOWS; i++) {
-        if (darwin_udp_flows[i].last_used < darwin_udp_flows[oldest].last_used)
+    /* Evict oldest — never steal the active TFTP proxy socket. */
+    int oldest = -1;
+    for (int i = 0; i < DARWIN_UDP_FLOWS; i++) {
+        if (tftp_proxy_active && darwin_udp_flows[i].fd == tftp_proxy_fd)
+            continue;
+        if (oldest < 0 ||
+            darwin_udp_flows[i].last_used < darwin_udp_flows[oldest].last_used)
             oldest = i;
     }
+    if (oldest < 0)
+        oldest = 0;
     close(darwin_udp_flows[oldest].fd);
     darwin_udp_flows[oldest].fd = -1;
     return &darwin_udp_flows[oldest];
@@ -783,6 +840,17 @@ static int darwin_udp_nat_tx(const uint8_t *eth, int len) {
                 fflush(stderr);
             }
             tftp_proxy_deliver_one();
+        } else if (op == 5 && tftp_proxy_active && f->fd == tftp_proxy_fd) {
+            /* Guest ERROR (timeout/abort) would kill tftpd while host-apply
+             * still owns the session — drop it. */
+            static int guest_err;
+            suppress_send = 1;
+            if (guest_err < 8) {
+                guest_err++;
+                fprintf(stderr,
+                        "[TAP] TFTP drop guest ERROR while host-proxying\n");
+                fflush(stderr);
+            }
         }
     }
     if (!suppress_send) {

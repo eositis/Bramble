@@ -1351,3 +1351,14 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | build + tests |
 | **Next** | Retest — expect Time to climb and transfer past 41k to Completed |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+## 2026-08-07 — TFTP stall ~27k after abort/_exit (Time OK)
+
+| Field | Detail |
+|-------|--------|
+| **Request** | Time increments but download still stalls (~27509); log shows abort/_exit mid-transfer |
+| **Cause** | Wall-clock TIMER advance fired guest timeouts → abort; guest ERROR can kill tftpd; core0 parked at _exit |
+| **Actions** | Host-clock elapsed only; drop guest ERROR while proxying; protect TFTP flow; keepalive re-ACK |
+| **Validate** | build + tests |
+| **Next** | Retest full download to Completed without abort |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
