@@ -11,6 +11,16 @@ Scope: local commits on `main` after clone.
 
 ---
 
+## 2026-08-07 — TFTP ACK-after-apply (stall ~8733 / Unknown TID)
+
+| Change | Reason |
+|--------|--------|
+| Host-apply path: ACK only after successful apply | ACK-before-apply raced `last_enqueued` when apply returned 1 without writing |
+| Soften keepalive (2s); stop on server ERROR | Aggressive re-ACK after dead TID flooded logs / UI Time |
+| (megaflash-vm) apply returns 0 for ahead / weird sizes | Do not claim success for unexpected blocks |
+
+---
+
 ## 2026-08-07 — TFTP uint16 wrap: close session at 65536
 
 | Change | Reason |

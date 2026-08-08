@@ -1373,3 +1373,17 @@ Transcript reference: [megaflash dual-core work](c4c672a1-a61d-45a7-8c50-b3eefb7
 | **Validate** | build + tests |
 | **Next** | Retest — expect Completed (65536 or empty EOF) |
 | **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |
+
+---
+
+## 2026-08-07 — TFTP stall at ~8733 + Unknown transfer ID
+
+| Field | Detail |
+|-------|--------|
+| **Request** | `devtools.po` transfer stuck Transferring at Blocks 8733 (~418s); keepalive ACK 8733; server `Unknown transfer ID` |
+| **Cause** | Host-apply ACKed before apply; apply returned 1 for unexpected ahead blocks → `last_enqueued` raced while guest `expected` stuck; keepalive re-ACKed dead session |
+| **Actions** | ACK only after successful apply; apply returns 0 for ahead/weird; keepalive 2s + stop on ERROR |
+| **Files** | `src/tapif.c`; megaflash-vm `bramble-overlay/megaflash_a2bus_hooks.c`; docs |
+| **Validate** | `make -C build bramble bramble_tests`; `./build/bramble_tests` (324/324); mf-vm overlay rebuild |
+| **Next** | Retest full download → Completed |
+| **Transcript** | [CYW43 stub host bridge](ef4345c3-2d26-44d1-93aa-320d6acc1f09) |

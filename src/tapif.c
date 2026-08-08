@@ -498,20 +498,44 @@ static void tftp_proxy_poll_flow(darwin_udp_flow_t *f) {
         }
 
         if (op == 3 || op == 6) {
-            /* DATA or OACK — ACK server now; feed guest later (or host-apply). */
+            /* DATA or OACK */
             blk = (op == 6) ? 0u : (((uint16_t)payload[2] << 8) | payload[3]);
             if (n > 516)
                 n = 516;
-            tftp_proxy_host_ack(f->fd, rip, rport, blk);
-            /* Drop retransmits already buffered/applied (wrap-safe). */
-            if (tftp_proxy_is_retransmit(blk))
+
+            /* Retransmit of last applied — ACK only (wrap-safe). */
+            if (tftp_proxy_is_retransmit(blk)) {
+                tftp_proxy_host_ack(f->fd, rip, rport, blk);
                 continue;
-            if (tftp_data_apply &&
-                tftp_data_apply(payload, (int)n, rport)) {
-                tftp_proxy_last_enqueued = blk;
-                tftp_proxy_have_enqueued = 1;
-                continue; /* host wrote flash + updated guest state */
             }
+
+            if (tftp_data_apply) {
+                /*
+                 * ACK *after* a successful apply. ACK-before-apply let
+                 * last_enqueued race ahead when apply rejected a block
+                 * (still returned 1), so the server advanced while we
+                 * stopped writing → stall + Unknown transfer ID.
+                 */
+                if (tftp_data_apply(payload, (int)n, rport)) {
+                    tftp_proxy_host_ack(f->fd, rip, rport, blk);
+                    tftp_proxy_last_enqueued = blk;
+                    tftp_proxy_have_enqueued = 1;
+                } else {
+                    static unsigned skip;
+                    if (skip < 8u) {
+                        skip++;
+                        fprintf(stderr,
+                                "[TAP] TFTP skip unapplied block %u "
+                                "(no ACK)\n",
+                                (unsigned)blk);
+                        fflush(stderr);
+                    }
+                }
+                continue;
+            }
+
+            /* Guest-paced path: ACK immediately, queue for CYW43 delivery. */
+            tftp_proxy_host_ack(f->fd, rip, rport, blk);
             if (!tftp_proxy_enqueue(rip, rport, payload, (int)n)) {
                 fprintf(stderr, "[TAP] TFTP proxy queue full — drop block %u\n",
                         (unsigned)blk);
@@ -524,10 +548,11 @@ static void tftp_proxy_poll_flow(darwin_udp_flow_t *f) {
         }
         if (op == 5) {
             /* Server ERROR while proxying. If transfer already done, ignore;
-             * otherwise log (often follows uint16 wrap / Illegal TFTP op). */
+             * otherwise log and stop keepalive (Unknown TID = session dead). */
             static int err_drop;
             if (tftp_proxy_transfer_done)
                 continue;
+            tftp_proxy_last_rx_armed = 0; /* stop keepalive spam */
             if (err_drop < 8) {
                 err_drop++;
                 fprintf(stderr,
@@ -564,7 +589,7 @@ static void tftp_proxy_poll_flow(darwin_udp_flow_t *f) {
                                      - tftp_proxy_last_rx.tv_nsec)
                            / 1000000ull;
             }
-            if (idle_ms >= 400ull) {
+            if (idle_ms >= 2000ull) {
                 static unsigned ka;
                 tftp_proxy_host_ack(f->fd, tftp_proxy_remote_ip
                                             ? tftp_proxy_remote_ip
